@@ -1,0 +1,359 @@
+/* ============================================================
+   《超级圣杯战争》全局样式
+   移动端竖屏优先；深色东方幻想基调；系统字体，无外部字体依赖。
+   ============================================================ */
+
+:root {
+  --c-bg: #14120f;
+  --c-bg-2: #1c1915;
+  --c-panel: #232019;
+  --c-panel-2: #2b271f;
+  --c-line: #3a342a;
+  --c-line-2: #4a4234;
+  --c-text: #ece5d6;
+  --c-text-dim: #a99f8b;
+  --c-text-mute: #7a7263;
+  --c-gold: #c8a951;
+  --c-gold-2: #e8c87a;
+  --c-red: #c0392b;
+  --c-green: #52be80;
+  --c-blue: #4e8fa8;
+
+  --r-ssr: #e8c87a;
+  --r-sr: #9fc6f0;
+  --r-r: #8fd6ae;
+  --r-n: #a8a8b3;
+
+  --e-jin: #d4b96a;
+  --e-mu: #6f9e5e;
+  --e-tu: #b08d57;
+  --e-shui: #5b9bc0;
+  --e-huo: #d9603b;
+
+  --tab-h: 58px;
+  --top-h: 48px;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  overscroll-behavior: none;
+}
+
+#app {
+  height: 100%;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+input,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* ── 布局 ───────────────────────────────────────────── */
+
+.page {
+  padding: 12px 12px calc(var(--tab-h) + 20px);
+  min-height: 100%;
+}
+
+.page-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 4px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-title::before {
+  content: '';
+  width: 3px;
+  height: 16px;
+  background: linear-gradient(180deg, var(--c-gold-2), transparent);
+  border-radius: 2px;
+}
+
+.panel {
+  background: var(--c-panel);
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-title {
+  font-size: 13px;
+  color: var(--c-gold);
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.muted {
+  color: var(--c-text-dim);
+}
+
+.tiny {
+  font-size: 12px;
+}
+
+/* ── 通用控件 ───────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--c-line-2);
+  background: var(--c-panel-2);
+  color: var(--c-text);
+  font-size: 13px;
+  transition: opacity 0.15s, transform 0.08s;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, #8a6f2c, #6d5620);
+  border-color: var(--c-gold);
+  color: #fdf4dd;
+  font-weight: 600;
+}
+
+.btn-ghost {
+  background: transparent;
+}
+
+.btn-danger {
+  border-color: #7a352c;
+  color: #e9a79c;
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  border: 1px solid var(--c-line-2);
+  color: var(--c-text-dim);
+  line-height: 1.6;
+}
+
+.tag-ssr { color: var(--r-ssr); border-color: #6b5a2c; }
+.tag-sr { color: var(--r-sr); border-color: #3d5570; }
+.tag-r { color: var(--r-r); border-color: #35594a; }
+.tag-n { color: var(--r-n); border-color: #4a4a52; }
+
+/* 五行 */
+.el-金 { color: var(--e-jin); }
+.el-木 { color: var(--e-mu); }
+.el-土 { color: var(--e-tu); }
+.el-水 { color: var(--e-shui); }
+.el-火 { color: var(--e-huo); }
+
+/* ── 资源条 ─────────────────────────────────────────── */
+
+.res-bar {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.res-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.res-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--c-text-dim);
+}
+
+.res-item b {
+  color: var(--c-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 顶部资源条中可点击跳转的资源（圣杯结晶 / 抽卡券 → 召唤页） */
+.res-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.res-link b {
+  color: var(--c-gold-2);
+}
+
+/* ── 头像 ───────────────────────────────────────────── */
+
+.portrait {
+  border-radius: 8px;
+  background: var(--c-panel-2);
+  object-fit: cover;
+  display: block;
+  border: 1px solid var(--c-line);
+}
+
+.portrait-ssr { border-color: var(--r-ssr); }
+.portrait-sr { border-color: var(--r-sr); }
+.portrait-r { border-color: var(--r-r); }
+.portrait-n { border-color: var(--r-n); }
+
+/* ── 列表项 ─────────────────────────────────────────── */
+
+.list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--c-line);
+  background: var(--c-bg-2);
+  margin-bottom: 6px;
+}
+
+.list-item.on {
+  border-color: var(--c-gold);
+  background: #2a2419;
+}
+
+/* ── 弹层 ───────────────────────────────────────────── */
+
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.dialog {
+  width: 100%;
+  max-width: 420px;
+  max-height: 82vh;
+  overflow-y: auto;
+  background: var(--c-panel);
+  border: 1px solid var(--c-line-2);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+/* ── 进度条 ─────────────────────────────────────────── */
+
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #191610;
+  overflow: hidden;
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--c-gold), var(--c-gold-2));
+  border-radius: 3px;
+}
+
+/* ── 空态 ───────────────────────────────────────────── */
+
+.empty {
+  text-align: center;
+  color: var(--c-text-mute);
+  padding: 40px 16px;
+  font-size: 13px;
+}
+
+/* ── 滚动条 ─────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--c-line-2);
+  border-radius: 2px;
+}

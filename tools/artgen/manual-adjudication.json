@@ -1,0 +1,10 @@
+{
+  "_comment": "人工裁定记录：第一层客观复检把装饰纹样误判为文字时，在此逐条记录最终判定。keep = 保留（属画面语言，非文字）；fix = 确属可辨文字，需重生成。",
+  "sunwu": { "verdict": "keep", "note": "护臂与甲片上的饕餮纹、云纹为传统装饰纹样，非文字" },
+  "caiwenji": { "verdict": "keep", "note": "手中圆形玉饰为团花纹/柿蒂纹，非文字" },
+  "sunbin": { "verdict": "keep", "note": "卷轴上为兵法阵图（几何圆阵线条），非文字" },
+  "jeannedarc": { "verdict": "keep", "note": "背景为装饰性拱环，刻痕不可辨读；旗面为卷草纹" },
+  "davinci": { "verdict": "keep", "note": "画面右侧即角色自身执笔之手，非第二人物；手部无多指/粘连" },
+  "luban": { "verdict": "keep", "note": "已重生成：改为木鹊与陶壶，器物表面素净无刻痕" },
+  "shangyang": { "verdict": "keep", "note": "已重生成：铜尺改为素面，戈与腰饰均无刻字" }
+}

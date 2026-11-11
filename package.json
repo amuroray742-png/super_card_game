@@ -1,0 +1,40 @@
+{
+  "name": "super-holy-grail-war",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "超级圣杯战争 — 全球历史名人抽卡数值挂机游戏",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "balance": "tsx tools/balance/simulate.ts",
+    "balance:report": "tsx tools/balance/report.ts",
+    "balance:rates": "tsx tools/balance/tenpull-rates.ts",
+    "validate:config": "tsx tools/validate-config.ts",
+    "scan:forbidden": "tsx tools/scan-forbidden-words.ts",
+    "art:placeholder": "tsx tools/placeholder/generate.ts",
+    "art:transcode": "tsx tools/artgen/transcode.ts",
+    "art:capture": "tsx tools/capture/screenshot.ts",
+    "check": "npm run validate:config && npm run scan:forbidden && npm run test && npm run build"
+  },
+  "dependencies": {
+    "pinia": "^2.2.6",
+    "vue": "^3.5.13",
+    "vue-router": "^4.4.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "sharp": "^0.35.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0",
+    "vue-tsc": "^3.3.14"
+  }
+}

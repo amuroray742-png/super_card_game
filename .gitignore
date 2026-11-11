@@ -1,0 +1,19 @@
+node_modules/
+dist/
+dist-ssr/
+coverage/
+.playwright/
+test-results/
+playwright-report/
+# 卡面流水线的中间产物（回执、批次日志、一次性脚本）。** 兼容误建的嵌套路径
+**/artgen/out/
+*.local
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log
+npm-debug.log*
+.env
+.env.*
+!.env.example

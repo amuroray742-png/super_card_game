@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="电芒游丝占位头像">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0%" stop-color="#1A1E26"/>
+      <stop offset="100%" stop-color="#313847"/>
+    </linearGradient>
+    <pattern id="spikes" width="30" height="30" patternUnits="userSpaceOnUse" patternTransform="rotate(78)">
+      <path d="M0 30 L15 0 L30 30 Z" fill="#FFFFFF" opacity="0.05"/>
+    </pattern>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#spikes)"/>
+
+  <circle cx="256" cy="250" r="150" fill="none" stroke="#6E7A8A" stroke-opacity="0.4" stroke-width="2"/>
+  <circle cx="256" cy="250" r="184" fill="none" stroke="#6E7A8A" stroke-opacity="0.33" stroke-width="2"/>
+  <circle cx="256" cy="250" r="218" fill="none" stroke="#6E7A8A" stroke-opacity="0.26" stroke-width="2"/>
+
+  <g transform="translate(0 8) scale(0.82) translate(56 56)" fill="#6E7A8A" fill-opacity="0.85" fill-rule="evenodd">
+    <path d="M256 96 C300 176 344 224 344 288 C344 360 306 408 256 408 C206 408 168 360 168 288 C168 236 210 204 226 152 C244 196 240 236 232 252 C252 226 258 164 256 96 Z"/>
+  </g>
+
+  <rect x="6" y="6" width="500" height="500" rx="26" fill="none" stroke="#6E7A8A" stroke-width="3" stroke-opacity="0.85"/>
+  <rect x="0" y="424" width="512" height="88" fill="#000000" fill-opacity="0.5"/>
+  <text x="256" y="480" text-anchor="middle" font-family="'Songti SC','SimSun',serif" font-size="44" fill="#DDE3EC">电芒游丝</text>
+</svg>

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="项羽占位头像">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2A1C3D"/>
+      <stop offset="100%" stop-color="#5A2E52"/>
+    </linearGradient>
+    <pattern id="stripes" width="26" height="26" patternUnits="userSpaceOnUse" patternTransform="rotate(28)">
+      <rect width="13" height="26" fill="#FFFFFF" opacity="0.035"/>
+    </pattern>
+    <radialGradient id="glow" cx="50%" cy="38%" r="62%">
+      <stop offset="0%" stop-color="#B85C38" stop-opacity="0.34"/>
+      <stop offset="100%" stop-color="#B85C38" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#stripes)" transform="translate(28 0)"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+
+  <!-- 装饰同心环 -->
+  <circle cx="256" cy="238" r="196" fill="none" stroke="#E8C87A" stroke-opacity="0.32" stroke-width="2"/>
+  <circle cx="256" cy="238" r="162" fill="none" stroke="#E8C87A" stroke-opacity="0.23" stroke-width="2"/>
+  <circle cx="256" cy="238" r="128" fill="none" stroke="#E8C87A" stroke-opacity="0.14" stroke-width="2"/>
+
+  <!-- 五行中心符号 -->
+  <g transform="translate(0 -14)" fill="#E8C87A" fill-opacity="0.92" fill-rule="evenodd">
+    <path d="M256 108 L360 236 L152 236 Z M152 268 L360 268 L360 304 L152 304 Z M176 340 L336 340 L336 376 L176 376 Z"/>
+  </g>
+
+  <!-- 五行角标 -->
+  <g transform="translate(404 60)">
+    <circle r="40" fill="#000000" fill-opacity="0.34" stroke="#E8C87A" stroke-opacity="0.5" stroke-width="2"/>
+    <text y="13" text-anchor="middle" font-family="'Songti SC','SimSun',serif" font-size="38" fill="#FFF4D6">土</text>
+  </g>
+
+  <!-- 定位角标 -->
+  <g transform="translate(38 300)" fill="#D9603B" fill-opacity="0.9">
+    <path d="M40 372 L72 324 L104 372 Z"/>
+  </g>
+
+  <!-- 稀有度边框 -->
+  <rect x="6" y="6" width="500" height="500" rx="26" fill="none" stroke="#E8C87A" stroke-width="8" stroke-opacity="0.85"/>
+
+  <!-- 名牌 -->
+  <rect x="0" y="424" width="512" height="88" fill="#000000" fill-opacity="0.5"/>
+  <text x="256" y="482" text-anchor="middle" font-family="'Songti SC','SimSun',serif" font-size="46" fill="#FFF4D6">项羽</text>
+</svg>

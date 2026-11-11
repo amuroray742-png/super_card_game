@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="织梦者占位头像">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0%" stop-color="#3A1512"/>
+      <stop offset="100%" stop-color="#6B241C"/>
+    </linearGradient>
+    <pattern id="spikes" width="30" height="30" patternUnits="userSpaceOnUse" patternTransform="rotate(8)">
+      <path d="M0 30 L15 0 L30 30 Z" fill="#FFFFFF" opacity="0.05"/>
+    </pattern>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#spikes)"/>
+
+  <circle cx="256" cy="250" r="150" fill="none" stroke="#E05B4B" stroke-opacity="0.4" stroke-width="3"/>
+  <circle cx="256" cy="250" r="184" fill="none" stroke="#E05B4B" stroke-opacity="0.33" stroke-width="3"/>
+  <circle cx="256" cy="250" r="218" fill="none" stroke="#E05B4B" stroke-opacity="0.26" stroke-width="3"/>
+  <circle cx="256" cy="250" r="252" fill="none" stroke="#E05B4B" stroke-opacity="0.19" stroke-width="3"/>
+
+  <g transform="translate(0 8) scale(0.82) translate(56 56)" fill="#E05B4B" fill-opacity="0.85" fill-rule="evenodd">
+    <path d="M256 104 L286 208 L256 240 L226 208 Z M170 268 L342 268 L342 300 L170 300 Z M186 316 L326 316 L326 344 L186 344 Z M186 372 L326 372 L326 400 L186 400 Z"/>
+  </g>
+
+  <rect x="6" y="6" width="500" height="500" rx="26" fill="none" stroke="#E05B4B" stroke-width="8" stroke-opacity="0.85"/>
+  <rect x="0" y="424" width="512" height="88" fill="#000000" fill-opacity="0.5"/>
+  <text x="256" y="480" text-anchor="middle" font-family="'Songti SC','SimSun',serif" font-size="44" fill="#FFD9D2">织梦者</text>
+</svg>
