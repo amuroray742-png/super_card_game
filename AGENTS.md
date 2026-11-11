@@ -114,6 +114,13 @@ npm run test:e2e         # Playwright 端到端（需先 npx playwright install 
 > `npm run build && npm run preview -- --port 4188 --host 127.0.0.1`，
 > 再 `npm run art:capture -- --url http://127.0.0.1:4188 --route /gacha --pull --out artifacts/art-preview/gacha.png`。
 
+> **本机坑（Windows + 非 ASCII 项目路径）**：Node 的 `fs.rmSync` 在**含中文的路径**下会静默失效
+> （不报错、文件也不删；同目录下 `fs.unlinkSync`、PowerShell 的 `Remove-Item` 都正常）。
+> vite 清理 `dist` 走的正是 `rmSync`，所以在中文路径下每次构建都会把旧哈希产物留在 `dist/` 里
+> （实测 586 个 vs 干净构建 209 个），preview 可能命中陈旧产物。
+> **构建前请用能正常删除的方式清一次**：`Remove-Item -Recurse -Force dist`。
+> 该问题只影响本地构建目录，不影响仓库内容与 CI——ASCII 路径下（克隆到英文目录）完全正常。
+
 ## 提交粒度
 
 每完成一个 Phase 做一次提交，提交信息用 `feat(phase-N): 描述`。数值调参单独提交，便于回滚。
