@@ -13,6 +13,9 @@
 3. **数据驱动**：新增英灵 / 关卡 / 遗物只加配置，不改逻辑代码。系统逻辑必须遍历配置表，禁止硬编码角色 id。
 4. **单一数据源**：概率公示、抽卡执行、掉落预览必须调用同一函数，禁止复制定义（合规硬要求）。
 5. **配置与代码分离**：所有数值常数集中在 `src/core/config/economy.ts`。禁止在业务代码里就地写数字。
+   > **显式例外**：账号 / 会话类阈值（用户名规则、口令强度、令牌有效期、限流阈值）
+   > 放 `src/core/config/account.ts`，前后端与服务端共用同一份。
+   > 这类阈值不属于经济数值调参范畴（不进 `npm run balance` 的曲线）。
 6. **平台解耦**：`src/presentation/` 不直接访问 `localStorage`，一律经 `src/platform/`。
 7. **养成即配置**：竞技场中养成投入只允许通过「战术铭文槽位数量」与「系数封顶表」体现，禁止直接数值加成路径。
 8. **存档结构也必须有唯一约定**：装备槽位 key 格式、掉落表 id、卡池 id 等由 `core/systems/loadout.ts`
@@ -39,6 +42,19 @@
     origin（`localhost:5173`）等于共用玩家存档。截图 / 验证 / 抓取类脚本一律用
     `tools/capture/screenshot.ts`（内置 origin 守卫 + 全新隔离 context），
     目标地址只允许 `127.0.0.1:<隔离端口>`（如 4188）。禁止自写一次性脚本直连 `localhost:5173`。
+14. **表现层不得直连后端接口**：所有认证 / 云存档请求一律经 `src/platform/account.ts`，
+    `src/presentation/` 里禁止出现 `fetch('http…')` 这类直连（否则会出现两套令牌与错误处理）。
+    令牌轮换、401 自动续期、会话落盘统一由 `presentation/stores/account.ts` 负责。
+    服务端同样遵守「单一数据源」：账号阈值与错误码表复用 `src/core/config/account.ts`，
+    不在 `server/` 里另立一份。
+15. **账号与登录是核心循环的一部分，不是可选项**：首屏即登录页，
+    未登录只放行 `/login` 与公开合规页（路由守卫 `presentation/router.ts`）。
+    存档归属由账号决定：本地槽位 `sgw.save.<账号 id>`，云端每账号一份。
+    存量单槽位 `sgw.save.main` 只迁给**第一个**登录的账号（`sgw.legacyMigrated` 标记）。
+    新增页面若需要玩家身份相关的数据，走 store，不得各自去读会话。
+    > 历史教训：登录系统缺失时，「跨设备同步」这类产品承诺无从兑现；
+    > 而把云存档接上后发现 `@fastify/cors` v11 默认方法表**不含 PUT**，
+    > 浏览器预检会静默拦掉云存档推送——这类问题只有端到端跑真实链路才会暴露。
 
 ## 数值调参的既定流程
 
@@ -83,14 +99,18 @@ npm test                 # 单测（含十项 PvP 隔离断言）
 
 ```
 src/core/       纯逻辑，可在 Node 下运行，被单元测试全覆盖
-src/platform/   平台适配（storage / payment / share / ads），首发为 mock
+src/platform/   平台适配（storage / account / payment / share / ads），首发为 mock
 src/presentation/ Vue 视图层
 src/content/    传记文本、合规文案、美术资源
+server/         真实后端（Fastify + node:sqlite）：认证 + 云存档
 tools/          数值模拟、配置校验、禁用词扫描、占位图生成
 tools/capture/  界面截图（内置 origin 守卫，禁止对玩家正在使用的 origin 动手）
 tests/unit/     Vitest 单测（core/systems 目标 100% 覆盖）
-tests/e2e/      Playwright 端到端
+tests/e2e/      Playwright 端到端（起真实后端 + 静态预览）
 ```
+
+`server/` 与 `src/core/` 的边界：服务端**只做**认证与云存档，不参与任何战斗与数值计算；
+账号阈值与错误码表从 `src/core/config/account.ts` 引入，不在服务端另立一份。
 
 ## 常用命令
 
@@ -103,12 +123,23 @@ npm run balance          # 数值模拟：难度曲线 vs 养成曲线
 npm run balance:report   # 投放回收表
 npm run balance:rates    # 十连综合概率（精确 DP）取数
 npm run validate:config  # 配置完整性校验（id 唯一、引用存在、数值区间）
-npm run scan:forbidden   # 禁用词扫描
+npm run scan:forbidden   # 禁用词扫描（含 server/）
 npm run art:placeholder  # 生成占位头像
 npm run art:transcode    # 卡面 JPEG → WebP 转码（体积 25.9MB → 3.9MB）
 npm run art:capture      # 界面截图（必须指向隔离 origin，见铁律 #13）
 npm run test:e2e         # Playwright 端到端（需先 npx playwright install chromium）
+npm run server:dev       # 后端开发模式（node --watch，默认 127.0.0.1:8787）
+npm run server:start     # 后端生产模式
 ```
+
+> **后端**：默认 `127.0.0.1:8787`，DB 落在 `server/data/app.db`（已被 .gitignore 忽略）。
+> 配置优先级：命令行参数 > 环境变量 > 默认值，完整清单见 `.env.example`。
+> **生产环境必须设置 `SGW_JWT_SECRET`**，否则进程启动即退出（重置密钥会让所有会话失效）。
+> 前端默认连 `http://127.0.0.1:8787`；可用环境变量 `VITE_API_BASE` 或
+> 设置页里的「服务地址」覆盖（写入 `localStorage['sgw.apiBase']`，优先级最高）。
+>
+> **端到端**：`npm run test:e2e` 会自动起两个服务——真实后端（临时 SQLite 库，
+> 端口 8790）与静态预览（端口 4173），用例走完整注册 → 登录 → 云存档链路。
 
 > 截图前先起隔离预览服务（**端口不要用 5173**，那是玩家可能在用的 dev server）：
 > `npm run build && npm run preview -- --port 4188 --host 127.0.0.1`，
@@ -129,3 +160,5 @@ npm run test:e2e         # Playwright 端到端（需先 npx playwright install 
 ## 提交粒度
 
 每完成一个 Phase 做一次提交，提交信息用 `feat(phase-N): 描述`。数值调参单独提交，便于回滚。
+登录与云存档这条工作线的步骤用 `feat(login-A)` … `feat(login-E)` 标记（A 后端骨架 → B 登录前端 →
+C 云存档同步 → D 端到端 → E 文档），每步一个可独立跑通的提交。
