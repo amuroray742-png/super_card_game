@@ -370,6 +370,10 @@ export interface BattleUnit {
   statuses: StatusEffect[]
   cooldowns: number[]
   bossMechanic?: BossMechanic
+  /** 是否为 BOSS 召唤出来的援军（§6.5） */
+  summoned?: boolean
+  /** 出场回合（1 起）。召唤的援军 > 1，回放时出场前不应显示。 */
+  appearRound?: number
   /** 竞技模式下的铭文 */
   runes?: string[]
 }
@@ -383,6 +387,8 @@ export type BattleLogKind =
   | 'control'
   | 'dot'
   | 'skill'
+  /** BOSS 召唤援军（§6.5） */
+  | 'summon'
   | 'round'
   | 'end'
 
@@ -426,8 +432,10 @@ export interface BattleUnitRosterEntry {
    */
   slot: number
   name: string
-  /** 初始最大生命（血条分母） */
+  /** 血条分母：满血生命 */
   maxHp: number
+  /** 出场回合（1 起）。召唤援军 > 1，回放时出场前不应显示该单位。 */
+  appearRound: number
 }
 
 // ─────────────────────────── 掉落 ───────────────────────────

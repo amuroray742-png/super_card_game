@@ -42,8 +42,13 @@ export interface BattleSetup {
 
 // ─────────────────────────── 单位构建 ───────────────────────────
 
-function scaleEnemyStats(def: EnemyDef, scale: number): FinalStats {
-  const mult = Math.max(0.1, scale)
+/**
+ * 敌人属性缩放。
+ *
+ * @param ratio 额外属性系数（召唤物用 `BATTLE.SUMMON_STAT_RATIO` 削弱）。
+ */
+function scaleEnemyStats(def: EnemyDef, scale: number, ratio = 1): FinalStats {
+  const mult = Math.max(0.1, scale) * ratio
   const stats = {
     atk: def.baseStats.atk * mult,
     def: def.baseStats.def * mult,
@@ -86,9 +91,11 @@ function buildEnemyUnits(
   enemies: EnemyDef[],
   scale: number,
   offset: number,
+  options?: { summoned?: boolean; appearRound?: number },
 ): BattleUnit[] {
   return enemies.map((def, i) => {
-    const stats = scaleEnemyStats(def, scale)
+    // 召唤物是模板怪物的削弱版：攻防血一起折算（只砍血会造出满攻玻璃炮）
+    const stats = scaleEnemyStats(def, scale, options?.summoned ? BATTLE.SUMMON_STAT_RATIO : 1)
     return {
       id: `${def.id}#${offset + i}`,
       side: 'enemy' as const,
@@ -106,6 +113,8 @@ function buildEnemyUnits(
       statuses: [],
       cooldowns: def.skills.map(() => 0),
       bossMechanic: def.bossMechanic,
+      summoned: options?.summoned ?? false,
+      appearRound: options?.appearRound ?? 1,
     }
   })
 }
@@ -140,6 +149,8 @@ export function simulateBattle(
   const damageById: Record<string, number> = {}
   const healById: Record<string, number> = {}
   const all = [...allies, ...enemies]
+  /** 敌人出场序号：召唤物用它生成唯一 id（`def.id#序号`） */
+  let enemySerial = all.filter((u) => u.side === 'enemy').length
 
   const push = (entry: BattleLogEntry) => {
     if (log.length < MAX_LOG) log.push(entry)
@@ -222,31 +233,48 @@ export function simulateBattle(
       applyRegen(unit, ctx, { round, push, damageById, healById })
     }
 
-    // 召唤机制
-    const summons = all.filter((u) => u.alive && u.bossMechanic?.type === 'summon')
-    for (const boss of summons) {
-      const mech = boss.bossMechanic!
-      if (mech.type !== 'summon') continue
+    // 召唤机制（§6.5）：BOSS 按配置周期召唤援军
+    //
+    // ⚠ 模板必须取自配置的 `mech.enemyId`（**敌人 id**），不是显示名。
+    //   历史教训：早期实现取 `template.name.split('#')[0]`（显示名，如「蜃楼幻身」）
+    //   去查 ENEMY_TEMPLATES（key 是敌人 id，如 `sand_mirage`）→ 永远查不到 →
+    //   `continue` 掉，**召唤从未触发**，BOSS 阶段只剩本体，机制形同虚设。
+    //
+    // 同时：数量取 `mech.count`；存活援军受 `BATTLE.MAX_LIVE_SUMMONS` 封顶，
+    // 否则 AoE BOSS 每 3 回合叠 2 个，30 回合能滚到 20 个援军。
+    //
+    // 注意先取快照再遍历：`all` 会在循环里被追加新单位。
+    const summoners = all.filter((u) => u.alive && u.bossMechanic?.type === 'summon')
+    for (const boss of summoners) {
+      const mech = boss.bossMechanic
+      if (!mech || mech.type !== 'summon') continue
       if (round % mech.everyTurns !== 0) continue
-      const pool = all.filter((u) => u.side === 'enemy' && !u.alive)
-      if (pool.length === 0) continue
-      const template = pool[0]
-      const base = template.name.split('#')[0]
-      const def = ENEMY_TEMPLATES.get(base)
+      const def = ENEMY_TEMPLATES.get(mech.enemyId)
       if (!def) continue
-      const spawned = buildEnemyUnits([def], enemyScale, all.length)
+
+      const liveSummons = all.filter((u) => u.side === 'enemy' && u.alive && u.summoned).length
+      const want = Math.min(mech.count, Math.max(0, BATTLE.MAX_LIVE_SUMMONS - liveSummons))
+      if (want <= 0) continue
+
+      const spawned = buildEnemyUnits(
+        Array.from({ length: want }, () => def),
+        enemyScale,
+        enemySerial,
+        { summoned: true, appearRound: round },
+      )
+      enemySerial += spawned.length
+      for (const s of spawned) all.push(s)
+
       for (const s of spawned) {
-        s.hp = s.maxHp * 0.4
-        all.push(s)
+        push({
+          round,
+          kind: 'summon',
+          actorId: boss.id,
+          targetId: s.id,
+          amount: 0,
+          text: `${boss.name} 召唤了「${s.name}」作为援军`,
+        })
       }
-      push({
-        round,
-        kind: 'skill',
-        actorId: boss.id,
-        targetId: '',
-        amount: 0,
-        text: `${boss.name} 召唤了援军`,
-      })
     }
 
     if (!all.some((u) => u.side === 'enemy' && u.alive)) {
@@ -284,6 +312,9 @@ export function simulateBattle(
  * 敌方槽位按**该阵营内的出场序号**重排（0 起）：
  * 战斗内部的 slot 是全局序号（敌方带 offset，召唤怪还会更大），
  * 拿它当画面行号会让怪画到画布外。
+ *
+ * `appearRound` 描述「援军何时入场」：召唤物出场回合 > 1，
+ * 回放据此在召唤事件发生前不显示该单位。
  */
 function buildRoster(allies: BattleUnit[], all: BattleUnit[]): BattleUnitRosterEntry[] {
   const enemyOrder = new Map<string, number>()
@@ -295,7 +326,14 @@ function buildRoster(allies: BattleUnit[], all: BattleUnit[]): BattleUnitRosterE
 
   const entries: BattleUnitRosterEntry[] = []
   for (const u of allies) {
-    entries.push({ id: u.id, side: 'ally', slot: u.slot, name: u.name, maxHp: u.maxHp })
+    entries.push({
+      id: u.id,
+      side: 'ally',
+      slot: u.slot,
+      name: u.name,
+      maxHp: u.maxHp,
+      appearRound: 1,
+    })
   }
   for (const u of all) {
     if (u.side !== 'enemy') continue
@@ -305,6 +343,7 @@ function buildRoster(allies: BattleUnit[], all: BattleUnit[]): BattleUnitRosterE
       slot: enemyOrder.get(u.id) ?? 0,
       name: u.name,
       maxHp: u.maxHp,
+      appearRound: u.appearRound ?? 1,
     })
   }
   return entries
@@ -537,7 +576,17 @@ function selectTargets(
         const sorted = [...enemies].sort(
           (a, b) => a.hp - b.hp || a.slot - b.slot || a.id.localeCompare(b.id),
         )
-        return sorted.slice(0, 1)
+        // BOSS 锁定：只要 BOSS 存活，单体攻击就锁定 BOSS。
+        //
+        // ⚠ 原因：召唤机制的援军血量**必然低于 BOSS**（削弱版小怪），
+        //   若仍按「集火最低血」打，队伍会永远在打小怪 → BOSS 永远不死 →
+        //   「每 N 回合召唤 2 个小怪」的 BOSS 直接变成不可通关的活门。
+        //   锁定 BOSS 后，援军退化为「持续压力」（AoE 伤害），机制才有意义。
+        //
+        // 影响面：竞技双方都不是 BOSS（无 bossMechanic）→ 不受影响；
+        //   非召唤关卡的 BOSS 关只有 BOSS 一个敌人 → 行为不变。
+        const boss = sorted.find((u) => u.bossMechanic !== undefined)
+        return boss ? [boss] : sorted.slice(0, 1)
       }
       return enemies
     case 'heal':

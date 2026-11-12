@@ -71,6 +71,17 @@
     窗口 resize 同样要重绘（改尺寸会清空画布）。
     > 历史教训：原实现 `onMounted` 先调 `resize()`（此时 `ctx.value` 仍为 null，变换没设上）
     > 才赋值 ctx → 高分屏上整个战斗场景被画进 2x 缓冲的左上角，整场战斗缩成一半挤在角落。
+18. **BOSS 机制必须真的触发，且要能被打死**：
+    - `BossMechanic` 的每个字段都必须被战斗代码读取——
+      召唤机制的 `enemyId`（**敌人 id**，不是显示名）/ `count` / `everyTurns` 缺一不可，
+      禁止从战场上「反推」模板（如取已死敌人的名字）。
+    - 召唤物是模板怪的**削弱版**：攻防血一起按 `BATTLE.SUMMON_STAT_RATIO` 折算，
+      并受 `BATTLE.MAX_LIVE_SUMMONS` 存活上限约束。
+    - **BOSS 锁定**：只要 BOSS 存活，我方单体攻击锁定 BOSS。
+      否则援军（血量必然低于 BOSS）会一直抢走「集火最低血」的注意力 → BOSS 永远不死 → 召唤型 BOSS 变成活门。
+    > 历史教训：召唤机制配置齐全（`enemyId` / `count` 都在）却**从未触发**——
+    > 模板查找拿显示名去查以敌人 id 为 key 的索引，永远查不到。
+    > 而 `npm run balance` 只比战力数字，**看不出机制空转**，只有真跑战斗才能发现。
 
 ## 数值调参的既定流程
 
@@ -78,6 +89,7 @@
 
 ```bash
 npm run balance          # 难度曲线 vs 养成曲线：检查 310 关单调递增、满养成可通关
+npm run balance:battle   # 实战战斗模拟：逐章 BOSS 通关率（召唤开/关对照）+ 实战卡关点
 npm run balance:report   # 投放回收表：五类资源回收率必须全部 ≥ 1
 npm run validate:config  # 配置自洽性
 npm test                 # 单测（含十项 PvP 隔离断言）
@@ -85,6 +97,11 @@ npm test                 # 单测（含十项 PvP 隔离断言）
 
 任何调参都要同时满足三个不变量：**关卡门槛单调递增**、**满养成可通关末关且有 1.5× 以上余量**、
 **竞技归一化后战力差 < 15%**。
+
+> ⚠ `npm run balance` 比的是**战力数字**（`computePower` vs `powerRequired`），**不跑战斗**。
+> 「满养成可通关末关」这条不变量必须用 `npm run balance:battle`（真实跑战斗）复核——
+> 当前两者严重脱节（模型 310 关 / 实战 246 关），修复需单独做数值调参提交，
+> 详见 `artifacts/plan.md` §6.5 的「已知缺口」。
 
 ## 命名的 IP 边界
 
@@ -137,6 +154,7 @@ npm test                 # 单元测试
 npm run build            # 类型检查 + 生产构建
 npm run check            # 配置校验 + 禁用词扫描 + 单测 + 构建（提交前跑这个）
 npm run balance          # 数值模拟：难度曲线 vs 养成曲线
+npm run balance:battle   # 实战战斗模拟：逐章 BOSS 通关率 + 实战卡关点
 npm run balance:report   # 投放回收表
 npm run balance:rates    # 十连综合概率（精确 DP）取数
 npm run validate:config  # 配置完整性校验（id 唯一、引用存在、数值区间）

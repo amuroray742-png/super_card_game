@@ -55,6 +55,7 @@ npm test                 # Vitest 单测
 npm run build            # 类型检查 + 生产构建
 npm run test:e2e         # Playwright 端到端（自动起真实后端 + 静态预览）
 npm run balance          # 数值模拟：难度曲线 vs 养成曲线
+npm run balance:battle   # 实战战斗模拟：逐章 BOSS 通关率 + 实战卡关点
 npm run balance:report   # 投放回收表
 npm run validate:config  # 配置完整性校验
 npm run scan:forbidden   # 禁用词扫描
@@ -70,7 +71,8 @@ npm run art:capture      # 界面截图（只允许指向隔离 origin）
 
 [`AGENTS.md`](AGENTS.md) 是本仓库的工程铁律（架构分层、存档写入、数值调参流程、合规红线、IP 边界），
 设计基线见 [`artifacts/plan.md`](artifacts/plan.md) 与 [`artifacts/art-style.md`](artifacts/art-style.md)。
-修改数值只改 `src/core/config/economy.ts` 与对应配置表，改完按序跑 `balance` / `balance:report` / `validate:config` / `test`。
+修改数值只改 `src/core/config/economy.ts` 与对应配置表，改完按序跑 `balance` / `balance:battle` / `balance:report` / `validate:config` / `test`。
+其中 `balance:battle` 会**真实跑战斗**，用于复核「满养成可通关末关」——`balance` 只比战力数字，看不出 BOSS 机制空转之类的实战问题。
 
 ## 合规
 

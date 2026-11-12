@@ -173,6 +173,22 @@ for (const pool of POOLS) {
   }
 }
 
+// BOSS 召唤机制（§6.5）：召唤目标必须是已配置的敌人 id。
+// 历史教训：机制用显示名查模板 → 永远查不到 → 召唤从未触发。
+for (const [enemyId, enemy] of ENEMY_DEFS) {
+  const mech = enemy.bossMechanic
+  if (!mech || mech.type !== 'summon') continue
+  if (!enemyIds.has(mech.enemyId)) {
+    err('B/REF', `BOSS ${enemyId} 的召唤机制引用了不存在的敌人 ${mech.enemyId}`)
+  }
+  if (mech.everyTurns <= 0) {
+    err('C/NUM', `BOSS ${enemyId} 的召唤周期 ${mech.everyTurns} 非正数`)
+  }
+  if (mech.count <= 0) {
+    err('C/NUM', `BOSS ${enemyId} 的召唤数量 ${mech.count} 非正数`)
+  }
+}
+
 for (const stage of STAGES) {
   if (stage.enemyIds.length === 0) {
     err('B/REF', `关卡 ${stage.id} 没有配置任何敌人`)

@@ -19,9 +19,22 @@ const playing = ref(false)
 const logIndex = ref(0)
 
 /** 参与战斗的单位：id → 展示信息 */
-const units = ref<
-  Record<string, { name: string; side: 'ally' | 'enemy'; hp: number; maxHp: number; slot: number }>
->({})
+interface CanvasUnit {
+  name: string
+  side: 'ally' | 'enemy'
+  hp: number
+  maxHp: number
+  slot: number
+  /** 出场回合（1 起）。召唤援军 > 1，出场前不画。 */
+  appearRound: number
+  /** 尚未出场（召唤援军出场前） */
+  hidden: boolean
+}
+
+const units = ref<Record<string, CanvasUnit>>({})
+
+/** 当前回合：由日志推进。用于判断援军是否已出场。 */
+const currentRound = ref(1)
 
 let raf = 0
 let lastTs = 0
@@ -58,9 +71,11 @@ function resize() {
  * ⚠ 单位 id / 槽位 / 初始血量**全部来自 core 的 `roster`**，
  * 表现层不得自行拼接（AGENTS.md 铁律 #8）：
  * 自行拼 id 会与日志里的 actorId / targetId 对不上，血条就永远不变。
+ *
+ * 召唤援军（appearRound > 1）初始为「未出场」，等日志里的 summon 事件再亮出来。
  */
 function initUnits() {
-  const map: Record<string, { name: string; side: 'ally' | 'enemy'; hp: number; maxHp: number; slot: number }> = {}
+  const map: Record<string, CanvasUnit> = {}
   for (const u of props.battle?.roster ?? []) {
     map[u.id] = {
       name: u.name,
@@ -68,9 +83,12 @@ function initUnits() {
       hp: u.maxHp,
       maxHp: u.maxHp,
       slot: u.slot,
+      appearRound: u.appearRound,
+      hidden: u.appearRound > 1,
     }
   }
   units.value = map
+  currentRound.value = 1
 }
 
 /**
@@ -128,6 +146,7 @@ function draw() {
 
   // 单位
   for (const [id, u] of Object.entries(units.value)) {
+    if (u.hidden) continue
     const { x, y } = positionOf(id)
     const alive = u.hp > 0
     const ratio = u.maxHp > 0 ? Math.max(0, u.hp / u.maxHp) : 0
@@ -185,12 +204,18 @@ function draw() {
 /** 按日志推进血量 */
 function applyLog(entry: BattleResult['log'][number]): void {
   const kind = entry.kind
+  if (entry.round > currentRound.value) currentRound.value = entry.round
   if (kind === 'damage' || kind === 'dot') {
     const t = units.value[entry.targetId]
     if (t) t.hp = Math.max(0, t.hp - entry.amount)
   } else if (kind === 'heal') {
     const t = units.value[entry.targetId]
     if (t) t.hp = Math.min(t.maxHp, t.hp + entry.amount)
+  } else if (kind === 'summon') {
+    // 召唤援军入场：由 core 的 roster 决定 id / 槽位 / 初始血量，
+    // 这里只负责「让它出现」（AGENTS.md 铁律 #8 / #16）。
+    const t = units.value[entry.targetId]
+    if (t) t.hidden = false
   }
 }
 

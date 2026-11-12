@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "balance": "tsx tools/balance/simulate.ts",
+    "balance:battle": "tsx tools/balance/battle-sim.ts",
     "balance:report": "tsx tools/balance/report.ts",
     "balance:rates": "tsx tools/balance/tenpull-rates.ts",
     "validate:config": "tsx tools/validate-config.ts",
