@@ -167,3 +167,19 @@ describe('健康检查', () => {
     expect(res.json().ok).toBe(true)
   })
 })
+
+describe('跨域预检', () => {
+  it('允许 PUT（云存档推送），否则浏览器会拦掉预检', async () => {
+    const res = await bundle.app.inject({
+      method: 'OPTIONS',
+      url: '/api/save',
+      headers: {
+        origin: 'http://127.0.0.1:4173',
+        'access-control-request-method': 'PUT',
+        'access-control-request-headers': 'authorization,content-type',
+      },
+    })
+    expect(res.headers['access-control-allow-methods']).toContain('PUT')
+    expect(res.headers['access-control-allow-origin']).toBe('http://127.0.0.1:4173')
+  })
+})

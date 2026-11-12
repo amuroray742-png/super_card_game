@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TABLE_PATH = join(ROOT, 'src/content/compliance/forbidden-words.md')
-const SCAN_ROOTS = ['src', 'tools', 'tests']
+// 服务端也要扫：它的中文文案会经接口返回给客户端，属于对外文案
+const SCAN_ROOTS = ['src', 'tools', 'tests', 'server']
 const EXTENSIONS = new Set(['.ts', '.vue', '.md', '.json'])
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'coverage', 'playwright-report'])
 /**

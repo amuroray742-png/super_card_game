@@ -1,16 +1,24 @@
 <script setup lang="ts">
 /**
- * 设置：战斗速度、音效、演出、存档导出导入、重置进度与关于。
- * 存档读写一律经 src/platform/storage.ts，表现层不直接访问 localStorage。
+ * 设置：账号、战斗速度、音效、演出、存档导出导入、重置进度与关于。
+ * 存档读写一律经 src/platform/storage.ts，表现层不直接访问 localStorage；
+ * 后端通信一律经 src/platform/account.ts。
  */
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
+import { useAccountStore } from '../stores/account'
 import { storage } from '../../platform/storage.ts'
+import {
+  readApiBaseOverride,
+  resolveApiBase,
+  writeApiBaseOverride,
+} from '../../platform/account.ts'
 import { BATTLE } from '../../core/config/economy.ts'
 import pkg from '../../../package.json'
 
 const store = useGameStore()
+const account = useAccountStore()
 const router = useRouter()
 
 const VERSION = pkg.version
@@ -32,6 +40,36 @@ function toggleSfx() {
 function toggleSkipAnim() {
   store.save.settings.skipAnim = !store.save.settings.skipAnim
   store.persist()
+}
+
+// ─────────────────────────── 账号 ───────────────────────────
+
+/** 当前后端地址（localStorage 覆盖优先，其次环境变量，最后默认值） */
+const apiBase = computed(() => resolveApiBase())
+/** 可编辑的服务地址（静态托管时指向自建后端） */
+const apiBaseInput = ref(readApiBaseOverride() || apiBase.value)
+
+function saveApiBase() {
+  writeApiBaseOverride(apiBaseInput.value)
+  store.notify('服务地址已保存', 'ok')
+}
+
+/** 退出登录：先把还没推上云端的存档刷掉，再吊销会话 */
+async function doLogout() {
+  await store.flushPush()
+  await account.logout()
+  await router.replace('/login')
+}
+
+const deleteOpen = ref(false)
+
+/** 注销账号：服务端级联删除账号 / 会话 / 云存档 */
+async function doDeleteAccount() {
+  const ok = await account.deleteAccount()
+  deleteOpen.value = false
+  if (!ok) return
+  store.notify('账号已注销，云端数据已删除', 'warn')
+  await router.replace('/login')
 }
 
 // ─────────────────────────── 存档导出 / 导入 ───────────────────────────
@@ -91,6 +129,30 @@ async function doReset() {
   <div class="page">
     <div class="page-title">设置</div>
 
+    <!-- 账号 -->
+    <section class="panel">
+      <div class="panel-title"><span>账号</span></div>
+      <div class="row-between tiny" style="margin-bottom: 6px">
+        <span class="muted">当前账号</span>
+        <b>{{ account.user?.username ?? '未登录' }}</b>
+      </div>
+      <div class="row-between tiny" style="margin-bottom: 6px">
+        <span class="muted">服务地址</span>
+        <b class="addr">{{ apiBase }}</b>
+      </div>
+      <input v-model="apiBaseInput" class="addr-input" placeholder="http://127.0.0.1:8787" />
+      <button class="btn btn-sm btn-block" style="margin-top: 6px" @click="saveApiBase">
+        保存服务地址
+      </button>
+      <p class="tiny muted" style="margin: 8px 0 0; line-height: 1.7">
+        进度随账号保存在云端，登录后可在其他设备继续；本机也会保留一份副本。
+      </p>
+      <button class="btn btn-sm btn-block" style="margin-top: 10px" @click="doLogout">退出登录</button>
+      <button class="btn btn-sm btn-danger btn-block" style="margin-top: 6px" @click="deleteOpen = true">
+        注销账号
+      </button>
+    </section>
+
     <!-- 战斗 -->
     <section class="panel">
       <div class="panel-title"><span>战斗</span></div>
@@ -128,7 +190,7 @@ async function doReset() {
     <section class="panel">
       <div class="panel-title"><span>存档</span></div>
       <p class="tiny muted" style="margin: 0 0 8px">
-        进度仅保存在本机浏览器中。导出后可在其他设备导入同一份进度。
+        存档串可用于备份当前进度：导出后在其他设备粘贴导入即可。
       </p>
       <div class="row" style="gap: 6px">
         <button class="btn btn-sm" style="flex: 1" :disabled="busy" @click="doExport">导出存档</button>
@@ -157,7 +219,7 @@ async function doReset() {
     <section class="panel">
       <div class="panel-title"><span>重置进度</span></div>
       <p class="tiny muted" style="margin: 0 0 8px">
-        清空本机存档并回到初始状态，该操作不可撤销。
+        清空本机与云端的进度并回到初始状态，该操作不可撤销。
       </p>
       <button class="btn btn-sm btn-danger btn-block" @click="resetOpen = true">重置全部进度</button>
     </section>
@@ -200,6 +262,20 @@ async function doReset() {
         <div class="row" style="gap: 8px">
           <button class="btn btn-sm" style="flex: 1" @click="resetOpen = false">取消</button>
           <button class="btn btn-sm btn-danger" style="flex: 1" @click="doReset">确认重置</button>
+        </div>
+      </div>
+    </div>
+    <!-- 注销账号二次确认 -->
+    <div v-if="deleteOpen" class="mask" @click.self="deleteOpen = false">
+      <div class="dialog">
+        <div class="panel-title">注销账号</div>
+        <p class="tiny muted" style="margin: 0 0 10px; line-height: 1.8">
+          注销后会删除账号 {{ account.user?.username }} 的云端存档与登录状态，本机副本也会被清除。
+          该操作不可撤销，如需保留进度请先导出存档。
+        </p>
+        <div class="row" style="gap: 8px">
+          <button class="btn btn-sm" style="flex: 1" @click="deleteOpen = false">取消</button>
+          <button class="btn btn-sm btn-danger" style="flex: 1" @click="doDeleteAccount">确认注销</button>
         </div>
       </div>
     </div>
@@ -269,6 +345,32 @@ async function doReset() {
 }
 
 .save-area:focus {
+  border-color: var(--c-line-2);
+}
+
+.addr {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addr-input {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--c-line);
+  background: var(--c-bg-2);
+  color: var(--c-text-dim);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  outline: none;
+}
+
+.addr-input:focus {
   border-color: var(--c-line-2);
 }
 </style>

@@ -36,7 +36,13 @@ export function buildApp(options: AppOptions): AppBundle {
   const limiter = createLimiter()
   const authGuard = makeAuthGuard(options.jwtSecret)
 
-  app.register(cors, { origin: options.corsOrigins, credentials: false })
+  app.register(cors, {
+    origin: options.corsOrigins,
+    credentials: false,
+    // ⚠ 必须显式列出方法：@fastify/cors v11 的默认方法表是 `GET,HEAD,POST`，
+    // **不含 PUT**——云存档推送（PUT /api/save）会被浏览器预检直接拦掉。
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  })
 
   // 统一错误体：{ error, message? }
   app.setErrorHandler((err, req, reply) => {

@@ -1,16 +1,22 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
+import { registerAccount, seedSession, uniqueUsername } from './helpers'
 
 /**
  * 端到端冒烟用例（§15.2）。
  *
  * 覆盖首发核心链路：
- *   首屏加载 → 概率公示可见 → 抽卡 → 编队 → 推征 → 养成 → 合规页
+ *   登录 → 概率公示可见 → 抽卡 → 编队 → 推征 → 养成 → 合规页
  *
  * 注意：用例不依赖具体数值，只依赖**结构与交互存在**，
  * 避免数值调参导致 E2E 频繁失败。
+ *
+ * 每个用例都现注册一个账号（云存档按账号隔离），
+ * 保证用例之间互不影响——等价于从前每个用例都是全新浏览器上下文。
  */
 
-async function gotoApp(page: import('@playwright/test').Page, hash = '#/expedition') {
+async function gotoApp(page: Page, hash = '#/expedition') {
+  const session = await registerAccount(uniqueUsername('smoke'))
+  await seedSession(page, session)
   await page.goto(`/${hash}`)
   await page.waitForLoadState('networkidle')
 }
