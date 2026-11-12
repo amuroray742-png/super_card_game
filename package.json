@@ -6,6 +6,7 @@
   "description": "超级圣杯战争 — 全球历史名人抽卡数值挂机游戏",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node tools/clean-dist.mjs",
     "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview --host",
     "test": "vitest run",
