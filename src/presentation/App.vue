@@ -6,7 +6,7 @@
  *   恢复会话 → 载入该账号的存档 → 首启引导劫持。
  * 本组件只负责渲染，未登录时（登录页 / 公开合规页）走裸布局，不显示资源条与标签栏。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from './stores/game'
 import { useAccountStore } from './stores/account'
@@ -60,7 +60,24 @@ const offlineRewards = computed(() => {
 
 onMounted(() => {
   booted.value = true
+  document.addEventListener('visibilitychange', flushOnHide)
+  window.addEventListener('pagehide', flushOnHide)
 })
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', flushOnHide)
+  window.removeEventListener('pagehide', flushOnHide)
+})
+
+/**
+ * 页面隐藏 / 关闭前把还没推上云端的存档刷掉。
+ *
+ * 挂机游戏的进度主要靠「定时保存 + 关页时兜底」保证不丢，
+ * 少了这一步，玩家关掉页面可能丢掉最后几分钟的进度。
+ */
+function flushOnHide() {
+  if (document.visibilityState === 'hidden') void store.flushPush()
+}
 
 /** 返回：引导页是首启落地页，没有可靠的前进历史，直接回推征页 */
 function goBack() {

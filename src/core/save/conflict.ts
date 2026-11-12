@@ -37,3 +37,21 @@ export function hasExternalUpdate(stored: SaveData | null, knownStamp: number): 
   if (!stored) return false
   return (stored.savedAt ?? 0) > knownStamp
 }
+
+/**
+ * 本地存档与云端存档，哪一份更新。
+ *
+ * 与 `hasExternalUpdate` 同一口径：**时间戳大者胜**。
+ * 相同则算本地胜（本地版本会被推上去，服务端接受等值写入）。
+ *
+ * 不做字段级合并：挂机游戏全量覆盖可接受，合并成本高收益低。
+ */
+export function pickNewer(
+  local: SaveData | null,
+  cloud: SaveData | null,
+): 'cloud' | 'local' | 'empty' {
+  if (!local && !cloud) return 'empty'
+  if (!local) return 'cloud'
+  if (!cloud) return 'local'
+  return (cloud.savedAt ?? 0) > (local.savedAt ?? 0) ? 'cloud' : 'local'
+}
