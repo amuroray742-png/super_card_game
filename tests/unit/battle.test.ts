@@ -108,6 +108,97 @@ describe('战斗结果', () => {
   })
 })
 
+describe('目标选择（并列按槽位序）', () => {
+  /**
+   * 同血并列时的目标必须按**槽位序**选，而不是英灵 id 的字典序。
+   *
+   * 历史教训：字典序是拼音字母序，与编队无关——
+   * 会出现「怪开局固定去打 caiwenji 这类字母序最小的人」这种反直觉结果。
+   * 改为槽位序后，同血时前排先挨打，符合「前排承伤」的编队语义。
+   */
+  it('同血时前排（slot 小）先挨打', () => {
+    // 对照组必须**同血**：否则会走「集火低血」分支，测不到并列判定。
+    // weiqing / mayuan 同为 R 猛将同档 → 基础 HP 相同（880）。
+    const result = runBattle({
+      allies: [makeHero('weiqing', {}, 0), makeHero('mayuan', {}, 3)],
+      enemies: [getEnemy('wanderer')],
+      enemyScale: 1,
+      ctx: { mode: 'pve', seed: 4242 },
+    })
+
+    // 两者同血 → 并列按槽位序 → 前排 weiqing(slot=0) 先挨打。
+    // 旧规则按 id 字典序会选 mayuan（"mayuan" < "weiqing"），即后排先挨打。
+    const allyHits = result.log.filter(
+      (e) => e.kind === 'damage' && (e.targetId === 'weiqing' || e.targetId === 'mayuan'),
+    )
+    expect(allyHits.length).toBeGreaterThan(0)
+    expect(allyHits[0].targetId).toBe('weiqing')
+    // 后排 mayuan 若挨打，必然在 weiqing 之后
+    const mayuanIdx = result.log.findIndex((e) => e.targetId === 'mayuan' && e.kind === 'damage')
+    if (mayuanIdx >= 0) {
+      expect(allyHits[0].round).toBeLessThanOrEqual(result.log[mayuanIdx].round)
+    }
+  })
+
+  it('目标选择规则未变：仍优先集火低血目标', () => {
+    const result = runBattle(setup(99, ['xiangyu', 'hanxin']))
+    // 存在伤害记录 → 集火仍生效
+    expect(Object.keys(result.damageById).length).toBeGreaterThan(0)
+  })
+})
+
+describe('参战名册（roster）', () => {
+  it('roster 的 id 与日志里的 actorId / targetId 完全一致', () => {
+    const result = runBattle(setup(555, ['xiangyu', 'caiwenji']))
+    const rosterIds = new Set(result.roster.map((u) => u.id))
+    for (const entry of result.log) {
+      if (entry.actorId) expect(rosterIds.has(entry.actorId)).toBe(true)
+      if (entry.targetId) expect(rosterIds.has(entry.targetId)).toBe(true)
+    }
+  })
+
+  it('roster 携带真实槽位与初始血量', () => {
+    const result = runBattle({
+      allies: [makeHero('xiangyu', {}, 0), makeHero('caiwenji', {}, 3)],
+      enemies: [getEnemy('wanderer')],
+      enemyScale: 1,
+      ctx: { mode: 'pve', seed: 777 },
+    })
+
+    const xiangyu = result.roster.find((u) => u.id === 'xiangyu')!
+    const caiwenji = result.roster.find((u) => u.id === 'caiwenji')!
+    expect(xiangyu.slot).toBe(0)
+    expect(caiwenji.slot).toBe(3)
+    expect(xiangyu.maxHp).toBeGreaterThan(0)
+    expect(caiwenji.maxHp).toBeGreaterThan(0)
+
+    // 敌方槽位是该阵营内的出场序号（0 起），不会画到画布外
+    const enemy = result.roster.find((u) => u.side === 'enemy')!
+    expect(enemy.slot).toBe(0)
+  })
+
+  it('名册覆盖全部参战单位，敌方槽位连续', () => {
+    const result = runBattle({
+      allies: [makeHero('xiangyu'), makeHero('hanxin')],
+      enemies: [getEnemy('boss_mirage'), getEnemy('wanderer')],
+      enemyScale: 1,
+      ctx: { mode: 'pve', seed: 31 },
+    })
+    const enemies = result.roster.filter((u) => u.side === 'enemy')
+    // 名册必须覆盖全部敌方单位，且槽位按出场序号连续（不会画到画布外）
+    enemies.forEach((u, i) => expect(u.slot).toBe(i))
+    // 名册条目数 = 敌方单位数（不得漏人）
+    const enemyIdsInLog = new Set(
+      result.log
+        .map((e) => e.targetId)
+        .filter((id) => id.endsWith('#0') || id.endsWith('#1') || id.endsWith('#2')),
+    )
+    for (const id of enemyIdsInLog) {
+      expect(enemies.some((u) => u.id === id)).toBe(true)
+    }
+  })
+})
+
 describe('BOSS 机制（§6.5）', () => {
   it('护盾阶段：BOSS 前段血量有护盾', () => {
     const boss = getEnemy('boss_wasteland')

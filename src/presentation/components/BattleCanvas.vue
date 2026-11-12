@@ -19,7 +19,9 @@ const playing = ref(false)
 const logIndex = ref(0)
 
 /** 参与战斗的单位：id → 展示信息 */
-const units = ref<Record<string, { name: string; side: 'ally' | 'enemy'; hp: number; maxHp: number }>>({})
+const units = ref<
+  Record<string, { name: string; side: 'ally' | 'enemy'; hp: number; maxHp: number; slot: number }>
+>({})
 
 let raf = 0
 let lastTs = 0
@@ -27,32 +29,77 @@ let acc = 0
 
 const FRAME_MS = 320
 
+/**
+ * 同步画布尺寸与设备像素比。
+ *
+ * ⚠ 顺序不能反：给 `el.width` / `el.height` 赋值会**重置 2D 上下文的变换矩阵**，
+ * 所以 `setTransform` 必须在尺寸赋值**之后**、且 `ctx` 已拿到时执行。
+ * 历史教训：原先 `onMounted` 里先调 `resize()`（此时 `ctx.value` 还是 null，
+ * 变换没设上）才赋值 ctx → 高分屏上整个战斗场景被画进 2x 缓冲的左上角，
+ * 整场战斗缩成一半大小挤在角落。
+ */
 function resize() {
   const el = canvas.value
   if (!el) return
+  const c = ctx.value ?? el.getContext('2d')
+  if (!c) return
+  ctx.value = c
   const dpr = Math.min(2, window.devicePixelRatio || 1)
   const rect = el.getBoundingClientRect()
   el.width = Math.max(1, Math.floor(rect.width * dpr))
   el.height = Math.max(1, Math.floor(rect.height * dpr))
-  const c = ctx.value
-  if (c) c.setTransform(dpr, 0, 0, dpr, 0, 0)
+  // 尺寸赋值会重置变换，必须重新设置
+  c.setTransform(dpr, 0, 0, dpr, 0, 0)
 }
 
-function slotOf(id: string): { side: 'ally' | 'enemy'; idx: number } {
-  const u = units.value[id]
-  const idx = Math.max(0, Object.keys(units.value).indexOf(id))
-  return { side: u?.side ?? 'ally', idx }
+/**
+ * 由战斗结果的名册初始化单位。
+ *
+ * ⚠ 单位 id / 槽位 / 初始血量**全部来自 core 的 `roster`**，
+ * 表现层不得自行拼接（AGENTS.md 铁律 #8）：
+ * 自行拼 id 会与日志里的 actorId / targetId 对不上，血条就永远不变。
+ */
+function initUnits() {
+  const map: Record<string, { name: string; side: 'ally' | 'enemy'; hp: number; maxHp: number; slot: number }> = {}
+  for (const u of props.battle?.roster ?? []) {
+    map[u.id] = {
+      name: u.name,
+      side: u.side,
+      hp: u.maxHp,
+      maxHp: u.maxHp,
+      slot: u.slot,
+    }
+  }
+  units.value = map
 }
 
-/** 单位站位：左侧 3 个前排 + 3 个后排，右侧镜像 */
+/**
+ * 单位站位：每侧 3 行纵列 × 2 列纵深，**前排朝敌、后排在后**。
+ *
+ * 槽位约定：
+ * - 我方 0-2 = 前排（近战位），3-5 = 后排（远程位）
+ * - 敌方 = 该阵营内的出场序号（0 起）
+ *
+ *   - 纵向 row = slot % 3（同一纵列里三个位从上到下）
+ *   - 纵深 col = floor(slot / 3)：0 = 前排，1 = 后排
+ *
+ * 敌人在右侧（x 更大），所以我方**前排取更大的 x**（靠近敌人）、
+ * 后排取更小的 x；敌方镜像（col 0 取更小的 x，靠近我方）。
+ *
+ * ⚠ 必须用**真实编队槽位号**：队伍会跳过空槽位，
+ * 用「队伍里第几个」会把后排的人画到前排去。
+ */
 function positionOf(id: string): { x: number; y: number } {
-  const { side, idx } = slotOf(id)
+  const u = units.value[id]
+  const side = u?.side ?? 'ally'
+  const slot = u?.slot ?? 0
   const w = canvas.value?.clientWidth ?? 360
   const h = canvas.value?.clientHeight ?? 220
-  const row = idx % 3
-  const col = Math.floor(idx / 3) // 0=前排 1=后排
-  const x = side === 'ally' ? w * 0.16 + col * w * 0.1 : w * 0.84 - col * w * 0.1
-  const y = h * 0.34 + row * h * 0.2
+  const row = slot % 3
+  const col = Math.floor(slot / 3) // 0=前排 1=后排
+  // 前排与后排的横向间距要大于单位直径（半径 20 → 直径 40），否则两列会重叠
+  const x = side === 'ally' ? w * 0.32 - col * w * 0.18 : w * 0.68 + col * w * 0.18
+  const y = h * 0.32 + row * h * 0.2
   return { x, y }
 }
 
@@ -168,7 +215,7 @@ function step(ts: number) {
 
 function replay() {
   if (!props.battle) return
-  for (const u of Object.values(units.value)) u.hp = u.maxHp
+  initUnits()
   logIndex.value = 0
   playing.value = true
   lastTs = 0
@@ -176,42 +223,46 @@ function replay() {
 
 function skipToEnd() {
   if (!props.battle) return
+  initUnits()
   for (const entry of props.battle.log) applyLog(entry)
   logIndex.value = props.battle.log.length
   playing.value = false
   draw()
 }
 
-/** 由父组件注入参战单位信息 */
-function setUnits(list: Record<string, { name: string; side: 'ally' | 'enemy'; hp: number; maxHp: number }>) {
-  units.value = list
-  draw()
-}
-
-defineExpose({ replay, skipToEnd, setUnits })
+defineExpose({ replay, skipToEnd })
 
 watch(
   () => props.battle,
   (b) => {
     if (b) {
+      initUnits()
       logIndex.value = 0
       playing.value = false
       draw()
     }
   },
+  { immediate: true },
 )
 
 onMounted(() => {
-  resize()
+  // ⚠ 顺序：先拿 ctx，再 resize（resize 会按 DPR 设置变换矩阵），最后重绘
   ctx.value = canvas.value?.getContext('2d') ?? null
+  resize()
   draw()
   raf = requestAnimationFrame(step)
-  window.addEventListener('resize', resize)
+  window.addEventListener('resize', handleResize)
 })
+
+/** 窗口尺寸变化：改画布尺寸会清空画布，必须重绘 */
+function handleResize() {
+  resize()
+  draw()
+}
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
-  window.removeEventListener('resize', resize)
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 

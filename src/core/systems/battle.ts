@@ -11,6 +11,7 @@ import type {
   BattleLogEntry,
   BattleResult,
   BattleUnit,
+  BattleUnitRosterEntry,
   Element,
   EnemyDef,
   FinalStats,
@@ -55,7 +56,7 @@ function scaleEnemyStats(def: EnemyDef, scale: number): FinalStats {
 }
 
 function buildAllyUnits(heroes: HeroRuntime[], ctx: BattleContext): BattleUnit[] {
-  return heroes.map((hero, i) => {
+  return heroes.map((hero) => {
     const stats = resolveStats(hero, ctx, {
       passives: getHeroPassiveMods(hero),
       setMods: getHeroSetMods(hero),
@@ -63,7 +64,8 @@ function buildAllyUnits(heroes: HeroRuntime[], ctx: BattleContext): BattleUnit[]
     return {
       id: hero.def.id,
       side: 'ally' as const,
-      slot: i,
+      // 真实编队槽位号（0-2 前排 / 3-5 后排）
+      slot: hero.slot,
       name: hero.def.name,
       element: hero.def.element,
       role: hero.def.role,
@@ -268,7 +270,44 @@ export function simulateBattle(
     healById,
     mvpId,
     survivors: all.filter((u) => u.side === 'ally' && u.alive).map((u) => u.id),
+    roster: buildRoster(allies, all),
   }
+}
+
+/**
+ * 参战名册（回放渲染用）。
+ *
+ * id 直接取 BattleUnit.id，与日志里的 actorId / targetId 完全一致——
+ * 表现层若自行拼接 id（如敌人用 `def.id` 而战斗用 `def.id#0`），
+ * 就会查不到单位，血条永远不变。
+ *
+ * 敌方槽位按**该阵营内的出场序号**重排（0 起）：
+ * 战斗内部的 slot 是全局序号（敌方带 offset，召唤怪还会更大），
+ * 拿它当画面行号会让怪画到画布外。
+ */
+function buildRoster(allies: BattleUnit[], all: BattleUnit[]): BattleUnitRosterEntry[] {
+  const enemyOrder = new Map<string, number>()
+  let n = 0
+  for (const u of all) {
+    if (u.side !== 'enemy') continue
+    enemyOrder.set(u.id, n++)
+  }
+
+  const entries: BattleUnitRosterEntry[] = []
+  for (const u of allies) {
+    entries.push({ id: u.id, side: 'ally', slot: u.slot, name: u.name, maxHp: u.maxHp })
+  }
+  for (const u of all) {
+    if (u.side !== 'enemy') continue
+    entries.push({
+      id: u.id,
+      side: 'enemy',
+      slot: enemyOrder.get(u.id) ?? 0,
+      name: u.name,
+      maxHp: u.maxHp,
+    })
+  }
+  return entries
 }
 
 // ─────────────────────────── 技能选择与强度 ───────────────────────────
@@ -490,13 +529,23 @@ function selectTargets(
     case 'debuff':
       if (effect.type === 'damage' && source.skills.length > 0) {
         // 单体伤害：优先低血目标（聚焦集火）
-        const sorted = [...enemies].sort((a, b) => a.hp - b.hp || a.id.localeCompare(b.id))
+        //
+        // 并列（血量相同）时按**槽位序**排，不用 id 字典序：
+        // 字典序是英灵 id 的拼音字母序，与编队无关，会出现
+        // 「怪开局固定去打 caiwenji 这类字母序最小的人」这种反直觉结果。
+        // 按槽位排 → 同血时前排先挨打，符合「前排承伤」的编队语义。
+        const sorted = [...enemies].sort(
+          (a, b) => a.hp - b.hp || a.slot - b.slot || a.id.localeCompare(b.id),
+        )
         return sorted.slice(0, 1)
       }
       return enemies
     case 'heal':
     case 'shield': {
-      const sorted = [...allies].sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp || a.id.localeCompare(b.id))
+      const sorted = [...allies].sort(
+        (a, b) =>
+          a.hp / a.maxHp - b.hp / b.maxHp || a.slot - b.slot || a.id.localeCompare(b.id),
+      )
       return sorted.slice(0, 1)
     }
     case 'buff':

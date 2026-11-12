@@ -58,21 +58,8 @@ function fight() {
   })
   battle.value = result
   showCanvas.value = true
-  // 回放单位信息
+  // 回放单位信息由 core 的 roster 产出，画布自行同步
   requestAnimationFrame(() => {
-    const units: Record<string, { name: string; side: 'ally' | 'enemy'; hp: number; maxHp: number }> = {}
-    for (const hero of store.team) {
-      units[hero.def.id] = {
-        name: hero.def.name,
-        side: 'ally',
-        hp: 1,
-        maxHp: 1,
-      }
-    }
-    for (const enemy of enemies) {
-      units[enemy.id] = { name: enemy.name, side: 'enemy', hp: 1, maxHp: 1 }
-    }
-    canvasRef.value?.setUnits(units)
     canvasRef.value?.replay()
   })
 }

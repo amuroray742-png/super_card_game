@@ -9,21 +9,27 @@ import '../../src/core/config/relics.ts'
 export function makeHero(
   id: string,
   overrides: Partial<HeroState> = {},
+  slot = 0,
 ): HeroRuntime {
   const def = HERO_INDEX.get(id)
   if (!def) throw new Error(`未知英灵：${id}`)
   const base = createHeroState(id, 0)
   const state: HeroState = { ...base, ...overrides }
   if (overrides.skillLevels) state.skillLevels = [...overrides.skillLevels]
-  return { def, state, relics: [] }
+  return { def, state, relics: [], slot }
 }
 
-/** 构造一支队伍 */
+/**
+ * 构造一支队伍。
+ *
+ * slot 按顺序分配（0-2 前排 / 3-5 后排），
+ * 便于测试「同血时前排先挨打」这类与站位相关的规则。
+ */
 export function makeTeam(
   ids: string[],
   overrides: Partial<HeroState> = {},
 ): HeroRuntime[] {
-  return ids.map((id) => makeHero(id, overrides))
+  return ids.map((id, i) => makeHero(id, overrides, i))
 }
 
 /** 满养成英灵（240 级 / 6★ / 满技能 / 6 件满强化遗物） */

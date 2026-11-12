@@ -161,6 +161,8 @@ export function buildArenaUnits(
       def,
       state: { id: heroId, level: 1, exp: 0, star, skillLevels, shards: 0, coreAwakened: false, obtainedAt: 0 },
       relics: [],
+      // 竞技快照是 6 槽定长数组，i 即真实槽位号（与 BattleUnit.slot 对齐）
+      slot: i,
     }
 
     const stats = resolveStats(runtime, ctx, { passives, setMods })
@@ -235,6 +237,7 @@ export function resolveArenaMatch(input: {
               obtainedAt: 0,
             },
             relics: [],
+            slot: i,
           }
         : null,
     ),

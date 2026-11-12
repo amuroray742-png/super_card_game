@@ -146,6 +146,17 @@ export interface HeroRuntime {
   state: HeroState
   /** 6 个遗物槽，与部位对应 */
   relics: (RelicInstance | null)[]
+  /**
+   * 编队槽位号（0-5）：**0-2 = 前排（近战位），3-5 = 后排（远程位）**。
+   *
+   * 这不是装饰字段，两处都依赖它：
+   * - 战斗目标选择的并列判定（并列时按槽位序 → 前排先挨打）
+   * - 战斗回放的站位（决定谁画在前、谁画在后）
+   *
+   * ⚠ 必须是**真实槽位号**，不能用「队伍里的第几个」。
+   * 队伍会跳过空槽位，用紧凑序号会让后排的人被当成前排。
+   */
+  slot: number
 }
 
 // ─────────────────────────── 遗物 ───────────────────────────
@@ -393,6 +404,30 @@ export interface BattleResult {
   healById: Record<string, number>
   mvpId: string | null
   survivors: string[]
+  /**
+   * 参战名单（回放渲染用）。
+   *
+   * ⚠ `id` 必须与 `log` 里的 `actorId` / `targetId` **完全一致**，
+   * 否则表现层查不到单位，血条不会变化。
+   *
+   * 由 core 产出，表现层不得自行拼接单位 id（AGENTS.md 铁律 #8）。
+   */
+  roster: BattleUnitRosterEntry[]
+}
+
+/** 参战单位名册条目 */
+export interface BattleUnitRosterEntry {
+  id: string
+  side: 'ally' | 'enemy'
+  /**
+   * 站位槽位号：
+   * - 我方 = **真实编队槽位**（0-2 前排 / 3-5 后排）
+   * - 敌方 = 该阵营内的出场序号（0 起）
+   */
+  slot: number
+  name: string
+  /** 初始最大生命（血条分母） */
+  maxHp: number
 }
 
 // ─────────────────────────── 掉落 ───────────────────────────

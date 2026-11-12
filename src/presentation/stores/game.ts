@@ -359,7 +359,8 @@ export const useGameStore = defineStore('game', () => {
   /** 当前编队的运行时对象 */
   const team = computed<HeroRuntime[]>(() => {
     const out: HeroRuntime[] = []
-    for (const id of save.value.team.slots) {
+    for (let slot = 0; slot < save.value.team.slots.length; slot++) {
+      const id = save.value.team.slots[slot]
       if (!id) continue
       const def = HERO_INDEX.get(id)
       const state = heroIndex.value.get(id)
@@ -368,6 +369,8 @@ export const useGameStore = defineStore('game', () => {
         def,
         state,
         relics: equippedMap.value.get(id) ?? new Array(RELIC_SLOT_COUNT).fill(null),
+        // 真实编队槽位号（0-2 前排 / 3-5 后排），不能用紧凑序号
+        slot,
       })
     }
     return out

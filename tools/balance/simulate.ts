@@ -12,7 +12,7 @@ import { STAGE } from '../../src/core/config/economy.ts'
 import { computePower, resolveStats } from '../../src/core/systems/stats.ts'
 import { getHeroPassiveMods } from '../../src/core/systems/growth.ts'
 import { getHeroSetMods } from '../../src/core/systems/relic.ts'
-import { getTeamPower, getBondMods } from '../../src/core/systems/team.ts'
+import { getTeamPower, getBondMods, preferredSlotForRole } from '../../src/core/systems/team.ts'
 import { generateRelic } from '../../src/core/systems/relic.ts'
 import { Rng } from '../../src/core/rng.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
@@ -31,7 +31,19 @@ function buildTeam(
 ): HeroRuntime[] {
   const rng = new Rng(20261110)
   const roster = HEROES.filter((h) => h.rarity === 'SSR').slice(0, 6)
-  return roster.map((def) => {
+  // 按定位排阵：猛将 / 统帅在前排，谋士 / 医者 / 器者在后排
+  // —— 目标选择按槽位序并列判定，前排先挨打，站位会直接影响模拟结果，
+  //    所以模拟用的阵型必须和玩家实际会摆的一致。
+  //
+  // 前排占 slot 0-2、后排占 slot 3-5（与 FRONT_SLOTS 一致），
+  // 前排不足 3 人时由后排补位——这正是玩家在编队页的实际摆法。
+  const front = roster.filter((h) => preferredSlotForRole(h.role) === 'front')
+  const back = roster.filter((h) => preferredSlotForRole(h.role) === 'back')
+  const frontLine = [...front, ...back].slice(0, 3)
+  const backLine = [...back, ...front].filter((h) => !frontLine.includes(h)).slice(0, 3)
+  const ordered = [...frontLine, ...backLine]
+
+  return ordered.map((def, slot) => {
     const state: HeroState = {
       id: def.id,
       level,
@@ -47,7 +59,7 @@ function buildTeam(
       const relicDef = `${setId}_${(i % 5) + 1}`
       return generateRelic(relicDef, rng, relicLevel)
     })
-    return { def, state, relics }
+    return { def, state, relics, slot }
   })
 }
 
