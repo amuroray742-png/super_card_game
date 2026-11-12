@@ -30,6 +30,7 @@
     "src/**/*.ts",
     "src/**/*.d.ts",
     "src/**/*.vue",
+    "server/**/*.ts",
     "tests/**/*.ts",
     "tools/**/*.ts",
     "vite.config.ts",

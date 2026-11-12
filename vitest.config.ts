@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/unit/**/*.test.ts'],
+    setupFiles: ['tests/setup/node-warnings.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/core/**/*.ts'],

@@ -7,6 +7,8 @@ test-results/
 playwright-report/
 # 卡面流水线的中间产物（回执、批次日志、一次性脚本）。** 兼容误建的嵌套路径
 **/artgen/out/
+# 服务端 SQLite 数据文件（含玩家账号与云存档，绝不入库）
+server/data/
 *.local
 .DS_Store
 .vscode/*

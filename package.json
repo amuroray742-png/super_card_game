@@ -20,15 +20,21 @@
     "art:placeholder": "tsx tools/placeholder/generate.ts",
     "art:transcode": "tsx tools/artgen/transcode.ts",
     "art:capture": "tsx tools/capture/screenshot.ts",
+    "server:dev": "node --watch --no-warnings server/src/index.ts",
+    "server:start": "node --no-warnings server/src/index.ts",
     "check": "npm run validate:config && npm run scan:forbidden && npm run test && npm run build"
   },
   "dependencies": {
+    "@fastify/cors": "^11.4.1",
+    "fastify": "^5.12.8",
+    "jsonwebtoken": "^9.0.3",
     "pinia": "^2.2.6",
     "vue": "^3.5.13",
     "vue-router": "^4.4.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.2",
     "@vitejs/plugin-vue": "^6.0.10",
     "sharp": "^0.35.5",
