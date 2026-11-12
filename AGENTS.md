@@ -115,7 +115,8 @@ tests/e2e/      Playwright 端到端（起真实后端 + 静态预览）
 ## 常用命令
 
 ```bash
-npm run dev              # 开发服务器
+npm run dev              # 开发服务器（**只起前端**，登录系统还需要后端）
+npm run dev:all          # 前端 + 后端一起起（开发推荐；任一退出另一个一并停）
 npm test                 # 单元测试
 npm run build            # 类型检查 + 生产构建
 npm run check            # 配置校验 + 禁用词扫描 + 单测 + 构建（提交前跑这个）
@@ -137,6 +138,9 @@ npm run server:start     # 后端生产模式
 > **生产环境必须设置 `SGW_JWT_SECRET`**，否则进程启动即退出（重置密钥会让所有会话失效）。
 > 前端默认连 `http://127.0.0.1:8787`；可用环境变量 `VITE_API_BASE` 或
 > 设置页里的「服务地址」覆盖（写入 `localStorage['sgw.apiBase']`，优先级最高）。
+>
+> **开发要两个进程**：只跑 `npm run dev`（前端）时，登录页会报「无法连接服务器」——
+> 这是登录系统引入真实后端后最容易踩的坑。用 `npm run dev:all` 一次拉起前后端。
 >
 > **端到端**：`npm run test:e2e` 会自动起两个服务——真实后端（临时 SQLite 库，
 > 端口 8790）与静态预览（端口 4173），用例走完整注册 → 登录 → 云存档链路。

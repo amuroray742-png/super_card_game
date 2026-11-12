@@ -48,7 +48,8 @@ artifacts/         设计基线（plan.md 19 章）与美术规范（art-style.m
 
 ```bash
 npm install
-npm run dev              # 开发服务器
+npm run dev:all           # 前端 + 后端一起起（推荐，见下方说明）
+npm run dev              # 只起前端开发服务器
 npm run check            # 配置校验 + 禁用词扫描 + 单测 + 构建（提交前跑这个）
 npm test                 # Vitest 单测
 npm run build            # 类型检查 + 生产构建
@@ -60,6 +61,10 @@ npm run scan:forbidden   # 禁用词扫描
 npm run art:transcode    # 卡面 JPEG → WebP 转码
 npm run art:capture      # 界面截图（只允许指向隔离 origin）
 ```
+
+> **登录系统引入真实后端后，开发需要两个进程**：只跑 `npm run dev`（前端）的话，
+> 登录页会提示「无法连接服务器」。用 `npm run dev:all` 一次拉起前后端，
+> 任一进程退出另一个会一并停止。单独起后端用 `npm run server:dev`。
 
 ## 协作约定
 
