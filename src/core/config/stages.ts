@@ -2,7 +2,8 @@
  * 章节与关卡（§5.8 / §6.4）。
  *
  * 310 关 = 10 章 × 31 关（第 31 关为章 BOSS）。
- * 关卡门槛 E(c,i) = BASE × CHAPTER_GROWTH^(章序-1) × IN_CHAPTER_GROWTH^(关序-1)，章末 BOSS 再 × BOSS_MULTIPLIER。
+ * 关卡难度由 `STAGE.SCALE_ANCHORS`（逐章锚点，真实难度）与
+ * `STAGE.POWER_ANCHORS`（逐章锚点，战力门槛）两条曲线决定，详见 economy.ts。
  * 章主题通过**环境氛围**表达，不指向任何真实历史人物或族群。
  */
 import type { ChapterDef, StageDef } from '../model/types.ts'
@@ -116,24 +117,38 @@ const CHAPTER_SPECS: ChapterSpec[] = [
 /** 每章总关卡数（30 普通 + 1 BOSS） */
 export const STAGES_PER_CHAPTER = STAGE.STAGES_PER_CHAPTER + 1
 
-/** 关卡战力需求（§5.8）—— 单调递增，章边界连续 */
-export function stagePowerRequired(chapter: number, index: number, isBoss: boolean): number {
-  const base =
-    STAGE.BASE_POWER *
-    Math.pow(STAGE.CHAPTER_GROWTH, chapter - 1) *
-    Math.pow(STAGE.IN_CHAPTER_GROWTH, index - 1)
-  return Math.round(isBoss ? base * STAGE.BOSS_MULTIPLIER : base)
+/**
+ * 敌人属性缩放倍率（**真实难度曲线**）。
+ *
+ * 每章首关用该章锚点，章内 30 个普通关等比铺开到 `IN_CHAPTER_SPAN`，
+ * 章末 BOSS 再乘 `BOSS_MULTIPLIER`。
+ * 全曲线严格递增（章内递增 + 章边界由锚点比 ≥ 1.30 保证）。
+ */
+export function stageEnemyScale(chapter: number, index: number, isBoss: boolean): number {
+  const step = Math.pow(STAGE.IN_CHAPTER_SPAN, 1 / STAGE.STAGES_PER_CHAPTER)
+  const base = STAGE.SCALE_ANCHORS[chapter - 1] * Math.pow(step, index - 1)
+  return isBoss ? base * STAGE.BOSS_MULTIPLIER : base
 }
 
 /**
- * 敌人属性缩放倍率。
- * 与关卡战力需求同曲线，使"战力门槛"与"敌人实际强度"同步增长。
+ * 关卡战力需求（§5.8）—— **软提示 + 挂机放行线**，单调递增，章边界连续。
+ *
+ * 章内按等比曲线从「上一章 BOSS 门槛 × CHAPTER_GATE_GAP」升到本章 BOSS 门槛，
+ * 于是每章首关严格高于上一章 BOSS（章边界不倒挂）。
+ *
+ * ⚠ 门槛不是难度本身，而是「玩家推进到这里需要多少战力」的标定值；
+ *   它必须**不晚于**该关真正打得赢的时刻，否则挂机会把玩家推进到打不过的关卡。
+ *   详见 economy.ts 的 STAGE.POWER_ANCHORS 注释。
  */
-export function stageEnemyScale(chapter: number, index: number, isBoss: boolean): number {
-  const scale =
-    Math.pow(STAGE.CHAPTER_GROWTH, chapter - 1) *
-    Math.pow(STAGE.IN_CHAPTER_GROWTH, index - 1)
-  return isBoss ? scale * STAGE.BOSS_MULTIPLIER : scale
+export function stagePowerRequired(chapter: number, index: number, isBoss: boolean): number {
+  const lo =
+    chapter === 1
+      ? STAGE.FIRST_STAGE_POWER
+      : STAGE.POWER_ANCHORS[chapter - 2] * STAGE.CHAPTER_GATE_GAP
+  const hi = STAGE.POWER_ANCHORS[chapter - 1]
+  // index 1..30 为普通关（等比铺开），章末 BOSS 直接取本章 BOSS 锚点
+  const t = isBoss ? 1 : (index - 1) / STAGE.STAGES_PER_CHAPTER
+  return Math.round(lo * Math.pow(hi / lo, t))
 }
 
 function buildStages(): StageDef[] {

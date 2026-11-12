@@ -231,6 +231,7 @@ export function simulateBattle(
       decrementCooldowns(unit)
       expireStatuses(unit)
       applyRegen(unit, ctx, { round, push, damageById, healById })
+      applyEnrage(unit, { round, push, damageById, healById })
     }
 
     // 召唤机制（§6.5）：BOSS 按配置周期召唤援军
@@ -630,11 +631,16 @@ export function dealDamage(
     return
   }
 
-  // 护盾阶段：伤害先扣护盾
+  // 护盾阶段：护盾**只挂一次**（破盾后不再回复）
+  //
+  // ⚠ 盾值取配置的 `threshold`（前 X% 血量有盾），不再硬编码 0.3。
+  // ⚠ 只在首次受击时挂盾：原实现「盾空 + 血量高于阈值」就补盾，
+  //   盾被打掉后下一发伤害又补一面 → 血量永远打不下去 → BOSS 实际无敌。
   let shieldRemaining = target.shield
-  const baseShield = target.bossMechanic?.type === 'shieldPhase' ? target.maxHp * 0.3 : 0
-  if (target.bossMechanic?.type === 'shieldPhase' && target.shield <= 0 && target.hp > target.maxHp * 0.7) {
-    target.shield = baseShield
+  const shieldMech = target.bossMechanic?.type === 'shieldPhase' ? target.bossMechanic : null
+  if (shieldMech && !target.shieldPhaseUsed && target.hp > target.maxHp * shieldMech.threshold) {
+    target.shield = target.maxHp * shieldMech.threshold
+    target.shieldPhaseUsed = true
     shieldRemaining = target.shield
   }
 
@@ -774,6 +780,39 @@ function applyRegen(unit: BattleUnit, ctx: BattleContext, hooks: EffectHooks) {
   const before = unit.hp
   unit.hp = Math.min(unit.maxHp, unit.hp + amount)
   hooks.healById[unit.id] = (hooks.healById[unit.id] ?? 0) + (unit.hp - before)
+}
+
+/**
+ * 狂暴阶段（§6.5）：血量掉到阈值以下后攻击提升。
+ *
+ * ⚠ 历史教训：`BossMechanic.enrage` 配在雷髓之主 / 沉渊之瞳身上，
+ *   但战斗代码**从未读取过这个分支**——机制完全空转，
+ *   两个 BOSS 实际是「没有狂暴的普通 BOSS」。
+ */
+function applyEnrage(unit: BattleUnit, hooks: EffectHooks) {
+  const mech = unit.bossMechanic
+  if (!mech || mech.type !== 'enrage' || !unit.alive) return
+  if (unit.hp > unit.maxHp * mech.threshold) return
+  // 只在跨过阈值的那一刻挂一次（addStatus 本身幂等，这里用状态判定避免重复日志）
+  const already = unit.statuses.some(
+    (s) => s.kind === 'buff' && s.stat === 'atk' && s.sourceId === unit.id,
+  )
+  if (already) return
+  addStatus(unit, {
+    kind: 'buff',
+    stat: 'atk',
+    value: mech.atkBonus,
+    turns: BATTLE.MAX_ROUNDS,
+    sourceId: unit.id,
+  })
+  hooks.push({
+    round: hooks.round,
+    kind: 'buff',
+    actorId: unit.id,
+    targetId: unit.id,
+    amount: mech.atkBonus,
+    text: `${unit.name} 进入狂暴状态，攻击提升 ${Math.round(mech.atkBonus * 100)}%`,
+  })
 }
 
 // ─────────────────────────── 敌人模板索引 ───────────────────────────

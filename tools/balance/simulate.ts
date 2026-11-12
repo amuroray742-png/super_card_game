@@ -112,10 +112,15 @@ console.log('  关卡区间        战力门槛        章节倍率')
 for (let chapter = 1; chapter <= STAGE.CHAPTERS; chapter++) {
   const first = STAGES.find((s) => s.chapter === chapter && s.index === 1)!
   const last = STAGES.find((s) => s.chapter === chapter && s.isBoss)!
+  // 章节倍率 = 本章 BOSS 门槛 / 上一章 BOSS 门槛（逐章锚点，不再是统一指数）
+  const ratio =
+    chapter === 1
+      ? last.powerRequired / first.powerRequired
+      : last.powerRequired / STAGES.find((s) => s.chapter === chapter - 1 && s.isBoss)!.powerRequired
   console.log(
     `  第${String(chapter).padStart(2)}章 1-${String(last.index).padStart(2)}   ` +
       `${fmt(first.powerRequired).padStart(8)} → ${fmt(last.powerRequired).padStart(8)}   ` +
-      `×${STAGE.CHAPTER_GROWTH}`,
+      `×${ratio.toFixed(2)}`,
   )
 }
 

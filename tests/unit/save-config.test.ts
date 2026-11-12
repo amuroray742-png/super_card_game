@@ -11,7 +11,9 @@ import { ENEMIES } from '../../src/core/config/enemies.ts'
 import { POOLS } from '../../src/core/config/pools.ts'
 import { BONDS } from '../../src/core/config/bonds.ts'
 import { BASE_RATES, GACHA, STAGE } from '../../src/core/config/economy.ts'
+import { getTeamPower } from '../../src/core/systems/team.ts'
 import { ELEMENTS, ROLES } from '../../src/core/model/types.ts'
+import { maxedHero } from './helpers.ts'
 
 describe('存档结构与迁移（§12.3 铁律 #4）', () => {
   it('新存档包含全部必需字段', () => {
@@ -135,6 +137,12 @@ describe('配置校验（§15.1）', () => {
     }
   })
 
+  it('敌方缩放单调递增（难度永不倒挂）', () => {
+    for (let i = 1; i < STAGES.length; i++) {
+      expect(STAGES[i].enemyScale).toBeGreaterThan(STAGES[i - 1].enemyScale)
+    }
+  })
+
   it('抽卡基础概率之和为 100%', () => {
     const total = Object.values(BASE_RATES).reduce((a, b) => a + b, 0)
     expect(total).toBeCloseTo(100, 6)
@@ -157,20 +165,47 @@ describe('配置校验（§15.1）', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('关卡难度曲线参数与推导一致（总跨度 ≈ 2.7e5，满养成可通关末关）', () => {
-    expect(STAGE.BASE_POWER).toBe(120)
-    expect(STAGE.CHAPTER_GROWTH).toBe(3.5)
-    expect(STAGE.BOSS_MULTIPLIER).toBe(1.5)
-    expect(STAGE.IN_CHAPTER_GROWTH).toBeCloseTo(Math.pow(3.5 / 1.5, 1 / 31), 10)
-    // 310 关总跨度
-    const span = STAGES[309].powerRequired / STAGES[0].powerRequired
-    expect(span).toBeGreaterThan(1e5)
-    expect(span).toBeLessThan(1e6)
-    // 章边界严格递增：每章首关 > 上一章末关
-    for (let c = 1; c < 10; c++) {
-      const prevBoss = STAGES[c * 31 - 1].powerRequired
-      const nextFirst = STAGES[c * 31].powerRequired
-      expect(nextFirst).toBeGreaterThan(prevBoss)
+  it('关卡难度曲线：逐章锚点 + 章内等比 + 章末 BOSS 尖峰', () => {
+    // 两条曲线都是逐章锚点（不再用统一指数外推）
+    expect(STAGE.SCALE_ANCHORS).toHaveLength(STAGE.CHAPTERS)
+    expect(STAGE.POWER_ANCHORS).toHaveLength(STAGE.CHAPTERS)
+    expect(STAGE.IN_CHAPTER_SPAN).toBeCloseTo(1.087, 6)
+    expect(STAGE.BOSS_MULTIPLIER).toBeCloseTo(1.15, 6)
+    expect(STAGE.CHAPTER_GATE_GAP).toBeCloseTo(1.05, 6)
+
+    // 章内：普通关等比铺开，章末 BOSS = 锚点 × 章内总跨度
+    for (const stage of STAGES) {
+      const anchor = STAGE.SCALE_ANCHORS[stage.chapter - 1]
+      const span = STAGE.IN_CHAPTER_SPAN * STAGE.BOSS_MULTIPLIER
+      if (stage.isBoss) {
+        expect(stage.enemyScale).toBeCloseTo(anchor * span, 6)
+        expect(stage.powerRequired).toBe(STAGE.POWER_ANCHORS[stage.chapter - 1])
+      } else {
+        const step = Math.pow(STAGE.IN_CHAPTER_SPAN, 1 / STAGE.STAGES_PER_CHAPTER)
+        expect(stage.enemyScale).toBeCloseTo(anchor * Math.pow(step, stage.index - 1), 6)
+      }
     }
+
+    // 章边界严格递增：每章首关 > 上一章末关（门槛与敌方缩放都要）
+    for (let c = 1; c < 10; c++) {
+      const prevBoss = STAGES[c * 31 - 1]
+      const nextFirst = STAGES[c * 31]
+      expect(nextFirst.powerRequired).toBeGreaterThan(prevBoss.powerRequired)
+      expect(nextFirst.enemyScale).toBeGreaterThan(prevBoss.enemyScale)
+    }
+
+    // 门槛总跨度必须落在「玩家养成跨度」之内（Lv1 约 7.4×10³ → 满养成约 3.6×10⁷）
+    const span = STAGES[309].powerRequired / STAGES[0].powerRequired
+    expect(span).toBeGreaterThan(1e3)
+    expect(span).toBeLessThan(1e5)
+  })
+
+  it('满养成对末关留有 1.5× 以上余量（门槛不高于满养成战力的 2/3）', () => {
+    const maxedTeam = HEROES.filter((h) => h.rarity === 'SSR')
+      .slice(0, 6)
+      .map((def, slot) => ({ ...maxedHero(def.id), slot }))
+    const maxedPower = getTeamPower(maxedTeam, { mode: 'pve' })
+    expect(maxedPower).toBeGreaterThan(0)
+    expect(STAGES[309].powerRequired).toBeLessThanOrEqual(maxedPower / 1.5)
   })
 })

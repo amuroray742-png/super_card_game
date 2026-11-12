@@ -258,9 +258,28 @@ if (SKILL.MAX_LEVEL < SKILL.MIN_LEVEL) err('C/NUM', '技能等级区间非法')
 if (RELIC.MAX_LEVEL < RELIC.MIN_LEVEL) err('C/NUM', '遗物等级区间非法')
 if (ZONE.MAX_PCT <= 0) err('C/NUM', '乘区上限必须为正')
 
-if (STAGE.BASE_POWER <= 0) err('C/NUM', '关卡基础战力必须为正')
-if (STAGE.CHAPTER_GROWTH <= 1) err('C/NUM', '章间倍率必须 > 1')
+if (STAGE.SCALE_ANCHORS.length !== STAGE.CHAPTERS) {
+  err('C/NUM', `敌人缩放锚点数量 ${STAGE.SCALE_ANCHORS.length} 与章节数不符`)
+}
+if (STAGE.POWER_ANCHORS.length !== STAGE.CHAPTERS) {
+  err('C/NUM', `战力门槛锚点数量 ${STAGE.POWER_ANCHORS.length} 与章节数不符`)
+}
+if (STAGE.IN_CHAPTER_SPAN <= 1) err('C/NUM', '章内缩放跨度必须 > 1')
 if (STAGE.BOSS_MULTIPLIER <= 1) err('C/NUM', 'BOSS 倍率必须 > 1')
+if (STAGE.CHAPTER_GATE_GAP <= 1) err('C/NUM', '章间门槛衔接系数必须 > 1')
+if (STAGE.FIRST_STAGE_POWER <= 0) err('C/NUM', '首关门槛必须为正')
+for (const [i, anchor] of STAGE.SCALE_ANCHORS.entries()) {
+  if (anchor <= 0) err('C/NUM', `第 ${i + 1} 章敌人缩放锚点必须为正`)
+  if (i > 0 && anchor <= STAGE.SCALE_ANCHORS[i - 1]) {
+    err('C/NUM', `第 ${i + 1} 章敌人缩放锚点未高于第 ${i} 章（难度倒挂）`)
+  }
+}
+for (const [i, anchor] of STAGE.POWER_ANCHORS.entries()) {
+  if (anchor <= 0) err('C/NUM', `第 ${i + 1} 章战力门槛锚点必须为正`)
+  if (i > 0 && anchor <= STAGE.POWER_ANCHORS[i - 1]) {
+    err('C/NUM', `第 ${i + 1} 章战力门槛锚点未高于第 ${i} 章（门槛倒挂）`)
+  }
+}
 
 if (REBIRTH.PERM_BOOST_CAP < REBIRTH.PERM_BOOST_PER_ROUND) {
   err('C/NUM', '圣杯重启永久加成上限小于每轮加成')
@@ -314,6 +333,12 @@ for (let i = 1; i < STAGES.length; i++) {
   const cur = STAGES[i]
   if (cur.powerRequired <= prev.powerRequired) {
     err('D/BAL', `关卡 ${cur.id} 门槛 ${cur.powerRequired} 未高于关卡 ${prev.id} 的 ${prev.powerRequired}（难度倒挂）`)
+  }
+  if (cur.enemyScale <= prev.enemyScale) {
+    err(
+      'D/BAL',
+      `关卡 ${cur.id} 敌人缩放 ${cur.enemyScale} 未高于关卡 ${prev.id} 的 ${prev.enemyScale}（敌方难度倒挂）`,
+    )
   }
 }
 
