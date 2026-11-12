@@ -1,13 +1,19 @@
 <script setup lang="ts">
 /**
  * 应用外壳：顶部资源条 + 内容区 + 底部标签栏 + 全局提示 + 离线结算弹窗。
+ *
+ * 启动顺序由**路由守卫**兜住（见 router.ts）：
+ *   恢复会话 → 载入该账号的存档 → 首启引导劫持。
+ * 本组件只负责渲染，未登录时（登录页 / 公开合规页）走裸布局，不显示资源条与标签栏。
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from './stores/game'
+import { useAccountStore } from './stores/account'
 import { formatNumber } from './utils/format'
 
 const store = useGameStore()
+const account = useAccountStore()
 const route = useRoute()
 const router = useRouter()
 const booted = ref(false)
@@ -21,6 +27,11 @@ const TABS = [
 ]
 
 const activeTab = computed(() => (route.meta.tab as string) ?? '')
+
+/** 未登录 → 裸布局（无资源条、无标签栏） */
+const bare = computed(() => !account.isAuthenticated)
+
+const bareTitle = computed(() => (route.name === 'login' ? '登录' : '合规与概率公示'))
 
 const resources = computed(() => {
   const p = store.save.player
@@ -47,20 +58,8 @@ const offlineRewards = computed(() => {
   ].filter((x) => x.value > 0)
 })
 
-onMounted(async () => {
-  await store.load()
+onMounted(() => {
   booted.value = true
-  // 离线结算：离开超过 1 分钟才结算
-  const elapsed = (Date.now() - store.save.lastTickAt) / 1000
-  if (elapsed > 60) void store.claimOffline()
-  // 新手引导：首次进入（无英灵）且从主入口落地时，直接进入引导页。
-  // 引导是「怎么抽卡」的第一次教学，必须自动出现，不能只置一个无人读取的标记；
-  // 深链（/gacha、/compliance 等）不劫持，避免玩家被弹离想去的地方。
-  const isRootEntry = route.path === '/' || route.path === '/expedition'
-  if (isRootEntry && Object.keys(store.save.heroes).length === 0) {
-    store.guideStep = 0
-    router.replace('/guide')
-  }
 })
 
 /** 返回：引导页是首启落地页，没有可靠的前进历史，直接回推征页 */
@@ -71,55 +70,77 @@ function goBack() {
   }
   router.back()
 }
+
+/** 裸布局的返回：登录页没有前进历史，回落到登录页本身 */
+function goBackBare() {
+  if (route.path === '/login') {
+    router.replace('/login')
+    return
+  }
+  router.back()
+}
 </script>
 
 <template>
   <div class="shell">
-    <!-- 顶部资源条 -->
-    <header class="top">
-      <button class="top-back" v-if="route.meta.tab === undefined" @click="goBack">‹</button>
-      <div class="res-bar">
-        <template v-for="r in resources" :key="r.label">
-          <button v-if="r.to" class="res-item res-link" @click="router.push(r.to)">
-            {{ r.label }}<b>{{ formatNumber(r.value) }}</b>
-          </button>
-          <span v-else class="res-item">
-            {{ r.label }}<b>{{ formatNumber(r.value) }}</b>
-          </span>
-        </template>
-      </div>
-      <button class="top-extra" @click="router.push('/settings')">⋯</button>
-    </header>
+    <!-- 未登录：裸布局（登录页 / 公开合规页） -->
+    <template v-if="bare">
+      <main class="body bare-body">
+        <div class="bare-top">
+          <button v-if="route.path !== '/login'" class="bare-back" @click="goBackBare">‹</button>
+          <span class="tiny muted">{{ bareTitle }}</span>
+        </div>
+        <router-view v-if="booted" />
+      </main>
+    </template>
 
-    <!-- 内容 -->
-    <main class="body" v-if="booted">
-      <router-view v-slot="{ Component }">
-        <component :is="Component" />
-      </router-view>
-    </main>
-    <div v-else class="empty">载入中…</div>
+    <template v-else>
+      <!-- 顶部资源条 -->
+      <header class="top">
+        <button class="top-back" v-if="route.meta.tab === undefined" @click="goBack">‹</button>
+        <div class="res-bar">
+          <template v-for="r in resources" :key="r.label">
+            <button v-if="r.to" class="res-item res-link" @click="router.push(r.to)">
+              {{ r.label }}<b>{{ formatNumber(r.value) }}</b>
+            </button>
+            <span v-else class="res-item">
+              {{ r.label }}<b>{{ formatNumber(r.value) }}</b>
+            </span>
+          </template>
+        </div>
+        <button class="top-extra" @click="router.push('/settings')">⋯</button>
+      </header>
 
-    <!-- 底部标签栏 -->
-    <nav class="tabs">
-      <button
-        v-for="t in TABS"
-        :key="t.key"
-        class="tab"
-        :class="{ on: activeTab === t.key }"
-        @click="router.push(t.to)"
-      >
-        <i>{{ t.icon }}</i>
-        <span>{{ t.label }}</span>
-      </button>
-    </nav>
+      <!-- 内容 -->
+      <main class="body" v-if="booted">
+        <router-view v-slot="{ Component }">
+          <component :is="Component" />
+        </router-view>
+      </main>
+      <div v-else class="empty">载入中…</div>
+
+      <!-- 底部标签栏 -->
+      <nav class="tabs">
+        <button
+          v-for="t in TABS"
+          :key="t.key"
+          class="tab"
+          :class="{ on: activeTab === t.key }"
+          @click="router.push(t.to)"
+        >
+          <i>{{ t.icon }}</i>
+          <span>{{ t.label }}</span>
+        </button>
+      </nav>
+    </template>
 
     <!-- 全局提示 -->
     <transition name="fade">
       <div v-if="store.toast" class="toast" :class="store.toast.kind">{{ store.toast.text }}</div>
     </transition>
 
-    <!-- 离线结算 -->
-    <div v-if="store.offlineReport" class="mask" @click.self="store.offlineReport = null">
+    <!-- 离线结算（未登录时不显示：弹窗属于游戏内结算，登录页不该出现） -->
+    <div v-if="!bare && store.offlineReport" class="mask" @click.self="store.offlineReport = null">
       <div class="dialog">
         <div class="panel-title">离线推征结算</div>
         <p class="muted tiny" style="margin: 0 0 10px">
@@ -174,6 +195,28 @@ function goBack() {
   flex: 1 1 auto;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* 未登录时的裸布局（登录页 / 公开合规页） */
+.bare-body {
+  padding-bottom: 20px;
+}
+
+.bare-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 4px;
+}
+
+.bare-back {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--c-line);
+  color: var(--c-text-dim);
+  font-size: 16px;
+  line-height: 1;
 }
 
 .tabs {

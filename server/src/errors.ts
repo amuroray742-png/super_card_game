@@ -1,27 +1,13 @@
 /**
- * 统一错误码与错误类型。
+ * 统一错误类型。
  *
+ * 错误码表来自 `src/core/config/account.ts`（前后端唯一口径），本文件不再另立一份。
  * 错误体固定为 `{ error: string, message?: string }`，
- * 前端按 `error` 枚举映射中文文案（不直接展示 message）。
+ * 前端按 `error` 码映射中文文案（不直接回显 message）。
  */
-export const ERROR_CODES = {
-  /** 凭据错误（用户不存在与口令错误共用同一码，避免账号枚举） */
-  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
-  /** 用户名已被占用 */
-  USERNAME_TAKEN: 'USERNAME_TAKEN',
-  /** 参数不合法（用户名格式、口令强度、存档体积等） */
-  INVALID_PAYLOAD: 'INVALID_PAYLOAD',
-  /** 未登录 / 令牌无效 */
-  UNAUTHORIZED: 'UNAUTHORIZED',
-  /** 触发频率限制 */
-  RATE_LIMITED: 'RATE_LIMITED',
-  /** 服务端尚无该账号的存档 */
-  NO_SAVE: 'NO_SAVE',
-  /** 推送的存档比服务端旧（冲突），响应里带服务端版本 */
-  STALE_SAVE: 'STALE_SAVE',
-  /** 服务器内部错误 */
-  INTERNAL: 'INTERNAL',
-} as const
+import { ACCOUNT_ERROR_CODES } from '../../src/core/config/account.ts'
+
+export const ERROR_CODES = ACCOUNT_ERROR_CODES
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES]
 

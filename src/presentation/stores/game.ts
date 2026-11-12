@@ -62,6 +62,20 @@ export const useGameStore = defineStore('game', () => {
   const toast = ref<{ text: string; kind: 'info' | 'ok' | 'warn' } | null>(null)
   /** 新手引导步骤（-1 = 结束） */
   const guideStep = ref(-1)
+  /**
+   * 本次会话是否已经触发过首启引导。
+   *
+   * 只在内存里：玩家本次游玩不该被引导反复打断；
+   * 跨会话是否再引导由「有没有英灵」决定（没英灵 = 还没真正开始玩）。
+   */
+  const guideSeen = ref(false)
+  /**
+   * 存档是否已经载入。
+   *
+   * 路由守卫用它决定「要不要载入存档」——每次导航都载一遍既慢又会
+   * 把存档的时间戳刷掉；登出 / 换账号时由 `invalidate()` 清掉。
+   */
+  const loaded = ref(false)
   /** 战斗播放器倍速 */
   const battleSpeed = ref(1)
 
@@ -129,6 +143,26 @@ export const useGameStore = defineStore('game', () => {
       knownStamp = 0
     }
     await persist()
+    loaded.value = true
+    // 离线结算：离开超过 1 分钟才结算
+    // （放在 load 里而不是 App 的 onMounted —— 登录后进入游戏同样要结算）
+    const elapsed = (clock.now() - save.value.lastTickAt) / 1000
+    if (elapsed > 60) void claimOffline()
+  }
+
+  /**
+   * 登出 / 换账号：清掉已载入标记与内存中的存档。
+   *
+   * 不清会让上一个账号的进度短暂显示在新账号下（串号），
+   * 路由守卫在未登录时会调用本方法。
+   */
+  function invalidate() {
+    loaded.value = false
+    guideSeen.value = false
+    knownStamp = 0
+    save.value = createNewSave(clock.now())
+    // 上一个账号的离线结算报告不能带到新账号上
+    offlineReport.value = null
   }
 
   /**
@@ -682,6 +716,8 @@ export const useGameStore = defineStore('game', () => {
     offlineReport,
     toast,
     guideStep,
+    guideSeen,
+    loaded,
     battleSpeed,
     currentPoolId,
     // getters
@@ -702,6 +738,7 @@ export const useGameStore = defineStore('game', () => {
     arenaHash,
     // actions
     load,
+    invalidate,
     persist,
     reset,
     notify,

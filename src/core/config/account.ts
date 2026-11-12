@@ -2,7 +2,7 @@
  * 账号与会话相关配置 —— 前后端共用的**唯一口径**。
  *
  * 服务端（`server/`）也 import 本文件，保证「用户名规则 / 口令强度 / 令牌有效期」
- * 在前后端不会出现两套实现。
+ * 在前后端不会出现两套实现（铁律 #3 数据驱动、#4 单一数据源）。
  *
  * 例外说明：AGENTS.md 铁律 #5 要求「数值常数集中在 `core/config/economy.ts`」，
  * 那条针对的是**经济数值调参**（曲线、概率、掉落率）。账号/会话类阈值不属于
@@ -34,6 +34,53 @@ export const ACCOUNT = {
   /** 默认后端地址（前端在未配置时使用） */
   DEFAULT_API_BASE: 'http://127.0.0.1:8787',
 } as const
+
+/**
+ * 账号接口的错误码 —— 前后端共用的**唯一口径**。
+ *
+ * 服务端 `server/src/errors.ts` 直接复用本表，不另立一份。
+ * `NETWORK` 由客户端本地判定（服务端不会返回该码）。
+ */
+export const ACCOUNT_ERROR_CODES = {
+  /** 凭据错误（用户不存在与口令错误共用同一码，避免账号枚举） */
+  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+  /** 用户名已被占用 */
+  USERNAME_TAKEN: 'USERNAME_TAKEN',
+  /** 参数不合法（用户名格式、口令强度、存档体积等） */
+  INVALID_PAYLOAD: 'INVALID_PAYLOAD',
+  /** 未登录 / 令牌无效 */
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  /** 触发频率限制 */
+  RATE_LIMITED: 'RATE_LIMITED',
+  /** 服务端尚无该账号的存档 */
+  NO_SAVE: 'NO_SAVE',
+  /** 推送的存档比服务端旧（冲突），响应里带服务端版本 */
+  STALE_SAVE: 'STALE_SAVE',
+  /** 服务器内部错误 */
+  INTERNAL: 'INTERNAL',
+  /** 客户端本地判定：连不上服务器 */
+  NETWORK: 'NETWORK',
+} as const
+
+export type AccountErrorCode = (typeof ACCOUNT_ERROR_CODES)[keyof typeof ACCOUNT_ERROR_CODES]
+
+/**
+ * 错误码 → 对外文案。
+ *
+ * 前端**按码映射**展示，不直接回显后端的 message，保证同一错误在任何入口
+ * 都是同一句提示，也让对外文案有唯一出处（便于合规扫描）。
+ */
+export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
+  INVALID_CREDENTIALS: '用户名或口令不正确',
+  USERNAME_TAKEN: '该用户名已被占用',
+  INVALID_PAYLOAD: '填写的内容不符合要求',
+  UNAUTHORIZED: '登录状态已失效，请重新登录',
+  RATE_LIMITED: '尝试过于频繁，请稍后再试',
+  NO_SAVE: '云端还没有存档',
+  STALE_SAVE: '进度已在其他设备更新',
+  INTERNAL: '服务暂时不可用，请稍后再试',
+  NETWORK: '无法连接服务器，请检查网络或后端地址',
+}
 
 /** localStorage 键名（唯一口径，避免各处手写字符串） */
 export const ACCOUNT_STORAGE_KEYS = {
