@@ -38,21 +38,23 @@ async function placeHero(page: Page, slotText: string, index: number): Promise<v
   await expect(dialog).toHaveCount(0)
 }
 
+/** 阵位的 6 个槽位文案（前 3 前排 / 后 3 后排） */
+const SLOT_TEXTS = ['空位 1', '空位 2', '空位 3', '空位 4', '空位 5', '空位 6'] as const
+
 /**
- * 编好队：前排 2 人、后排 2 人。
+ * 编好队：默认前排 2 人、后排 2 人。
  *
  * ⚠ 必须编队才能推征——经验池的经验来自推征掉落。
  *   队里放的是列表首位（圣殿按稀有度降序，首位就是新手保底 SSR）。
  *   ⚠ **至少 3 人**：实测 2 人队（战力 1436）在第 1 关每轮只打 3 场就卡关，
  *     3 人队（战力 2081）才能跑满 10 场。人数不够 → 经验攒不够 → 喂经验按钮全禁用。
  */
-async function setupTeam(page: Page): Promise<void> {
+async function setupTeam(page: Page, count = 4): Promise<void> {
   await page.goto('/#/formation')
   await page.waitForLoadState('networkidle')
-  await placeHero(page, '空位 1', 0)
-  await placeHero(page, '空位 2', 1)
-  await placeHero(page, '空位 4', 2)
-  await placeHero(page, '空位 5', 3)
+  for (let i = 0; i < count; i++) {
+    await placeHero(page, SLOT_TEXTS[i], i)
+  }
 }
 
 /** 读取玩家经验池 */
@@ -62,6 +64,38 @@ async function expPoolOf(page: Page): Promise<number> {
     const save = JSON.parse(localStorage.getItem(key)!)
     return save.player.exp ?? 0
   })
+}
+
+/** 读取玩家英灵印记 */
+async function emblemsOf(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))!
+    const save = JSON.parse(localStorage.getItem(key)!)
+    return save.player.emblems ?? 0
+  })
+}
+
+/** 读取某个英灵在存档里的等级 */
+async function heroLevelOf(page: Page, heroId: string): Promise<number> {
+  return page.evaluate((id) => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))!
+    const save = JSON.parse(localStorage.getItem(key)!)
+    return save.heroes[id]?.level ?? 0
+  }, heroId)
+}
+
+/** 读取某个英灵在存档里已投入但未升级的经验 */
+async function heroExpOf(page: Page, heroId: string): Promise<number> {
+  return page.evaluate((id) => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))!
+    const save = JSON.parse(localStorage.getItem(key)!)
+    return save.heroes[id]?.exp ?? 0
+  }, heroId)
+}
+
+/** 从详情页 URL 里取英灵 id */
+function heroIdFromUrl(page: Page): string {
+  return page.url().split('/hero/')[1]?.split('?')[0]?.split('#')[0] ?? ''
 }
 
 /**
@@ -273,5 +307,86 @@ test.describe('喂经验扣玩家经验池', () => {
     await page.locator('[data-testid="feed-all"]').click()
     await expect.poll(() => expPoolOf(page), { timeout: 8_000 }).toBe(0)
     await expect(page.locator('[data-testid="feed-all"]')).toBeDisabled()
+  })
+})
+
+/**
+ * 境界突破的**完整链路**（§5.4）。
+ *
+ * 覆盖：喂经验 → 撞到境界门槛（Lv60）→ 消耗英灵印记 → 跨入新境界（Lv61）
+ * → 门槛上存着的经验立即兑现成等级。
+ *
+ * ⚠ 这条链路曾经整条断裂：`REALMS[].breakMaterial` 指向的道具 id 全项目无定义、
+ *   无掉落、无 UI，于是 `applyExp` 的硬上限把英灵卡死在 Lv60——
+ *   实测喂多少经验都不再升级（`blockedByRealm` 恒为 true）。
+ *   只测「喂经验会扣池子」守不住这个坑：卡在门槛上的英灵照样能扣池子，
+ *   但永远升不了级。必须有一条**真的走到 Lv60 并突破**的用例。
+ */
+test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 Lv61）', () => {
+  // ⚠ 这条用例要真实挂机刷经验，比其它用例慢得多
+  test.setTimeout(300_000)
+
+  test('喂到境界门槛后，消耗英灵印记突破到新境界，存量经验立即兑现', async ({ page }) => {
+    await bootLoggedIn(page)
+    await pullHeroes(page)
+    // 满编 6 人：队越强推征打得越远、经验掉得越快
+    await setupTeam(page, 6)
+
+    // 记住主角（圣殿首位 = 新手保底 SSR）
+    await page.goto('/#/temple')
+    await page.waitForLoadState('networkidle')
+    await page.locator('.hero-cell').first().click()
+    await expect(page).toHaveURL(/#\/hero\//)
+    const heroId = heroIdFromUrl(page)
+    expect(heroId).not.toBe('')
+
+    // ── 1) 挂机攒经验池 ──
+    // 升到 Lv60 单人要 7874 经验；这里攒到 1.5 万，
+    // 好让突破后有**足够的存量经验**兑现成等级（否则只跨 1 级看不出兑现）。
+    const TARGET_POOL = 15_000
+    let pool = await expPoolOf(page)
+    for (let round = 0; round < 45 && pool < TARGET_POOL; round++) {
+      await page.goto('/#/expedition')
+      await page.waitForLoadState('networkidle')
+      const before = await expPoolOf(page)
+      await page.locator('button', { hasText: '推征 10 场' }).click()
+      // 结算落盘后才涨；遇战败会中断（runIdle 遇败即停），这一轮可能白跑
+      await page.waitForTimeout(900)
+      pool = await expPoolOf(page)
+      if (pool <= before) continue
+    }
+    expect(pool, `经验池没攒到 ${TARGET_POOL}（实际 ${pool}）`).toBeGreaterThanOrEqual(TARGET_POOL)
+
+    // ── 2) 全部喂给主角 → 撞到境界门槛 Lv60 ──
+    await page.goto(`/#/hero/${heroId}`)
+    await page.waitForLoadState('networkidle')
+    await page.locator('[data-testid="feed-all"]').click()
+
+    await expect.poll(() => heroLevelOf(page, heroId), { timeout: 15_000 }).toBe(60)
+    // 经验池被扣干
+    await expect.poll(() => expPoolOf(page), { timeout: 8_000 }).toBe(0)
+    // 没升掉的经验存在英灵身上（卡在门槛上也不丢）
+    const banked = await heroExpOf(page, heroId)
+    expect(banked).toBeGreaterThan(0)
+
+    // ── 3) 境界门槛出现突破入口 ──
+    await expect(page.getByText(/已达名阶门槛/).first()).toBeVisible()
+    const breakBtn = page.locator('[data-testid="break-realm"]')
+    await expect(breakBtn).toBeVisible()
+    await expect(breakBtn).toBeEnabled()
+
+    const emblemsBefore = await emblemsOf(page)
+    expect(emblemsBefore).toBeGreaterThanOrEqual(10)
+
+    // ── 4) 突破：扣印记 + 跨入 Lv61 + 存量经验兑现 ──
+    await breakBtn.click()
+
+    await expect.poll(() => heroLevelOf(page, heroId), { timeout: 15_000 }).toBeGreaterThan(60)
+    // 印记按配置扣（名阶 10 枚）
+    await expect.poll(() => emblemsOf(page), { timeout: 8_000 }).toBe(emblemsBefore - 10)
+    // 存量经验被兑现 → 等级不止 61
+    expect(await heroLevelOf(page, heroId)).toBeGreaterThan(61)
+    // 境界显示切到名阶
+    await expect(page.locator('.stat-row').filter({ hasText: '境界' }).first()).toContainText('名阶')
   })
 })
