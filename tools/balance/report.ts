@@ -13,7 +13,7 @@
  *   2. 满养成消耗明细
  *   3. 投放 / 消耗 = 回收倍数（>1 说明主线养得起，<1 说明需要额外来源）
  */
-import { DROP_TABLES, LEVEL, SKILL, RELIC, STAR, STAGE } from '../../src/core/config/economy.ts'
+import { DROP_TABLES, LEVEL, REALMS, SKILL, RELIC, STAR, STAGE } from '../../src/core/config/economy.ts'
 import { STAGES } from '../../src/core/config/stages.ts'
 import { totalExpToReach, starUpCost } from '../../src/core/systems/growth.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
@@ -95,13 +95,26 @@ const expPerHero = totalExpToReach(LEVEL.MAX)
 
 /** 单个英灵 1★ → 6★ 所需同名碎片与印记 */
 let shardsPerHero = 0
-let emblemsPerHero = 0
+let starEmblemsPerHero = 0
 for (let star = STAR.MIN; star < STAR.MAX; star++) {
   const cost = starUpCost(star)
   if (!cost) continue
   shardsPerHero += cost.shards
-  emblemsPerHero += cost.emblems
+  starEmblemsPerHero += cost.emblems
 }
+
+/**
+ * 单个英灵三次境界突破（凡阶 → 名阶 → 圣阶 → 神阶）所需印记。
+ *
+ * ⚠ 境界突破消耗英灵印记，是继升星之后的第二大印记出口；
+ *   只算升星会让回收表高估印记余量。
+ */
+let breakEmblemsPerHero = 0
+for (const realm of REALMS) {
+  if (!realm.breakCost) continue
+  breakEmblemsPerHero += realm.breakCost.emblems
+}
+const emblemsPerHero = starEmblemsPerHero + breakEmblemsPerHero
 
 /** 单个英灵 3 个技能升满（1 → 20 级） */
 const skillLevelsPerHero = SKILL.MAX_LEVEL - SKILL.MIN_LEVEL
@@ -168,7 +181,10 @@ console.log(`  经验        ${fmt(cost.exp).padStart(12)}   （单人 ${fmt(exp
 console.log(`  银两        ${fmt(cost.silver).padStart(12)}   （技能 ${fmt(skillSilverPerHero * TEAM_SIZE)} + 遗物 ${fmt(relicSilverPerRelic * relicsInTeam)}）`)
 console.log(`  术式结晶    ${fmt(cost.skillStones).padStart(12)}   （单人 ${skillStonesPerHero} × ${TEAM_SIZE}）`)
 console.log(`  遗物强化石  ${fmt(cost.relicStones).padStart(12)}   （单件 ${relicStonesPerRelic} × ${relicsInTeam} 件）`)
-console.log(`  英灵印记    ${fmt(cost.emblems).padStart(12)}   （单人 ${emblemsPerHero} × ${TEAM_SIZE}）`)
+console.log(
+  `  英灵印记    ${fmt(cost.emblems).padStart(12)}   （单人 ${emblemsPerHero} × ${TEAM_SIZE}` +
+    ` = 升星 ${starEmblemsPerHero} + 突破 ${breakEmblemsPerHero}）`,
+)
 
 console.log('\n【回收倍数】主线 310 关投放 ÷ 满养成消耗\n')
 console.log('  资源            投放          消耗        回收倍数   判定')

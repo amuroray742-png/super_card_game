@@ -163,9 +163,14 @@ async function setupAccount(context: BrowserContext, page: Page, opts: Options):
 }
 
 /**
- * 英灵详情场景：登录 → 十连 → 圣殿点开第一个英灵。
+ * 英灵详情场景：登录 → 十连 → 编队 → 推征攒经验 → 圣殿点开第一个英灵。
  *
  * 详情页要有属性面板与提升预览，截图用于验收养成信息的可读性。
+ *
+ * ⚠ 为什么要先推征：喂经验的**唯一来源**是玩家经验池，
+ *   新号经验池是 0 → 喂经验按钮全禁用、提示「经验不足（0 / 1,000）」，
+ *   截出来的图看不到真实可用状态。
+ * ⚠ 至少编 3 人：实测 2 人队在第 1 关每轮只打 3 场就卡关，攒不到经验。
  */
 async function runHeroScenario(
   context: BrowserContext,
@@ -174,9 +179,33 @@ async function runHeroScenario(
   outPath: string,
 ): Promise<string> {
   const base = await setupAccount(context, page, opts)
+
+  // 编队（满编 6 人，保证推征打得赢）
+  await page.goto(`${base}/#/formation`, { waitUntil: 'networkidle' })
+  for (const [slotText, index] of [
+    ['空位 1', 0],
+    ['空位 2', 1],
+    ['空位 3', 2],
+    ['空位 4', 3],
+    ['空位 5', 4],
+    ['空位 6', 5],
+  ] as const) {
+    await page.locator('.slot', { hasText: slotText }).click()
+    await page.locator('.dialog .pick-row').nth(index).click()
+    await page.waitForTimeout(120)
+  }
+
+  // 推征攒经验进池子
+  await page.goto(`${base}/#/expedition`, { waitUntil: 'networkidle' })
+  for (let i = 0; i < 3; i++) {
+    await page.locator('button', { hasText: '推征 10 场' }).click()
+    await page.waitForTimeout(700)
+  }
+
   await page.goto(`${base}/#/temple`, { waitUntil: 'networkidle' })
   await page.locator('.hero-cell').first().click()
-  await page.waitForTimeout(500)
+  // 等提示条（toast 2.2s 自动消失）淡出，否则会盖住「经验不足」这类行内提示
+  await page.waitForTimeout(2600)
   await page.screenshot({ path: outPath, fullPage: opts.fullPage })
   return ''
 }

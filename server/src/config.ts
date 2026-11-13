@@ -24,6 +24,10 @@ const DEFAULT_CORS_ORIGINS = [
   'http://127.0.0.1:5173',
   'http://127.0.0.1:4173',
   'http://localhost:4173',
+  // 截图工具的隔离预览端口（tools/capture/screenshot.ts，AGENTS.md 约定用 4188）
+  // ⚠ 漏了它 → 截图场景的账号登录被 CORS 预检拦掉，页面停在登录页找不到「十连」按钮
+  'http://127.0.0.1:4188',
+  'http://localhost:4188',
 ]
 
 function argValue(argv: string[], flag: string): string | undefined {

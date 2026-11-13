@@ -8,16 +8,18 @@ import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { BONDS } from '../../core/config/bonds.ts'
-import { SKILL } from '../../core/config/economy.ts'
+import { SKILL, LEVEL } from '../../core/config/economy.ts'
 import {
   expToNext,
   starUpCost,
   applyExp,
   getHeroPassiveMods,
   skillLevelCap,
+  realmBreakCost,
+  atRealmGate,
 } from '../../core/systems/growth.ts'
 import { RELIC_DEFS, getHeroSetMods } from '../../core/systems/relic.ts'
-import { resolveStats, computePower } from '../../core/systems/stats.ts'
+import { resolveStats, computePower, getRealm, nextRealm } from '../../core/systems/stats.ts'
 import { RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { formatNumber } from '../utils/format'
 import type { RelicInstance, HeroRuntime, FinalStats } from '../../core/model/types.ts'
@@ -31,8 +33,52 @@ const def = computed(() => HERO_INDEX.get(heroId.value) ?? null)
 const state = computed(() => store.save.heroes[heroId.value] ?? null)
 const owned = computed(() => !!state.value)
 
-/** 喂经验的档位（单位：经验） */
-const EXP_FEEDS = [1000, 10000, 100000]
+/** 喂经验的档位（单位：经验）——经济数值，取自 core 配置（铁律 #5） */
+const EXP_FEEDS = LEVEL.EXP_FEED_OPTIONS
+
+/**
+ * 玩家经验池。
+ *
+ * ⚠ 喂经验的**唯一来源**——战斗 / 挂机掉落的经验进池子，喂给英灵时从池子里扣。
+ *   （原实现只加不减，等于白嫖等级。）
+ */
+const expPool = computed(() => store.save.player.exp)
+
+/** 当前境界 */
+const realmLabel = computed(() => {
+  const s = state.value
+  if (!s) return ''
+  const r = getRealm(s.level)
+  return `${r.name}（Lv${r.minLevel}-${r.maxLevel}）`
+})
+
+/**
+ * 境界门槛信息。卡在门槛（凡阶末 Lv60 / 名阶末 Lv120 / 圣阶末 Lv180）时才非空。
+ */
+const realmGate = computed(() => {
+  const s = state.value
+  if (!s) return null
+  if (!atRealmGate(s.level)) return null
+  const cost = realmBreakCost(s.level)
+  if (!cost) return null
+  const next = nextRealm(s.level)
+  const emblems = store.save.player.emblems
+  return { cost, nextName: next?.name ?? '', emblems, ok: emblems >= cost.emblems }
+})
+
+/** 喂经验的可用性与提示 */
+function feedHint(amount: number): { ok: boolean; text: string } {
+  const s = state.value
+  if (!s) return { ok: false, text: '' }
+  if (s.level >= LEVEL.MAX) return { ok: false, text: '已达最高等级' }
+  if (expPool.value < amount) {
+    return {
+      ok: false,
+      text: `经验不足（${formatNumber(expPool.value)} / ${formatNumber(amount)}）`,
+    }
+  }
+  return { ok: true, text: '' }
+}
 
 /** 升级后的下一级所需经验（用于经验条） */
 const expNeed = computed(() => (state.value ? expToNext(state.value.level) : 0))
@@ -290,6 +336,14 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
               <i :style="{ width: `${expPct}%` }"></i>
             </div>
             <div class="row-between tiny">
+              <span class="muted">经验池</span>
+              <span data-testid="exp-pool">{{ formatNumber(expPool) }}</span>
+            </div>
+            <div class="row-between tiny">
+              <span class="muted">境界</span>
+              <span>{{ realmLabel }}</span>
+            </div>
+            <div class="row-between tiny">
               <span class="muted">同名碎片</span>
               <b>{{ formatNumber(shards) }}</b>
             </div>
@@ -333,8 +387,27 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
                 +{{ starGain.gain.hp }} · 战力 +{{ formatNumber(starGain.gain.power) }}
               </span>
             </div>
-            <div v-if="levelPreviews.length === 0 && !starGain" class="tiny muted">
+            <div v-if="levelPreviews.length === 0 && !starGain && !realmGate" class="tiny muted">
               当前已无法继续提升等级或星级。
+            </div>
+          </div>
+
+          <!-- 境界门槛：卡住时给出突破入口 -->
+          <div v-if="realmGate" class="preview-box">
+            <div class="tiny warn-text">
+              已达{{ realmGate.nextName }}门槛（Lv{{ realmGate.cost.targetLevel }}）——需突破境界才能继续升级
+            </div>
+            <button
+              class="btn btn-sm btn-block"
+              style="margin-top: 6px"
+              data-testid="break-realm"
+              :disabled="!realmGate.ok"
+              @click="store.breakRealm(heroId)"
+            >
+              境界突破（英灵印记 {{ realmGate.cost.emblems }}）
+            </button>
+            <div v-if="!realmGate.ok" class="tiny warn-text" style="margin-top: 3px">
+              英灵印记不足（{{ formatNumber(realmGate.emblems) }} / {{ realmGate.cost.emblems }}）
             </div>
           </div>
 
@@ -345,11 +418,25 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
               :key="n"
               class="btn btn-sm"
               style="flex: 1; min-width: 96px"
+              :data-feed="n"
+              :disabled="!feedHint(n).ok"
               @click="store.feedExp(heroId, n)"
             >
               喂 {{ formatNumber(n) }} 经验
             </button>
           </div>
+          <div v-if="EXP_FEEDS.some((n) => !feedHint(n).ok)" class="tiny warn-text" style="margin-top: 3px">
+            {{ feedHint(EXP_FEEDS.find((n) => !feedHint(n).ok)!).text }}
+          </div>
+          <button
+            class="btn btn-sm btn-block"
+            style="margin-top: 6px"
+            data-testid="feed-all"
+            :disabled="expPool <= 0"
+            @click="store.feedExp(heroId, expPool)"
+          >
+            全部喂入（{{ formatNumber(expPool) }}）
+          </button>
           <button
             class="btn btn-sm btn-block"
             style="margin-top: 6px"

@@ -89,7 +89,8 @@ export function performRebirth(save: SaveData): RebirthPreview {
 }
 
 /**
- * 境界突破材料检查（用于 UI 提示）。
+ * 境界突破消耗检查（用于 UI 提示）。
+ * 突破消耗**英灵印记**（emblems）。
  */
 export function realmBreakRequirement(level: number) {
   return realmBreakCost(level)

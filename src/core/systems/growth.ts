@@ -45,7 +45,10 @@ export interface LevelUpResult {
 
 /**
  * 消耗经验提升等级。
- * 境界门槛：达到下一境界最低等级时停下，需玩家使用突破材料才能继续（§5.4）。
+ *
+ * 境界门槛：达到本境界上限（凡阶 Lv60 / 名阶 Lv120 / 圣阶 Lv180）时停下，
+ * 需玩家先完成**境界突破**（消耗英灵印记）才能继续（§5.4）。
+ * 停在门槛上时，已投入但没用完的经验保留在 `hero.exp`，突破后立刻兑现。
  */
 export function applyExp(hero: HeroState, expGain: number): LevelUpResult {
   let exp = hero.exp + Math.max(0, Math.floor(expGain))
@@ -77,20 +80,68 @@ export function applyExp(hero: HeroState, expGain: number): LevelUpResult {
 
 /** 境界突破：消耗材料提升境界上限 */
 export interface RealmBreakCost {
-  material: string
-  count: number
+  /** 消耗的**英灵印记**数量 */
+  emblems: number
+  /** 突破后进入的境界 id */
+  realmId: string
+  /** 突破后达到的等级（即新境界的第 1 级） */
+  targetLevel: number
 }
 
+/**
+ * 下一个境界的突破消耗；已在最高境界返回 null。
+ *
+ * ⚠ 消耗的是**英灵印记**（emblems）——通用养成资源，复用现有经济体系，
+ *   不需要为境界另造一套道具 id / 掉落表 / 图鉴。
+ */
 export function realmBreakCost(level: number): RealmBreakCost | null {
   const next = nextRealm(level)
-  if (!next || !next.breakMaterial) return null
-  return { material: next.breakMaterial, count: next.breakCount }
+  if (!next || !next.breakCost) return null
+  return { emblems: next.breakCost.emblems, realmId: next.id, targetLevel: next.minLevel }
 }
 
-/** 境界是否已解锁（等级达标 + 材料已消耗） */
+/**
+ * 是否卡在境界门槛（已到本境界上限，需要突破才能继续升级）。
+ *
+ * 境界门槛是 `applyExp` 的硬上限（`next.minLevel - 1`），所以英灵会在
+ * 凡阶末（Lv60）/ 名阶末（Lv120）/ 圣阶末（Lv180）停下，等待突破。
+ */
+export function atRealmGate(level: number): boolean {
+  const next = nextRealm(level)
+  if (!next) return false
+  return level >= next.minLevel - 1
+}
+
+/** 印记是否足够突破（且确实卡在门槛上） */
+export function canBreakRealm(level: number, emblems: number): boolean {
+  const cost = realmBreakCost(level)
+  if (!cost) return false
+  if (!atRealmGate(level)) return false
+  return emblems >= cost.emblems
+}
+
+/**
+ * 执行境界突破：等级跨入下一境界（第 1 级）。
+ *
+ * 与 `applySkillUp` / `applyStarUp` 一致，**只改英灵状态、不动资源**——
+ * 资源由表现层的 store 扣，避免两处各写一套扣费规则。
+ *
+ * 突破时英灵身上已投入但未升级的经验**不丢失**，会保留在 `hero.exp`，
+ * 下一次喂经验（或 store 主动触发结算）时立刻兑现成等级。
+ */
+export function applyRealmBreak(hero: HeroState): boolean {
+  if (!atRealmGate(hero.level)) return false
+  const next = nextRealm(hero.level)
+  if (!next) return false
+  hero.level = next.minLevel
+  return true
+}
+
+/** 境界是否已解锁（起始境界恒为已解锁，其余境界需等级跨入） */
 export function realmUnlocked(level: number): boolean {
   const realm = getRealm(level)
-  return realm.breakMaterial === null || level > realm.minLevel
+  if (realm.breakCost === null) return true
+  return level >= realm.minLevel
 }
 
 // ─────────────────────────── 星级 ───────────────────────────

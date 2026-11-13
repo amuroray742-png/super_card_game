@@ -35,7 +35,7 @@ vi.mock('../../src/platform/storage.ts', () => ({
 
 const { useGameStore } = await import('../../src/presentation/stores/game.ts')
 const { createHeroState } = await import('../../src/core/systems/growth.ts')
-const { skillUpCost, skillLevelCap } = await import('../../src/core/systems/growth.ts')
+const { skillUpCost, skillLevelCap, realmBreakCost } = await import('../../src/core/systems/growth.ts')
 const { resolveStats, computePower } = await import('../../src/core/systems/stats.ts')
 const { getHeroPassiveMods } = await import('../../src/core/systems/growth.ts')
 const { HERO_INDEX } = await import('../../src/core/config/heroes/index.ts')
@@ -113,6 +113,109 @@ describe('技能升级的资源口径', () => {
     expect(cost).not.toBeNull()
     expect(cost!.skillStones).toBe(SKILL.SKILL_STONES_PER_LEVEL)
     expect(cost!.silver).toBe(SKILL.SILVER_PER_LEVEL)
+  })
+})
+
+describe('喂经验扣经验池 + 境界突破', () => {
+  beforeEach(() => {
+    mem.clear()
+    setActivePinia(createPinia())
+  })
+
+  it('喂经验从经验池扣款，并真的提升等级', async () => {
+    const store = useGameStore()
+    await store.load()
+    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
+    store.save.player.exp = 10_000
+
+    const before = store.save.heroes[HERO_ID].level
+    await store.feedExp(HERO_ID, 1_000)
+
+    // ⚠ 原实现只加不减 → 经验池是死资源，喂经验等于白嫖等级
+    expect(store.save.player.exp).toBe(9_000)
+    expect(store.save.heroes[HERO_ID].level).toBeGreaterThan(before)
+  })
+
+  it('经验池不足时拒绝，且不扣任何资源、不升级', async () => {
+    const store = useGameStore()
+    await store.load()
+    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
+    store.save.player.exp = 500
+
+    const before = store.save.heroes[HERO_ID].level
+    await store.feedExp(HERO_ID, 1_000)
+
+    expect(store.save.player.exp).toBe(500)
+    expect(store.save.heroes[HERO_ID].level).toBe(before)
+  })
+
+  it('卡在境界门槛时经验不丢（存在英灵身上，等突破后兑现）', async () => {
+    const store = useGameStore()
+    await store.load()
+    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
+    store.save.heroes[HERO_ID].level = 60
+    store.save.player.exp = 10_000
+
+    await store.feedExp(HERO_ID, 1_000)
+
+    expect(store.save.player.exp).toBe(9_000)
+    expect(store.save.heroes[HERO_ID].level).toBe(60)
+    expect(store.save.heroes[HERO_ID].exp).toBeGreaterThan(0)
+  })
+
+  it('境界突破消耗英灵印记，并跨入新境界', async () => {
+    const store = useGameStore()
+    await store.load()
+    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
+    store.save.heroes[HERO_ID].level = 60
+    store.save.player.emblems = 100
+
+    const cost = realmBreakCost(60)!
+    await store.breakRealm(HERO_ID)
+
+    expect(store.save.player.emblems).toBe(100 - cost.emblems)
+    expect(store.save.heroes[HERO_ID].level).toBe(cost.targetLevel)
+  })
+
+  it('印记不足时拒绝突破，且不扣印记', async () => {
+    const store = useGameStore()
+    await store.load()
+    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
+    store.save.heroes[HERO_ID].level = 60
+    store.save.player.emblems = 0
+
+    await store.breakRealm(HERO_ID)
+
+    expect(store.save.heroes[HERO_ID].level).toBe(60)
+    expect(store.save.player.emblems).toBe(0)
+  })
+
+  it('未到境界门槛时不能突破', async () => {
+    const store = useGameStore()
+    await store.load()
+    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
+    store.save.heroes[HERO_ID].level = 30
+    store.save.player.emblems = 999
+
+    await store.breakRealm(HERO_ID)
+
+    expect(store.save.heroes[HERO_ID].level).toBe(30)
+    expect(store.save.player.emblems).toBe(999)
+  })
+
+  it('突破后存着的经验立刻兑现成等级', async () => {
+    const store = useGameStore()
+    await store.load()
+    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
+    store.save.heroes[HERO_ID].level = 60
+    store.save.player.exp = 10_000
+    store.save.player.emblems = 100
+
+    await store.feedExp(HERO_ID, 1_000)
+    expect(store.save.heroes[HERO_ID].level).toBe(60)
+
+    await store.breakRealm(HERO_ID)
+    expect(store.save.heroes[HERO_ID].level).toBeGreaterThan(60)
   })
 })
 

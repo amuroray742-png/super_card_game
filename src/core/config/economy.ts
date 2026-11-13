@@ -41,6 +41,13 @@ export const LEVEL = {
    * 数值挂机游戏的标准做法是让等级成长同为指数，才能与指数难度对齐。
    */
   MULT: 1.03,
+  /**
+   * 喂经验的档位（单位：经验）。
+   *
+   * ⚠ 这些是**经济数值**，不是 UI 常量——表现层必须从此处取（铁律 #5）。
+   *   最小档 1000 大致对应第 1 章 10 场推征的产出。
+   */
+  EXP_FEED_OPTIONS: [1000, 10000, 100000] as const,
 } as const
 
 /** 境界分段。每个境界给 realm 乘区一份累计加成。 */
@@ -53,9 +60,16 @@ export interface Realm {
   bonusPct: number
   /** 经验曲线基准缩放（境界间重置基准） */
   expScale: number
-  /** 突破所需材料 id（用于制造周期性目标） */
-  breakMaterial: string | null
-  breakCount: number
+  /**
+   * **进入本境界**所需的突破消耗（英灵印记）。null = 起始境界，无需突破。
+   *
+   * ⚠ 原字段是 `breakMaterial: 'realm_book_famed'` 这类**道具 id**，
+   *   但那些 id 在整个项目里没有任何定义、掉落来源或 UI——境界突破因此
+   *   从未真正实现过：实测喂经验时英灵卡死在 Lv60（`applyExp` 的硬上限是
+   *   `next.minLevel - 1`），玩家经验池喂干也升不了级。
+   *   现改为复用**已存在**的通用养成资源「英灵印记」，无需新增道具系统。
+   */
+  breakCost: { emblems: number } | null
 }
 
 /**
@@ -69,12 +83,17 @@ export interface Realm {
  * 约 87% 的总经验，末阶漫长且与关卡投放严重脱节。
  * 重新标定为 1 / 5 / 15 / 40：单人 Lv1→240 累计 ≈ 3.0×10⁷，
  * 与 6 人编队总需求 1.8×10⁸ 同关卡经验投放（4.0×10⁸）同量级。
+ *
+ * ⚠ `breakCost` 是**进入本境界**的消耗（进入名阶才付名阶的价）。
+ *   印记消耗定为 10 / 20 / 40（单人三次突破共 70 枚，6 人编队共 420 枚），
+ *   与印记总投放配套（见 tools/balance/report.ts）：
+ *   升星 1200 + 突破 420 = 1620 枚。
  */
 export const REALMS: readonly Realm[] = [
-  { id: 'mortal', name: '凡阶', minLevel: 1, maxLevel: 60, bonusPct: 0, expScale: 1, breakMaterial: null, breakCount: 0 },
-  { id: 'famed', name: '名阶', minLevel: 61, maxLevel: 120, bonusPct: 0.15, expScale: 5, breakMaterial: 'realm_book_famed', breakCount: 1 },
-  { id: 'saint', name: '圣阶', minLevel: 121, maxLevel: 180, bonusPct: 0.35, expScale: 15, breakMaterial: 'realm_book_saint', breakCount: 2 },
-  { id: 'divine', name: '神阶', minLevel: 181, maxLevel: 240, bonusPct: 0.6, expScale: 40, breakMaterial: 'realm_book_divine', breakCount: 3 },
+  { id: 'mortal', name: '凡阶', minLevel: 1, maxLevel: 60, bonusPct: 0, expScale: 1, breakCost: null },
+  { id: 'famed', name: '名阶', minLevel: 61, maxLevel: 120, bonusPct: 0.15, expScale: 5, breakCost: { emblems: 10 } },
+  { id: 'saint', name: '圣阶', minLevel: 121, maxLevel: 180, bonusPct: 0.35, expScale: 15, breakCost: { emblems: 20 } },
+  { id: 'divine', name: '神阶', minLevel: 181, maxLevel: 240, bonusPct: 0.6, expScale: 40, breakCost: { emblems: 40 } },
 ] as const
 
 /** 星级 → 基础属性倍率。重复抽卡不直接走这条路（合规 §2.1），只走印记兑换。 */
@@ -448,6 +467,11 @@ const DROP_GROWTH = 3.5
 /**
  * 每章一张普通关卡表 + 一张 BOSS 表。
  * 银两 / 经验随章节增长；进阶资源按 ADVANCE_GROWTH 增长。
+ *
+ * ⚠ 印记投放（2.5a / 4a~11a）是为**境界突破**让路的：
+ *   印记是继升星之后的第二大出口（单人 70 枚，6 人编队 420 枚），
+ *   原投放（2a / 3a~8a）扣掉突破消耗后回收率只有 0.98×——直接是缺口。
+ *   上调后回收率回到 1.2× 以上（见 tools/balance/report.ts）。
  */
 export const DROP_TABLES: Record<string, DropTableDef> = (() => {
   const tables: Record<string, DropTableDef> = {}
@@ -465,7 +489,7 @@ export const DROP_TABLES: Record<string, DropTableDef> = (() => {
         { rarity: 'R', weight: 30 },
         { rarity: 'SR', weight: 10 },
       ],
-      emblems: [0, Math.ceil(2 * a)],
+      emblems: [0, Math.ceil(2.5 * a)],
     }
     tables[`boss_${chapter}`] = {
       silver: [Math.round(120 * k), Math.round(260 * k)],
@@ -477,7 +501,7 @@ export const DROP_TABLES: Record<string, DropTableDef> = (() => {
         { rarity: 'SR', weight: 40 },
         { rarity: 'SSR', weight: 15 },
       ],
-      emblems: [Math.ceil(3 * a), Math.ceil(8 * a)],
+      emblems: [Math.ceil(4 * a), Math.ceil(11 * a)],
     }
   }
   return tables

@@ -32,14 +32,25 @@ import { getEquippedRelics, equipRelic, unequipRelic, RELIC_SLOT_COUNT } from '.
 import { executePull, summarizePull, InsufficientFundsError } from '../../core/systems/gacha.ts'
 import { getPool, groupByRarity, resolvePoolHeroIds } from '../../core/config/pools.ts'
 import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, generateRelic } from '../../core/systems/relic.ts'
-import { applyExp, applySkillUp, skillUpCost, skillLevelCap, starUpCost, applyStarUp } from '../../core/systems/growth.ts'
+import {
+  applyExp,
+  applySkillUp,
+  skillUpCost,
+  skillLevelCap,
+  starUpCost,
+  applyStarUp,
+  realmBreakCost,
+  atRealmGate,
+  applyRealmBreak,
+} from '../../core/systems/growth.ts'
 import { computeEffectiveRates } from '../../core/systems/gachaRates.ts'
 import { previewRebirth, performRebirth } from '../../core/systems/rebirth.ts'
 import { buildArenaLoadout, arenaSnapshotHash, resolveArenaMatch, arenaContext, resolveArenaRewards } from '../../core/systems/arena.ts'
-import { DAILY, REDEEM_CODES } from '../../core/config/economy.ts'
+import { DAILY, LEVEL, REDEEM_CODES } from '../../core/config/economy.ts'
 import { ACCOUNT, ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../core/config/account.ts'
 import { dayIndex } from '../../core/time.ts'
 import { useAccountStore } from './account.ts'
+import { formatNumber } from '../utils/format.ts'
 import '../../core/config/relics.ts'
 import '../../core/config/enemies.ts'
 
@@ -580,16 +591,88 @@ export const useGameStore = defineStore('game', () => {
 
   // ─────────────────────────── 养成 ───────────────────────────
 
-  function feedExp(heroId: string, amount: number) {
+  /**
+   * 喂经验：从**玩家经验池**取经验投给英灵。
+   *
+   * ⚠ 原实现只加不减——`applyExp` 直接把经验塞给英灵，玩家经验池
+   *   （`player.exp`，战斗与挂机掉落的主要来源）只增不减，等于**白嫖等级**：
+   *   池子里的经验是死资源，喂经验却凭空给经验。
+   *   现在改为「池子扣 N → 英灵吃 N」，与数值模型一致
+   *   （tools/balance/report.ts 的经验回收表一直按「池子付费」计算）。
+   *
+   * 扣减口径：按**请求量**扣。喂不完的部分（境界门槛卡住 / 已满级）
+   * 不会消失，它存在英灵自己的 `hero.exp` 里，突破境界后立刻兑现。
+   */
+  async function feedExp(heroId: string, amount: number) {
     const state = save.value.heroes[heroId]
     if (!state) return
-    const res = applyExp(state, amount)
-    void persist().then((ok) => {
-      if (!ok) return
-      if (res.levelsGained > 0) {
-        notify(`${HERO_INDEX.get(heroId)?.name ?? '英灵'} 提升了 ${res.levelsGained} 级`, 'ok')
-      }
-    })
+    const need = Math.max(0, Math.floor(amount))
+    if (need <= 0) return
+    if (state.level >= LEVEL.MAX) {
+      notify('该英灵已达最高等级', 'warn')
+      return
+    }
+    const p = save.value.player
+    // 先判余额再扣费：余额不足直接拒绝，不允许出现负数资源（铁律 #10）
+    if (p.exp < need) {
+      notify(`经验不足（${formatNumber(p.exp)} / ${formatNumber(need)}）`, 'warn')
+      return
+    }
+    p.exp -= need
+    const res = applyExp(state, need)
+    // 扣费动作走 critical：立即推云端；冲突时整份存档回滚，不会「扣了经验没升级」
+    if (!(await persist(true))) return
+    const name = HERO_INDEX.get(heroId)?.name ?? '英灵'
+    if (res.levelsGained > 0) {
+      notify(`${name} 提升了 ${res.levelsGained} 级`, 'ok')
+    } else if (res.blockedByRealm) {
+      notify(`${name} 已达境界门槛，需突破境界才能继续升级`, 'warn')
+    } else {
+      notify(`已投入 ${formatNumber(need)} 经验`, 'ok')
+    }
+  }
+
+  /**
+   * 境界突破：消耗**英灵印记**把英灵送进下一个境界。
+   *
+   * ⚠ 这条链路此前从未实现过：`applyExp` 的等级硬上限是 `next.minLevel - 1`，
+   *   而 `REALMS[].breakMaterial` 指向的道具 id 全项目无定义、无掉落、无 UI，
+   *   于是英灵实测卡死在 Lv60（经验池喂干也升不了级）。
+   */
+  async function breakRealm(heroId: string) {
+    const state = save.value.heroes[heroId]
+    if (!state) return
+    const cost = realmBreakCost(state.level)
+    if (!cost) {
+      notify('已达最高境界', 'warn')
+      return
+    }
+    if (!atRealmGate(state.level)) {
+      notify('尚未达到境界门槛', 'warn')
+      return
+    }
+    const p = save.value.player
+    if (p.emblems < cost.emblems) {
+      notify(`英灵印记不足（${formatNumber(p.emblems)} / ${cost.emblems}）`, 'warn')
+      return
+    }
+    p.emblems -= cost.emblems
+    if (!applyRealmBreak(state)) {
+      // 兜底：状态不允许突破时把印记还回去
+      p.emblems += cost.emblems
+      notify('当前无法突破境界', 'warn')
+      return
+    }
+    // 突破前已投入但卡在门槛上的经验，立刻兑现成等级
+    const res = applyExp(state, 0)
+    if (!(await persist(true))) return
+    const name = HERO_INDEX.get(heroId)?.name ?? '英灵'
+    notify(
+      res.levelsGained > 0
+        ? `${name} 突破境界，提升 ${res.levelsGained} 级`
+        : `${name} 已突破境界`,
+      'ok',
+    )
   }
 
   async function upgradeSkill(heroId: string, index: number) {
@@ -928,6 +1011,7 @@ export const useGameStore = defineStore('game', () => {
     claimOffline,
     pull,
     feedExp,
+    breakRealm,
     upgradeSkill,
     upgradeStar,
     upgradeRelic,
