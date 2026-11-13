@@ -9,11 +9,18 @@ import { useGameStore } from '../stores/game'
 import { HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { BONDS } from '../../core/config/bonds.ts'
 import { SKILL } from '../../core/config/economy.ts'
-import { expToNext, starUpCost } from '../../core/systems/growth.ts'
-import { RELIC_DEFS } from '../../core/systems/relic.ts'
+import {
+  expToNext,
+  starUpCost,
+  applyExp,
+  getHeroPassiveMods,
+  skillLevelCap,
+} from '../../core/systems/growth.ts'
+import { RELIC_DEFS, getHeroSetMods } from '../../core/systems/relic.ts'
+import { resolveStats, computePower } from '../../core/systems/stats.ts'
 import { RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { formatNumber } from '../utils/format'
-import type { RelicInstance } from '../../core/model/types.ts'
+import type { RelicInstance, HeroRuntime, FinalStats } from '../../core/model/types.ts'
 
 const store = useGameStore()
 const route = useRoute()
@@ -60,6 +67,89 @@ const heroBonds = computed(() => {
       active: team?.active ?? false,
     }
   }).filter((x) => x.relevant)
+})
+
+// ─────────────────────────── 属性与提升预览 ───────────────────────────
+
+/**
+ * 该英灵的运行时对象。
+ *
+ * 属性一律经 core 的唯一入口 `resolveStats` 取（AGENTS.md 铁律 #2），
+ * 表现层不自己算「基础属性 × 成长」——那会与战斗里的算法分叉。
+ */
+const runtime = computed<HeroRuntime | null>(() => {
+  const d = def.value
+  const s = state.value
+  if (!d || !s) return null
+  return { def: d, state: s, relics: relicSlots.value, slot: 0 }
+})
+
+/** 取属性（PVE 路径，含境界 / 遗物 / 星级被动 / 遗物套装；不含羁绊） */
+function statsOf(rt: HeroRuntime): FinalStats {
+  return resolveStats(
+    rt,
+    { mode: 'pve', seed: 0 },
+    { passives: getHeroPassiveMods(rt), setMods: getHeroSetMods(rt) },
+  )
+}
+
+/** 当前属性 */
+const currentStats = computed(() => (runtime.value ? statsOf(runtime.value) : null))
+/** 当前战力 */
+const currentPower = computed(() => (currentStats.value ? computePower(currentStats.value) : 0))
+
+/** 四项主属性（展示用） */
+const statRows = computed(() => {
+  const s = currentStats.value
+  if (!s) return []
+  return [
+    { key: 'atk' as const, label: '攻击', value: s.atk },
+    { key: 'def' as const, label: '防御', value: s.def },
+    { key: 'hp' as const, label: '生命', value: s.hp },
+    { key: 'spd' as const, label: '速度', value: s.spd },
+  ]
+})
+
+/** 属性差值（预览 - 当前） */
+function gainOf(pre: FinalStats, cur: FinalStats) {
+  return {
+    atk: Math.round(pre.atk - cur.atk),
+    def: Math.round(pre.def - cur.def),
+    hp: Math.round(pre.hp - cur.hp),
+    spd: Math.round(pre.spd - cur.spd),
+    power: Math.round(computePower(pre) - computePower(cur)),
+  }
+}
+
+/**
+ * 各档位喂经验后的提升预览。
+ *
+ * ⚠ **逐档算**，而不是只算最大档——否则玩家点「喂 1.0万」时看到的
+ *   是「喂 10.0万」的收益，预览与实际不符。
+ *   试算用 `applyExp` 的**同一套语义**在克隆体上做（不碰真实存档），
+ *   所以预览显示的等级与实际喂经验的结果必然一致。
+ */
+const levelPreviews = computed(() => {
+  const rt = runtime.value
+  const cur = currentStats.value
+  if (!rt || !cur) return []
+  const out: { feed: number; levels: number; gain: ReturnType<typeof gainOf> }[] = []
+  for (const feed of EXP_FEEDS) {
+    const clone: HeroRuntime = { ...rt, state: { ...rt.state } }
+    const res = applyExp(clone.state, feed)
+    if (res.levelsGained <= 0) continue
+    out.push({ feed, levels: res.levelsGained, gain: gainOf(statsOf(clone), cur) })
+  }
+  return out
+})
+
+/** 升星后的提升预览（升星会解锁新的星级被动） */
+const starGain = computed(() => {
+  const rt = runtime.value
+  const cur = currentStats.value
+  if (!rt || !cur || !starCost.value) return null
+  const clone: HeroRuntime = { ...rt, state: { ...rt.state, star: rt.state.star + 1 } }
+  return { gain: gainOf(statsOf(clone), cur) }
 })
 
 // ─────────────────────────── 交互 ───────────────────────────
@@ -113,6 +203,35 @@ function unequip(slot: number) {
 
 function relicName(relic: RelicInstance): string {
   return RELIC_DEFS.get(relic.defId)?.name ?? relic.defId
+}
+
+/**
+ * 技能升级按钮的可用性与提示。
+ *
+ * ⚠ 消耗的是**术式结晶**（skillStones），与圣杯结晶是两回事；
+ *   这里直接把「差多少」写出来，玩家不必自己换算。
+ */
+function skillUpHint(index: number): { ok: boolean; text: string } {
+  const s = state.value
+  if (!s) return { ok: false, text: '' }
+  const cur = s.skillLevels[index] ?? 0
+  if (cur >= skillLevelCap(s.level)) {
+    return { ok: false, text: '当前等级无法继续提升（需先提升英灵等级）' }
+  }
+  const p = store.save.player
+  if (p.skillStones < SKILL.SKILL_STONES_PER_LEVEL) {
+    return {
+      ok: false,
+      text: `术式结晶不足（${formatNumber(p.skillStones)} / ${SKILL.SKILL_STONES_PER_LEVEL}）`,
+    }
+  }
+  if (p.silver < SKILL.SILVER_PER_LEVEL) {
+    return {
+      ok: false,
+      text: `银两不足（${formatNumber(p.silver)} / ${formatNumber(SKILL.SILVER_PER_LEVEL)}）`,
+    }
+  }
+  return { ok: true, text: '' }
 }
 </script>
 
@@ -180,6 +299,45 @@ function relicName(relic: RelicInstance): string {
             </div>
           </div>
 
+          <!-- 属性 -->
+          <div v-if="currentStats" class="stat-row">
+            <div class="row-between tiny">
+              <span class="muted">属性</span>
+              <span class="tiny muted">不含羁绊加成</span>
+            </div>
+            <div class="stat-grid">
+              <div v-for="row in statRows" :key="row.key" class="stat-cell" :data-stat="row.key">
+                <div class="tiny muted">{{ row.label }}</div>
+                <b>{{ formatNumber(row.value) }}</b>
+              </div>
+            </div>
+            <div class="row-between tiny" style="margin-top: 6px">
+              <span class="muted">战力</span>
+              <b>{{ formatNumber(currentPower) }}</b>
+            </div>
+          </div>
+
+          <!-- 提升预览：让「升级 / 升星」有明确的收益 -->
+          <div v-if="levelPreviews.length > 0 || starGain" class="preview-box">
+            <div v-for="p in levelPreviews" :key="p.feed" class="tiny">
+              喂 {{ formatNumber(p.feed) }} 经验（升 {{ p.levels }} 级）→
+              <span class="ok-text">
+                攻 +{{ p.gain.atk }} · 防 +{{ p.gain.def }} · 生命 +{{ p.gain.hp }} · 战力
+                +{{ formatNumber(p.gain.power) }}
+              </span>
+            </div>
+            <div v-if="starGain" class="tiny">
+              升星 →
+              <span class="ok-text">
+                攻 +{{ starGain.gain.atk }} · 防 +{{ starGain.gain.def }} · 生命
+                +{{ starGain.gain.hp }} · 战力 +{{ formatNumber(starGain.gain.power) }}
+              </span>
+            </div>
+            <div v-if="levelPreviews.length === 0 && !starGain" class="tiny muted">
+              当前已无法继续提升等级或星级。
+            </div>
+          </div>
+
           <!-- 养成 -->
           <div class="row" style="margin-top: 10px; gap: 6px; flex-wrap: wrap">
             <button
@@ -232,10 +390,15 @@ function relicName(relic: RelicInstance): string {
             v-if="state"
             class="btn btn-sm btn-block"
             style="margin-top: 6px"
+            :disabled="!skillUpHint(i).ok"
             @click="store.upgradeSkill(heroId, i)"
           >
-            提升等级（结晶 {{ SKILL.CRYSTALS_PER_LEVEL }} · 银两 {{ formatNumber(SKILL.SILVER_PER_LEVEL) }}）
+            提升等级（术式结晶 {{ SKILL.SKILL_STONES_PER_LEVEL }} · 银两
+            {{ formatNumber(SKILL.SILVER_PER_LEVEL) }}）
           </button>
+          <div v-if="state && !skillUpHint(i).ok" class="tiny warn-text" style="margin-top: 3px">
+            {{ skillUpHint(i).text }}
+          </div>
         </div>
       </section>
 
@@ -391,6 +554,47 @@ function relicName(relic: RelicInstance): string {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* 属性四宫格 */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.stat-cell {
+  padding: 5px 4px;
+  border-radius: 6px;
+  background: var(--c-panel);
+  text-align: center;
+  line-height: 1.4;
+}
+
+.stat-cell b {
+  font-size: 13px;
+}
+
+/* 提升预览 */
+.preview-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--c-line-2);
+  background: var(--c-bg-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.6;
+}
+
+.ok-text {
+  color: var(--c-green);
+}
+
+.warn-text {
+  color: #e0a06a;
 }
 
 .skill {

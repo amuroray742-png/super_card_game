@@ -94,8 +94,8 @@ export const SKILL = {
   MAX_LEVEL: 20,
   /** 每级技能效果强度 +2% */
   PCT_PER_LEVEL: 0.02,
-  /** 升 1 级所需术式结晶 */
-  CRYSTALS_PER_LEVEL: 12,
+  /** 升 1 级所需**术式结晶**（skillStones，不是圣杯结晶） */
+  SKILL_STONES_PER_LEVEL: 12,
   /** 升 1 级所需银两 */
   SILVER_PER_LEVEL: 800,
 } as const

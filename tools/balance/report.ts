@@ -105,7 +105,7 @@ for (let star = STAR.MIN; star < STAR.MAX; star++) {
 
 /** 单个英灵 3 个技能升满（1 → 20 级） */
 const skillLevelsPerHero = SKILL.MAX_LEVEL - SKILL.MIN_LEVEL
-const skillCrystalsPerHero = skillLevelsPerHero * SKILL.CRYSTALS_PER_LEVEL
+const skillStonesPerHero = skillLevelsPerHero * SKILL.SKILL_STONES_PER_LEVEL
 const skillSilverPerHero = skillLevelsPerHero * SKILL.SILVER_PER_LEVEL
 
 /** 单件遗物 1 → 60 级 */
@@ -118,7 +118,7 @@ const relicsInTeam = TEAM_SIZE * RELIC_SLOTS
 const cost = {
   exp: expPerHero * TEAM_SIZE,
   silver: skillSilverPerHero * TEAM_SIZE + relicSilverPerRelic * relicsInTeam,
-  skillStones: skillCrystalsPerHero * TEAM_SIZE,
+  skillStones: skillStonesPerHero * TEAM_SIZE,
   relicStones: relicStonesPerRelic * relicsInTeam,
   emblems: emblemsPerHero * TEAM_SIZE,
 }
@@ -166,7 +166,7 @@ console.log(
 console.log('\n【满养成消耗】基准 = 6 人编队（Lv240 / 6★ / 技能满级 / 6 件遗物满强化）\n')
 console.log(`  经验        ${fmt(cost.exp).padStart(12)}   （单人 ${fmt(expPerHero)} × ${TEAM_SIZE}）`)
 console.log(`  银两        ${fmt(cost.silver).padStart(12)}   （技能 ${fmt(skillSilverPerHero * TEAM_SIZE)} + 遗物 ${fmt(relicSilverPerRelic * relicsInTeam)}）`)
-console.log(`  术式结晶    ${fmt(cost.skillStones).padStart(12)}   （单人 ${skillCrystalsPerHero} × ${TEAM_SIZE}）`)
+console.log(`  术式结晶    ${fmt(cost.skillStones).padStart(12)}   （单人 ${skillStonesPerHero} × ${TEAM_SIZE}）`)
 console.log(`  遗物强化石  ${fmt(cost.relicStones).padStart(12)}   （单件 ${relicStonesPerRelic} × ${relicsInTeam} 件）`)
 console.log(`  英灵印记    ${fmt(cost.emblems).padStart(12)}   （单人 ${emblemsPerHero} × ${TEAM_SIZE}）`)
 

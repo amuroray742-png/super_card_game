@@ -16,6 +16,11 @@
    > **显式例外**：账号 / 会话类阈值（用户名规则、口令强度、令牌有效期、限流阈值）
    > 放 `src/core/config/account.ts`，前后端与服务端共用同一份。
    > 这类阈值不属于经济数值调参范畴（不进 `npm run balance` 的曲线）。
+   > **资源命名口径**：`crystals` 在本项目**专指圣杯结晶**（抽卡资源）；
+   > 术式结晶一律叫 `skillStones`，遗物强化石叫 `relicStones`。
+   > 历史上技能升级把两者搞混（扣了 `player.crystals`）→ 玩家术式结晶堆到 2 万
+   > 也升不动技能，还白扣抽卡资源。配置项因此叫 `SKILL.SKILL_STONES_PER_LEVEL`
+   > 而不是 `CRYSTALS_PER_LEVEL`。
 6. **平台解耦**：`src/presentation/` 不直接访问 `localStorage`，一律经 `src/platform/`。
 7. **养成即配置**：竞技场中养成投入只允许通过「战术铭文槽位数量」与「系数封顶表」体现，禁止直接数值加成路径。
 8. **存档结构也必须有唯一约定**：装备槽位 key 格式、掉落表 id、卡池 id 等由 `core/systems/loadout.ts`

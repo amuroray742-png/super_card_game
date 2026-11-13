@@ -140,14 +140,20 @@ export function getHeroPassiveMods(hero: HeroRuntime): StatMod[] {
 // ─────────────────────────── 技能 ───────────────────────────
 
 export interface SkillUpCost {
-  crystals: number
+  /**
+   * 消耗的**术式结晶**数量。
+   *
+   * ⚠ 字段名不叫 `crystals`——本项目里 `crystals` 专指**圣杯结晶**（抽卡资源），
+   *   两者混用正是「技能升级提示资源不足」的成因（实现扣错了资源）。
+   */
+  skillStones: number
   silver: number
 }
 
 export function skillUpCost(currentLevel: number): SkillUpCost | null {
   if (currentLevel >= SKILL.MAX_LEVEL) return null
   return {
-    crystals: SKILL.CRYSTALS_PER_LEVEL,
+    skillStones: SKILL.SKILL_STONES_PER_LEVEL,
     silver: SKILL.SILVER_PER_LEVEL,
   }
 }

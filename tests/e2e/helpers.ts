@@ -59,12 +59,23 @@ export async function registerAccount(
   return { refreshToken: body.refreshToken, user: body.user }
 }
 
-/** 往页面注入会话与后端地址（必须在 goto 之前调用） */
+/**
+ * 往页面注入会话与后端地址（必须在 goto 之前调用）。
+ *
+ * ⚠ **只在本地还没有会话时注入**：refresh token 是**一次性轮换**的
+ *   （refresh 即轮换，后端只存 hash），
+ *   而 `addInitScript` 会在**每次导航**时重新执行——
+ *   若无条件覆盖，页面刷新后会把「页面刚轮换出来的新 token」又换回最初那个，
+ *   立刻失效（表现为「登录状态已失效」并被踢回登录页）。
+ *   所以这里改成「有会话就不动」，让页面自己管理轮换。
+ */
 export async function seedSession(page: Page, session: E2eSession): Promise<void> {
   await page.addInitScript(
     ({ apiBase, sess }) => {
       localStorage.setItem('sgw.apiBase', apiBase)
-      localStorage.setItem('sgw.session', JSON.stringify(sess))
+      if (!localStorage.getItem('sgw.session')) {
+        localStorage.setItem('sgw.session', JSON.stringify(sess))
+      }
     },
     { apiBase: E2E_API_BASE, sess: session },
   )

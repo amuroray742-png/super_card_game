@@ -32,7 +32,7 @@ import { getEquippedRelics, equipRelic, unequipRelic, RELIC_SLOT_COUNT } from '.
 import { executePull, summarizePull, InsufficientFundsError } from '../../core/systems/gacha.ts'
 import { getPool, groupByRarity, resolvePoolHeroIds } from '../../core/config/pools.ts'
 import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, generateRelic } from '../../core/systems/relic.ts'
-import { applyExp, applySkillUp, starUpCost, applyStarUp } from '../../core/systems/growth.ts'
+import { applyExp, applySkillUp, skillUpCost, skillLevelCap, starUpCost, applyStarUp } from '../../core/systems/growth.ts'
 import { computeEffectiveRates } from '../../core/systems/gachaRates.ts'
 import { previewRebirth, performRebirth } from '../../core/systems/rebirth.ts'
 import { buildArenaLoadout, arenaSnapshotHash, resolveArenaMatch, arenaContext, resolveArenaRewards } from '../../core/systems/arena.ts'
@@ -595,9 +595,23 @@ export const useGameStore = defineStore('game', () => {
   async function upgradeSkill(heroId: string, index: number) {
     const state = save.value.heroes[heroId]
     if (!state) return
-    const crystals = 12
-    const silver = 800
-    if (save.value.player.crystals < crystals || save.value.player.silver < silver) {
+    const current = state.skillLevels[index] ?? 0
+
+    // 先判上限（受境界门槛约束），再判资源。
+    // ⚠ 顺序反了会让技能已满级的玩家看到「资源不足」——那是误导。
+    if (current >= skillLevelCap(state.level)) {
+      notify('当前等级无法继续提升', 'warn')
+      return
+    }
+    const cost = skillUpCost(current)
+    if (!cost) {
+      notify('当前等级无法继续提升', 'warn')
+      return
+    }
+    const p = save.value.player
+    // ⚠ 扣的是**术式结晶**（skillStones），不是圣杯结晶（crystals）。
+    //   原实现扣 crystals → 玩家术式结晶堆到 2 万也升不动技能（还白扣抽卡资源）。
+    if (p.skillStones < cost.skillStones || p.silver < cost.silver) {
       notify('资源不足', 'warn')
       return
     }
@@ -605,8 +619,8 @@ export const useGameStore = defineStore('game', () => {
       notify('当前等级无法继续提升', 'warn')
       return
     }
-    save.value.player.crystals -= crystals
-    save.value.player.silver -= silver
+    p.skillStones -= cost.skillStones
+    p.silver -= cost.silver
     // 冲突时整份存档回滚，扣费与提升一起撤销
     if (!(await persist(true))) return
     notify('技能等级已提升', 'ok')

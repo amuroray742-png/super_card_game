@@ -28,6 +28,10 @@
  * # 观战场景（需要一台隔离的后端：注册账号 → 十连 → 编队 → 推征页点「观战」）
  * npx tsx tools/capture/screenshot.ts --battle --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/battle.png
+ *
+ * # 英灵详情场景（注册账号 → 十连 → 圣殿点开第一个英灵）
+ * npx tsx tools/capture/screenshot.ts --hero --api http://127.0.0.1:8791 \
+ *   --url http://127.0.0.1:4188 --out artifacts/art-preview/hero.png
  * ```
  */
 import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test'
@@ -52,6 +56,8 @@ interface Options {
   out: string
   pull: boolean
   battle: boolean
+  /** 英灵详情场景（登录 → 十连 → 圣殿点开第一个英灵） */
+  hero: boolean
   /** 隔离后端地址（观战场景要注册账号） */
   api: string
   /** 指定关卡 id（走关卡详情页的「战斗预览」；不填则走推征页的「观战」） */
@@ -71,6 +77,7 @@ function parseArgs(argv: string[]): Options {
     out: get('--out') ?? 'artifacts/art-preview/screenshot.png',
     pull: argv.includes('--pull'),
     battle: argv.includes('--battle'),
+    hero: argv.includes('--hero'),
     api: get('--api') ?? '',
     stage: get('--stage') ?? '',
     fullPage: argv.includes('--full-page'),
@@ -129,6 +136,52 @@ async function registerSession(api: string): Promise<ShotSession> {
 }
 
 /**
+ * 准备一个可用的登录态 + 一批英灵（注册 → 注入会话 → 十连）。
+ *
+ * 会话与后端地址必须在**导航前**写入（路由守卫靠它们恢复登录态）。
+ */
+async function setupAccount(context: BrowserContext, page: Page, opts: Options): Promise<string> {
+  const session = await registerSession(opts.api)
+  await context.addInitScript(
+    ({ apiBase, sess }: { apiBase: string; sess: ShotSession }) => {
+      localStorage.setItem('sgw.apiBase', apiBase)
+      // ⚠ 只在还没有会话时注入：refresh token 是一次性轮换的，
+      //   无条件覆盖会把页面刚轮换出来的新 token 换回最初那个 → 立刻失效。
+      if (!localStorage.getItem('sgw.session')) {
+        localStorage.setItem('sgw.session', JSON.stringify(sess))
+      }
+    },
+    { apiBase: opts.api.replace(/\/$/, ''), sess: session },
+  )
+
+  const base = opts.url.replace(/\/$/, '')
+  await page.goto(`${base}/#/gacha`, { waitUntil: 'networkidle' })
+  await page.locator('button', { hasText: '十连' }).first().click()
+  await page.getByRole('button', { name: '收下' }).click()
+  await page.waitForTimeout(400)
+  return base
+}
+
+/**
+ * 英灵详情场景：登录 → 十连 → 圣殿点开第一个英灵。
+ *
+ * 详情页要有属性面板与提升预览，截图用于验收养成信息的可读性。
+ */
+async function runHeroScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  const base = await setupAccount(context, page, opts)
+  await page.goto(`${base}/#/temple`, { waitUntil: 'networkidle' })
+  await page.locator('.hero-cell').first().click()
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: outPath, fullPage: opts.fullPage })
+  return ''
+}
+
+/**
  * 观战场景：登录 → 十连 → 编队 → 推征页点「观战」。
  *
  * 为什么要一整套编排：观战画布要**有编队、有登录态**才会出现，
@@ -140,23 +193,7 @@ async function runBattleScenario(
   opts: Options,
   outPath: string,
 ): Promise<string> {
-  const session = await registerSession(opts.api)
-  // 会话与后端地址必须在导航前写入（路由守卫靠它们恢复登录态）
-  await context.addInitScript(
-    ({ apiBase, sess }: { apiBase: string; sess: ShotSession }) => {
-      localStorage.setItem('sgw.apiBase', apiBase)
-      localStorage.setItem('sgw.session', JSON.stringify(sess))
-    },
-    { apiBase: opts.api.replace(/\/$/, ''), sess: session },
-  )
-
-  const base = opts.url.replace(/\/$/, '')
-
-  // 1) 十连拿英灵
-  await page.goto(`${base}/#/gacha`, { waitUntil: 'networkidle' })
-  await page.locator('button', { hasText: '十连' }).first().click()
-  await page.getByRole('button', { name: '收下' }).click()
-  await page.waitForTimeout(400)
+  const base = await setupAccount(context, page, opts)
 
   // 2) 编队：**满编 6 人**（前排 3 + 后排 3），
   //    少编就看不到三排纵向排布，遮挡类问题会漏检
@@ -201,8 +238,8 @@ async function runBattleScenario(
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   assertSafeOrigin(opts.url)
-  if (opts.battle && !opts.api) {
-    throw new Error('观战场景需要 --api <隔离后端地址>（用于注册临时账号）')
+  if ((opts.battle || opts.hero) && !opts.api) {
+    throw new Error('观战 / 英灵详情场景需要 --api <隔离后端地址>（用于注册临时账号）')
   }
 
   const target = `${opts.url.replace(/\/$/, '')}/#${opts.route}`
@@ -222,7 +259,9 @@ async function main(): Promise<void> {
     const page = await context.newPage()
 
     let resultPath = ''
-    if (opts.battle) {
+    if (opts.hero) {
+      resultPath = await runHeroScenario(context, page, opts, outPath)
+    } else if (opts.battle) {
       resultPath = await runBattleScenario(context, page, opts, outPath)
     } else {
       await page.goto(target, { waitUntil: 'networkidle' })
@@ -233,7 +272,7 @@ async function main(): Promise<void> {
       }
     }
 
-    if (!opts.battle) {
+    if (!opts.battle && !opts.hero) {
       await page.screenshot({ path: outPath, fullPage: opts.fullPage })
     }
     if (resultPath) {
