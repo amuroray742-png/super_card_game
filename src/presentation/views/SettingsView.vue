@@ -184,6 +184,9 @@ async function doReset() {
           {{ settings.skipAnim ? '开' : '关' }}
         </button>
       </div>
+      <div class="tiny muted" style="margin-top: -4px">
+        开启后观战与战斗预览直接出战后结算，不播放战斗演出。
+      </div>
     </section>
 
     <!-- 存档 -->

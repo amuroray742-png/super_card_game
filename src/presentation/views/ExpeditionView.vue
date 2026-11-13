@@ -7,24 +7,29 @@ import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { STAGES } from '../../core/config/stages.ts'
 import { getEnemy } from '../../core/config/enemies.ts'
+import { DROP_TABLES } from '../../core/config/economy.ts'
 import { runBattle } from '../../core/systems/battle.ts'
 import { getBondMods, getTeamPower } from '../../core/systems/team.ts'
 import { getHeroSetMods } from '../../core/systems/relic.ts'
 import { getHeroPassiveMods } from '../../core/systems/growth.ts'
 import { formatNumber, formatPower } from '../utils/format'
 import BattleCanvas from '../components/BattleCanvas.vue'
+import BattleResultPanel from '../components/BattleResultPanel.vue'
 import type { BattleResult } from '../../core/model/types.ts'
 
 const store = useGameStore()
 const router = useRouter()
 
 const showCanvas = ref(false)
+const showResult = ref(false)
 const battle = ref<BattleResult | null>(null)
-const canvasRef = ref<InstanceType<typeof BattleCanvas> | null>(null)
 
 const stage = computed(() => store.currentStage)
 const chapter = computed(() => Math.ceil(stage.value.id / 31))
 const stageName = computed(() => stage.value.name)
+
+/** 当前关卡的掉落表（战后结算展示） */
+const drops = computed(() => DROP_TABLES[stage.value.dropTableId])
 
 const powerGap = computed(() => {
   const need = stage.value.powerRequired
@@ -58,10 +63,20 @@ function fight() {
   })
   battle.value = result
   showCanvas.value = true
-  // 回放单位信息由 core 的 roster 产出，画布自行同步
-  requestAnimationFrame(() => {
-    canvasRef.value?.replay()
-  })
+  showResult.value = false
+  // 画布收到新战斗会自动开演（BattleCanvas 的 loadBattle 负责起播）
+}
+
+/** 演出播完（或被跳过）：展示战后结算 */
+function onFinished() {
+  showResult.value = true
+}
+
+/** 回放倍速：写回存档设置（与设置页同一口径） */
+function onSpeedChange(v: number) {
+  store.save.settings.speed = v
+  store.battleSpeed = v
+  store.persist()
 }
 
 /** 挂机推进 N 场 */
@@ -134,7 +149,15 @@ async function idle(battles: number) {
         <span>战斗回放</span>
         <button class="btn btn-sm btn-ghost" @click="showCanvas = false">收起</button>
       </div>
-      <BattleCanvas ref="canvasRef" :battle="battle" :speed="store.battleSpeed" />
+      <BattleCanvas
+        :battle="battle"
+        :speed="store.battleSpeed"
+        :chapter="chapter"
+        :skip-anim="store.save.settings.skipAnim"
+        @finished="onFinished"
+        @speed-change="onSpeedChange"
+      />
+      <BattleResultPanel v-if="showResult && battle" class="result-wrap" :battle="battle" :drops="drops" />
     </section>
 
     <!-- 本章关卡 -->
@@ -200,6 +223,10 @@ async function idle(battles: number) {
   border-radius: 8px;
   background: var(--c-bg-2);
   border: 1px solid var(--c-line);
+}
+
+.result-wrap {
+  margin-top: 10px;
 }
 
 .ok-text { color: var(--c-green); }

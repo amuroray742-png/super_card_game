@@ -8,11 +8,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { CHAPTERS, STAGES } from '../../core/config/stages.ts'
 import { ENEMY_INDEX, getEnemy } from '../../core/config/enemies.ts'
-import { HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { DROP_TABLES } from '../../core/config/economy.ts'
 import { runBattle } from '../../core/systems/battle.ts'
 import { getBondMods } from '../../core/systems/team.ts'
 import { formatNumber, formatPower } from '../utils/format'
+import BattleCanvas from '../components/BattleCanvas.vue'
+import BattleResultPanel from '../components/BattleResultPanel.vue'
 import type { BattleResult, EnemyDef } from '../../core/model/types.ts'
 
 const store = useGameStore()
@@ -44,6 +45,8 @@ const isIdleTarget = computed(() => store.save.idle.currentStage === stage.value
 
 /** 战斗预览结果 */
 const preview = ref<BattleResult | null>(null)
+/** 演出是否播完（播完才显示结算） */
+const previewFinished = ref(false)
 
 function previewBattle() {
   if (store.teamEmpty) {
@@ -62,6 +65,19 @@ function previewBattle() {
       teamMods: { bond: getBondMods(store.team) },
     },
   })
+  previewFinished.value = false
+}
+
+/** 演出播完（或被跳过）：展示战后结算 */
+function onPreviewFinished() {
+  previewFinished.value = true
+}
+
+/** 回放倍速：写回存档设置（与设置页同一口径） */
+function onSpeedChange(v: number) {
+  store.save.settings.speed = v
+  store.battleSpeed = v
+  store.persist()
 }
 
 function setIdleTarget() {
@@ -74,12 +90,6 @@ function setIdleTarget() {
 function goStage(offset: number) {
   const next = stageId.value + offset
   if (next >= 1 && next <= STAGES.length) router.push(`/stage/${next}`)
-}
-
-/** 英灵 id → 名称 */
-function heroName(id: string | null): string {
-  if (!id) return '—'
-  return HERO_INDEX.get(id)?.name ?? id
 }
 </script>
 
@@ -197,23 +207,20 @@ function heroName(id: string | null): string {
           <span>战斗预览</span>
           <span class="tag" :class="preview.win ? 'tag-sr' : ''">{{ preview.win ? '胜利' : '失败' }}</span>
         </div>
-        <div class="row-between tiny">
-          <span class="muted">回合数</span>
-          <b>{{ preview.rounds }}</b>
-        </div>
-        <div class="row-between tiny">
-          <span class="muted">存活</span>
-          <b>{{ preview.survivors.length }} / {{ store.team.length }}</b>
-        </div>
-        <div class="row-between tiny">
-          <span class="muted">表现较佳</span>
-          <b>{{ heroName(preview.mvpId) }}</b>
-        </div>
-        <div class="log">
-          <div v-for="(entry, i) in preview.log.slice(-8)" :key="i" class="tiny log-line">
-            {{ entry.text }}
-          </div>
-        </div>
+        <BattleCanvas
+          :battle="preview"
+          :speed="store.battleSpeed"
+          :chapter="stage?.chapter ?? 1"
+          :skip-anim="store.save.settings.skipAnim"
+          @finished="onPreviewFinished"
+          @speed-change="onSpeedChange"
+        />
+        <BattleResultPanel
+          v-if="previewFinished"
+          class="result-wrap"
+          :battle="preview"
+          :drops="drops ?? undefined"
+        />
       </section>
 
       <button class="btn btn-block btn-ghost" @click="router.back()">返回</button>
@@ -276,20 +283,5 @@ function heroName(id: string | null): string {
 .drop-rarity {
   margin-left: 6px;
   color: var(--c-text-dim);
-}
-
-.log {
-  margin-top: 8px;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--c-bg-2);
-  border: 1px solid var(--c-line);
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-.log-line {
-  color: var(--c-text-mute);
-  line-height: 1.7;
 }
 </style>

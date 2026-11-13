@@ -105,3 +105,33 @@ export function portraitPath(heroId: string): string {
     ? `/portraits/${heroId}${AI_CARD_EXT}`
     : `/portraits/${heroId}.svg`
 }
+
+/**
+ * 取敌人立绘路径。
+ *
+ * 敌人素材按敌人 id 命名（`public/enemies/<id>.svg`），与英灵卡面共用
+ * 「路径由 core 给出」的唯一口径（AGENTS.md 铁律 #8）——
+ * 表现层不得自行拼接 `/enemies/xxx`。
+ *
+ * @param defId 敌人**基础定义 id**（名册里的 `defId`，不含 `#序号` 后缀）
+ */
+export function enemyArtPath(defId: string): string {
+  return `/enemies/${defId}.svg`
+}
+
+/**
+ * 头像裁取约定（§6.3 战斗演出）。
+ *
+ * 源区是**正方形**：边长 = `sizeRatio × 图片宽度`，水平居中，
+ * 顶端偏移 = `topRatio × 图片高度`。
+ * 渲染时用 `Image.naturalWidth/Height` 换算，不写死像素，换图不破。
+ *
+ * - `hero`：卡面是 3:4 全身图，头部落在图高 8%~32%，
+ *   取「图宽 50% 的顶部方块」能把头部放进圆内上半（已抽查 xiangyu / caiwenji 验证）。
+ * - `enemy`：敌人占位图底部一条是名字文字条（y 424~512），
+ *   取 82% 见方并去掉底条，徽记圆环仍完整。
+ */
+export const AVATAR_CROP = {
+  hero: { sizeRatio: 0.5, topRatio: 0.02 },
+  enemy: { sizeRatio: 0.82, topRatio: 0 },
+} as const

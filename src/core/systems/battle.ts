@@ -27,8 +27,16 @@ import { clamp, deriveStats, elementFactor, resolveStats } from './stats.ts'
 import { getHeroPassiveMods } from './growth.ts'
 import { getHeroSetMods } from './relic.ts'
 
-/** 战报最大条数，防止长战斗内存膨胀 */
-const MAX_LOG = 400
+/**
+ * 战报最大条数，防止长战斗内存膨胀。
+ *
+ * ⚠ 上限必须容得下**最长的战斗**，否则回放会在中途被截断
+ *   （血条停在半血、没有死亡演出、回合数对不上）。
+ *   实测：第 10 章 BOSS（真实关卡缩放 1288）会打满 30 回合，
+ *   战报条数 8/8 场撞上旧的 400 上限 → 上限提到 1500。
+ *   内存无压力：同一时刻只存活一个 BattleResult（挂机逐场的战报立即丢弃）。
+ */
+const MAX_LOG = 1500
 
 export interface BattleSetup {
   allies: HeroRuntime[]
@@ -316,6 +324,10 @@ export function simulateBattle(
  *
  * `appearRound` 描述「援军何时入场」：召唤物出场回合 > 1，
  * 回放据此在召唤事件发生前不显示该单位。
+ *
+ * `defId` 是**基础定义 id**（敌人 id 去掉 `#序号` 后缀），美术路径由 core 侧
+ * 按它给出——表现层不得自行剥后缀（AGENTS.md 铁律 #8 / #16）。
+ * `role` / `element` / `mechanic` 供战斗演出取色与判定 BOSS（§6.3）。
  */
 function buildRoster(allies: BattleUnit[], all: BattleUnit[]): BattleUnitRosterEntry[] {
   const enemyOrder = new Map<string, number>()
@@ -334,6 +346,9 @@ function buildRoster(allies: BattleUnit[], all: BattleUnit[]): BattleUnitRosterE
       name: u.name,
       maxHp: u.maxHp,
       appearRound: 1,
+      defId: baseDefId(u.id),
+      role: u.role,
+      element: u.element,
     })
   }
   for (const u of all) {
@@ -345,9 +360,24 @@ function buildRoster(allies: BattleUnit[], all: BattleUnit[]): BattleUnitRosterE
       name: u.name,
       maxHp: u.maxHp,
       appearRound: u.appearRound ?? 1,
+      defId: baseDefId(u.id),
+      role: u.role,
+      element: u.element,
+      mechanic: u.bossMechanic?.type,
     })
   }
   return entries
+}
+
+/**
+ * 单位 id → 基础定义 id（去掉 `#序号` 后缀）。
+ *
+ * 敌人 id 形如 `boss_abyss#0`（同一模板的第几个），
+ * 召唤援军还会更大；英灵 id 不含后缀。
+ */
+function baseDefId(unitId: string): string {
+  const hash = unitId.indexOf('#')
+  return hash >= 0 ? unitId.slice(0, hash) : unitId
 }
 
 // ─────────────────────────── 技能选择与强度 ───────────────────────────
@@ -675,6 +705,7 @@ export function dealDamage(
         actorId: source.id,
         targetId: target.id,
         amount: absorbed,
+        absorbed: true,
         text: `${target.name} 的护盾吸收了 ${absorbed} 点伤害`,
       })
       return
@@ -710,9 +741,13 @@ export function dealDamage(
   if (target.hp <= 0) {
     target.hp = 0
     target.alive = false
+    // ⚠ 死亡是**独立事件**（kind:'death'）。
+    //   历史教训：原来这里塞的是一条 amount=0 的 damage，靠文案「X 被击败」隐式表达，
+    //   表现层无法可靠判定谁死了（amount=0 还可能是护盾吸收的特例）；
+    //   而持续伤害（dot）致死更是**一条日志都不产**，回放里单位会「静默消失」。
     hooks.push({
       round: hooks.round,
-      kind: 'damage',
+      kind: 'death',
       actorId: source.id,
       targetId: target.id,
       amount: 0,
@@ -769,6 +804,15 @@ function applyDot(unit: BattleUnit, all: BattleUnit[], ctx: BattleContext, hooks
     if (unit.hp <= 0) {
       unit.hp = 0
       unit.alive = false
+      // 持续伤害致死也要有死亡事件，否则回放里单位会「静默消失」
+      hooks.push({
+        round: hooks.round,
+        kind: 'death',
+        actorId: dot.sourceId,
+        targetId: unit.id,
+        amount: 0,
+        text: `${unit.name} 被击败`,
+      })
     }
   }
 }

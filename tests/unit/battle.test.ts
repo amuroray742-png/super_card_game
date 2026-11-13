@@ -43,7 +43,24 @@ describe('战斗确定性', () => {
 
   it('战报长度受限，防止长战斗内存膨胀', () => {
     const result = runBattle(setup(5))
-    expect(result.log.length).toBeLessThanOrEqual(400)
+    expect(result.log.length).toBeLessThanOrEqual(1500)
+  })
+
+  it('最长的战斗（末章 BOSS 打满 30 回合）不会被战报上限截断', () => {
+    // ⚠ 旧上限 400 会把这场战斗截断在第 15 回合左右：
+    //   回放里血条停在半血、没有死亡演出、回合数对不上（实测 8/8 场触顶）。
+    const stage = getStage(310)
+    const result = runBattle({
+      allies: ['xiangyu', 'hanxin', 'zhugeliang', 'caiwenji', 'mayuan', 'zhangfei'].map((id) =>
+        maxedHero(id),
+      ),
+      enemies: stage.enemyIds.map((id) => getEnemy(id)),
+      enemyScale: stage.enemyScale,
+      ctx: { mode: 'pve' as const, seed: 2024 },
+    })
+    expect(result.log.length).toBeLessThan(1500)
+    // 打得久说明战报确实很长（不是战斗太短导致断言空过）
+    expect(result.rounds).toBeGreaterThan(10)
   })
 })
 
@@ -196,6 +213,85 @@ describe('参战名册（roster）', () => {
     for (const id of enemyIdsInLog) {
       expect(enemies.some((u) => u.id === id)).toBe(true)
     }
+  })
+
+  it('名册携带基础定义 id / 定位 / 五行 / BOSS 机制（战斗演出的唯一来源）', () => {
+    const result = runBattle({
+      allies: [makeHero('xiangyu'), makeHero('caiwenji')],
+      enemies: [getEnemy('boss_mirage'), getEnemy('wanderer')],
+      enemyScale: 1,
+      ctx: { mode: 'pve', seed: 31 },
+    })
+
+    // 英灵：defId 就是英灵 id
+    const ally = result.roster.find((u) => u.id === 'xiangyu')!
+    expect(ally.defId).toBe('xiangyu')
+    expect(ally.role).toBe('猛将')
+    expect(ally.element).toBe('土')
+    expect(ally.mechanic).toBeUndefined()
+
+    // 敌人：defId 去掉 `#序号` 后缀（表现层不得自行剥，AGENTS.md 铁律 #16）
+    const enemy = result.roster.find((u) => u.side === 'enemy')!
+    expect(enemy.id).toBe(`${enemy.defId}#${enemy.slot}`)
+    expect(enemy.defId).toMatch(/^[a-z_]+$/)
+
+    // BOSS 携带机制类型（战斗演出据此加描边与分段血条）
+    const boss = result.roster.find((u) => u.defId === 'boss_mirage')!
+    expect(boss.mechanic).toBe('summon')
+  })
+})
+
+describe('死亡事件（§6.3 战斗演出）', () => {
+  it('单位被击败时有独立的 death 事件', () => {
+    const result = runBattle({
+      allies: [maxedHero('xiangyu')],
+      enemies: [getEnemy('wanderer')],
+      enemyScale: 1,
+      ctx: { mode: 'pve' as const, seed: 5 },
+    })
+    const deaths = result.log.filter((e) => e.kind === 'death')
+    expect(deaths.length).toBeGreaterThan(0)
+    for (const d of deaths) {
+      expect(d.targetId).toBeTruthy()
+      expect(d.amount).toBe(0)
+      expect(d.text).toContain('被击败')
+      // 死者必须在名册里（表现层要靠它做消散演出）
+      expect(result.roster.some((u) => u.id === d.targetId)).toBe(true)
+    }
+  })
+
+  it('持续伤害致死同样产出 death 事件（否则回放里单位会静默消失）', () => {
+    // 构造「只会灼烧、不直接造成伤害」的技能，逼出 dot 致死分支
+    const dotHero = makeHero('zuchongzhi', { level: 60, star: 6, skillLevels: [20, 20, 20] })
+    const burnOnly = {
+      ...dotHero,
+      def: {
+        ...dotHero.def,
+        skills: [
+          {
+            id: 'burn_only',
+            name: '焚',
+            kind: 'battle' as const,
+            desc: '只灼烧，不直接造成伤害',
+            ratio: 0,
+            target: 'allEnemies' as const,
+            effects: [{ type: 'dot' as const, kind: 'burn' as const, ratio: 10, turns: 5 }],
+            cooldown: 0,
+            unlockStar: 1,
+            unlockLevel: 1,
+          },
+        ],
+      },
+    }
+    const result = runBattle({
+      allies: [burnOnly],
+      enemies: [getEnemy('wanderer')],
+      enemyScale: 1,
+      ctx: { mode: 'pve' as const, seed: 7 },
+    })
+    const deaths = result.log.filter((e) => e.kind === 'death')
+    expect(deaths.length).toBeGreaterThan(0)
+    expect(deaths[0].targetId).toBe('wanderer#0')
   })
 })
 

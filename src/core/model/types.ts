@@ -397,6 +397,8 @@ export type BattleLogKind =
   | 'control'
   | 'dot'
   | 'skill'
+  /** 单位被击败（§6.3 战斗演出） */
+  | 'death'
   /** BOSS 召唤援军（§6.5） */
   | 'summon'
   | 'round'
@@ -409,6 +411,13 @@ export interface BattleLogEntry {
   targetId: string
   amount: number
   crit?: boolean
+  /**
+   * 本次伤害被**护盾吸收**（伤害未落到血量上）。
+   *
+   * 战斗演出据此把飘字显示成「吸收」样式（§6.3）；
+   * 表现层不得靠文案猜测。
+   */
+  absorbed?: boolean
   text: string
 }
 
@@ -446,6 +455,24 @@ export interface BattleUnitRosterEntry {
   maxHp: number
   /** 出场回合（1 起）。召唤援军 > 1，回放时出场前不应显示该单位。 */
   appearRound: number
+  /**
+   * 基础定义 id（§6.3 战斗演出）。
+   *
+   * ⚠ 敌人 `id` 形如 `boss_abyss#0`（`#序号` 是同一模板的第几个），
+   *   **表现层不得自行剥这个后缀**——美术路径必须由 core 按 `defId` 给出。
+   *   我方 `id` 即英灵 id，此时 `defId === id`。
+   */
+  defId: string
+  /** 定位（角色色标） */
+  role: Role
+  /** 五行（元素色） */
+  element: Element
+  /**
+   * BOSS 机制类型；存在即 BOSS。
+   *
+   * 战斗演出据此加 BOSS 描边与分段血条（§6.3）。
+   */
+  mechanic?: BossMechanic['type']
 }
 
 // ─────────────────────────── 掉落 ───────────────────────────
