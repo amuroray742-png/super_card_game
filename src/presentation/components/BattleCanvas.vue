@@ -24,6 +24,11 @@ import {
   type BattleEffect,
   type BattleState,
 } from '../utils/battle-timeline.ts'
+import {
+  BATTLE_LAYOUT,
+  floatBaseY,
+  unitPosition,
+} from '../utils/battle-layout.ts'
 
 const props = defineProps<{
   battle: BattleResult | null
@@ -57,24 +62,22 @@ const speed = computed(() => props.speed ?? 1)
 
 // ─────────────────────────── 布局与配色 ───────────────────────────
 
-/** 头像半径 */
-const UNIT_R = 21
-/** 名牌相对头像的纵向偏移 */
-const NAME_DY = -32
-/** 血条相对头像的纵向偏移 */
-const BAR_DY = 30
+/**
+ * 头像半径 / 名牌 / 血条 / 行距等几何常量**全部来自 `battle-layout.ts`**（唯一口径）。
+ *
+ * ⚠ 那里同时提供了「不重叠」的可计算不变量，由 `tests/unit/battle-layout.test.ts` 守护：
+ *   下一排的最上缘（BOSS 双环外缘）必须 ≥ 上一排的最下沿（名牌下沿）。
+ *   历史教训：行距只按头像直径估算 → 上排血条被下排头像整个盖住。
+ */
+const UNIT_R = BATTLE_LAYOUT.unitRadius
+/** 名牌基线相对头像的纵向偏移（**头像下方**） */
+const NAME_DY = BATTLE_LAYOUT.nameDy
+/** 血条相对头像的纵向偏移（紧贴头像下沿） */
+const BAR_DY = BATTLE_LAYOUT.barDy
 /** 血条宽度 */
 const BAR_W = 48
-/**
- * 飘字基线相对头像的纵向偏移与上浮距离。
- *
- * ⚠ 上浮必须**留出画布顶部空间**：第一排单位在 `h × 0.34`，
- *   若飘字从 `y - 44` 往上飘 30px，末排飘字会整个飞出画布（只见数字下半截）。
- */
-const FLOAT_DY = -48
-const FLOAT_RISE = 18
-/** 飘字基线的最低位置（不出画布顶） */
-const FLOAT_MIN_Y = 11
+/** 画布高度（CSS 用 `v-bind` 绑定，杜绝「常量改了 CSS 没改」的两套口径） */
+const canvasHeight = BATTLE_LAYOUT.canvasHeight
 
 /** 定位色标（沿用全局主题板，不另造花哨配色） */
 const ROLE_COLOR: Record<string, string> = {
@@ -160,15 +163,14 @@ function resize() {
  *
  * ⚠ 必须用**真实编队槽位号**（core 名册给的 `slot`）：队伍会跳过空槽位，
  * 用「队伍里第几个」会把后排的人画到前排去（AGENTS.md 铁律 #16）。
+ *
+ * ⚠ 纵向几何（行距、名牌、血条位置）统一由 `battle-layout.ts` 给出，
+ *   「相邻两排不重叠」由 `tests/unit/battle-layout.test.ts` 守护（铁律 #21）。
  */
 function positionOf(unit: BattleUnitRosterEntry): { x: number; y: number } {
   const w = canvas.value?.clientWidth ?? 360
-  const h = canvas.value?.clientHeight ?? 240
-  const row = unit.slot % 3
-  const col = Math.floor(unit.slot / 3) // 0=前排 1=后排
-  const x = unit.side === 'ally' ? w * 0.3 - col * w * 0.17 : w * 0.7 + col * w * 0.17
-  const y = h * 0.34 + row * h * 0.19
-  return { x, y }
+  const h = canvas.value?.clientHeight ?? canvasHeight
+  return unitPosition(unit, w, h)
 }
 
 // ─────────────────────────── 绘制 ───────────────────────────
@@ -230,7 +232,7 @@ function draw() {
 
     // 站位光圈（扁平一点，别被血条切掉一半）
     c.beginPath()
-    c.ellipse(x, y + 29, 24, 7, 0, 0, Math.PI * 2)
+    c.ellipse(x, y + 24, 24, 6, 0, 0, Math.PI * 2)
     c.fillStyle = unit.side === 'ally' ? 'rgba(200,169,81,0.16)' : 'rgba(192,57,43,0.16)'
     c.fill()
 
@@ -263,7 +265,7 @@ function draw() {
 
     // 定位色环
     c.beginPath()
-    c.arc(x, y, r + 2, 0, Math.PI * 2)
+    c.arc(x, y, r + BATTLE_LAYOUT.ringOut, 0, Math.PI * 2)
     c.strokeStyle = alive ? (ROLE_COLOR[unit.role] ?? '#8a8272') : '#3a362d'
     c.lineWidth = 2
     c.stroke()
@@ -271,7 +273,7 @@ function draw() {
     // BOSS 额外描边（金色双环）
     if (isBoss && alive) {
       c.beginPath()
-      c.arc(x, y, r + 6, 0, Math.PI * 2)
+      c.arc(x, y, r + BATTLE_LAYOUT.bossOut, 0, Math.PI * 2)
       c.strokeStyle = 'rgba(200,169,81,0.75)'
       c.lineWidth = 1.5
       c.stroke()
@@ -302,7 +304,9 @@ function draw() {
 
     // 名牌
     c.fillStyle = alive ? 'rgba(236,229,214,0.9)' : 'rgba(120,112,99,0.6)'
-    c.font = isBoss ? 'bold 11px sans-serif' : '11px sans-serif'
+    c.font = isBoss
+      ? `bold ${BATTLE_LAYOUT.nameFont}px sans-serif`
+      : `${BATTLE_LAYOUT.nameFont}px sans-serif`
     c.textAlign = 'center'
     c.fillText(unit.name, x, y + NAME_DY)
 
@@ -315,12 +319,12 @@ function draw() {
     c.fillRect(bx, by, BAR_W, 5)
     c.fillStyle = ratio > 0.5 ? '#52be80' : ratio > 0.25 ? '#c8a951' : '#c0392b'
     c.fillRect(bx, by, BAR_W * ratio, 5)
-    // BOSS 血条分段（每 10% 一刻度）
+    // BOSS 血条分段（每 20% 一刻度；10 段挤在 48px 上会糊成条纹）
     if (isBoss) {
       c.strokeStyle = 'rgba(20,18,16,0.85)'
       c.lineWidth = 1
-      for (let i = 1; i < 10; i++) {
-        const sx = bx + (BAR_W * i) / 10
+      for (let i = 1; i < 5; i++) {
+        const sx = bx + (BAR_W * i) / 5
         c.beginPath()
         c.moveTo(sx, by)
         c.lineTo(sx, by + 5)
@@ -335,16 +339,16 @@ function draw() {
   // 飘字
   drawFloats(c, effects)
 
-  // 最新一条事件文字
+  // 最新一条事件文字（贴在画布底部，不与第三排的名牌打架）
   const idx = state.eventIndex
   const log = tl.events[Math.max(0, idx - 1)]?.entry
   if (log) {
     c.fillStyle = 'rgba(0,0,0,0.45)'
-    c.fillRect(0, h - 30, w, 30)
+    c.fillRect(0, h - BATTLE_LAYOUT.eventBarHeight, w, BATTLE_LAYOUT.eventBarHeight)
     c.fillStyle = '#ece5d6'
     c.font = '12px sans-serif'
     c.textAlign = 'center'
-    c.fillText(log.text, w / 2, h - 11)
+    c.fillText(log.text, w / 2, h - BATTLE_LAYOUT.eventBarHeight + 18)
   }
 }
 
@@ -388,8 +392,8 @@ function drawFloats(c: CanvasRenderingContext2D, effects: BattleEffect[]) {
     c.textAlign = 'center'
     c.strokeStyle = 'rgba(0,0,0,0.75)'
     c.lineWidth = 3
-    // 上浮但**不出画布顶**：第一排单位上方的空间有限，硬飘会整段飞出画布
-    const fy = Math.max(FLOAT_MIN_Y, y + FLOAT_DY - p * FLOAT_RISE)
+    // 上浮但**不出画布顶**（钳制逻辑在 battle-layout.ts，单测有守护）
+    const fy = floatBaseY(y, p)
     c.strokeText(text, x + offset, fy)
     c.fillText(text, x + offset, fy)
     c.restore()
@@ -640,7 +644,15 @@ onBeforeUnmount(() => {
 .battle-canvas {
   display: block;
   width: 100%;
-  height: 240px;
+  /*
+   * 画布高度不是随手定的：三排单位纵向排布时，
+   * 「顶部队列空间 + 头像直径 42 + 血条 5 + 名牌 11 + 行距间隙」必须完整放得下，
+   * 否则后画的一排会把上一排的血条盖住（AGENTS.md 铁律 #21）。
+   *
+   * 高度取自 `battle-layout.ts` 的唯一口径（v-bind 绑定），
+   * 下限由 `tests/unit/battle-layout.test.ts` 守护。
+   */
+  height: v-bind('canvasHeight + "px"');
 }
 
 /* 回合进度条 */

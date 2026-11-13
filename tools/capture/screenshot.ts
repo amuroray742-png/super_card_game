@@ -158,11 +158,16 @@ async function runBattleScenario(
   await page.getByRole('button', { name: '收下' }).click()
   await page.waitForTimeout(400)
 
-  // 2) 编队：前排 1 人、后排 1 人
+  // 2) 编队：**满编 6 人**（前排 3 + 后排 3），
+  //    少编就看不到三排纵向排布，遮挡类问题会漏检
   await page.goto(`${base}/#/formation`, { waitUntil: 'networkidle' })
   for (const [slotText, index] of [
     ['空位 1', 0],
-    ['空位 4', 1],
+    ['空位 2', 1],
+    ['空位 3', 2],
+    ['空位 4', 3],
+    ['空位 5', 4],
+    ['空位 6', 5],
   ] as const) {
     await page.locator('.slot', { hasText: slotText }).click()
     const dialog = page.locator('.dialog')
