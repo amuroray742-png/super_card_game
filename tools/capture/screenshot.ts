@@ -36,6 +36,10 @@
  * # 抽卡券场景（注册账号 → 十连扣光结晶 → 召唤页看十连改用抽卡券）
  * npx tsx tools/capture/screenshot.ts --gacha-ticket --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/gacha-ticket.png
+ *
+ * # 抽卡演出场景（注册账号 → 十连 → 抓「逐张翻牌」与「SSR 全屏爆点」两帧）
+ * npx tsx tools/capture/screenshot.ts --gacha-reveal --api http://127.0.0.1:8791 \
+ *   --url http://127.0.0.1:4188 --out artifacts/art-preview/gacha-reveal.png
  * ```
  */
 import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test'
@@ -64,6 +68,8 @@ interface Options {
   hero: boolean
   /** 抽卡券场景：召唤页「结晶耗尽 → 十连改用抽卡券」 */
   gachaTicket: boolean
+  /** 抽卡演出场景：抓「逐张翻牌」与「SSR 全屏爆点」两帧 */
+  gachaReveal: boolean
   /** 隔离后端地址（观战场景要注册账号） */
   api: string
   /** 指定关卡 id（走关卡详情页的「战斗预览」；不填则走推征页的「观战」） */
@@ -85,6 +91,7 @@ function parseArgs(argv: string[]): Options {
     battle: argv.includes('--battle'),
     hero: argv.includes('--hero'),
     gachaTicket: argv.includes('--gacha-ticket'),
+    gachaReveal: argv.includes('--gacha-reveal'),
     api: get('--api') ?? '',
     stage: get('--stage') ?? '',
     fullPage: argv.includes('--full-page'),
@@ -143,11 +150,11 @@ async function registerSession(api: string): Promise<ShotSession> {
 }
 
 /**
- * 准备一个可用的登录态 + 一批英灵（注册 → 注入会话 → 十连）。
+ * 注入登录态。
  *
  * 会话与后端地址必须在**导航前**写入（路由守卫靠它们恢复登录态）。
  */
-async function setupAccount(context: BrowserContext, page: Page, opts: Options): Promise<string> {
+async function injectSession(context: BrowserContext, opts: Options): Promise<ShotSession> {
   const session = await registerSession(opts.api)
   await context.addInitScript(
     ({ apiBase, sess }: { apiBase: string; sess: ShotSession }) => {
@@ -160,6 +167,14 @@ async function setupAccount(context: BrowserContext, page: Page, opts: Options):
     },
     { apiBase: opts.api.replace(/\/$/, ''), sess: session },
   )
+  return session
+}
+
+/**
+ * 准备一个可用的登录态 + 一批英灵（注册 → 注入会话 → 十连）。
+ */
+async function setupAccount(context: BrowserContext, page: Page, opts: Options): Promise<string> {
+  await injectSession(context, opts)
 
   const base = opts.url.replace(/\/$/, '')
   await page.goto(`${base}/#/gacha`, { waitUntil: 'networkidle' })
@@ -167,6 +182,37 @@ async function setupAccount(context: BrowserContext, page: Page, opts: Options):
   await page.getByRole('button', { name: '收下' }).click()
   await page.waitForTimeout(400)
   return base
+}
+
+/**
+ * 抽卡演出场景：注册 → 召唤页点十连 → 抓「逐张翻牌」与「SSR 全屏爆点」两帧。
+ *
+ * 新手保底让**首个十连必出 1 位 SSR**，所以这条链路一定有全屏爆点可拍。
+ */
+async function runGachaRevealScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  await injectSession(context, opts)
+  const base = opts.url.replace(/\/$/, '')
+  await page.goto(`${base}/#/gacha`, { waitUntil: 'networkidle' })
+  await page.getByTestId('pull-ten').click()
+
+  // 演出层出现 = 演出 t=0，从这一刻开始计时
+  await page.getByTestId('gacha-reveal').waitFor({ state: 'visible' })
+  await page.waitForTimeout(330)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-charge.png') })
+  await page.waitForTimeout(450)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-cards.png') })
+
+  // 全屏爆点：SSR 落在第 10 张，等它自己出现
+  await page.locator('.burst-card').waitFor({ state: 'visible', timeout: 20000 })
+  await page.waitForTimeout(380)
+  await page.screenshot({ path: outPath })
+
+  return ''
 }
 
 /**
@@ -297,8 +343,8 @@ async function runBattleScenario(
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   assertSafeOrigin(opts.url)
-  if ((opts.battle || opts.hero || opts.gachaTicket) && !opts.api) {
-    throw new Error('观战 / 英灵详情 / 抽卡券场景需要 --api <隔离后端地址>（用于注册临时账号）')
+  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal) && !opts.api) {
+    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出场景需要 --api <隔离后端地址>（用于注册临时账号）')
   }
 
   const target = `${opts.url.replace(/\/$/, '')}/#${opts.route}`
@@ -324,6 +370,8 @@ async function main(): Promise<void> {
       resultPath = await runBattleScenario(context, page, opts, outPath)
     } else if (opts.gachaTicket) {
       await runGachaTicketScenario(context, page, opts, outPath)
+    } else if (opts.gachaReveal) {
+      await runGachaRevealScenario(context, page, opts, outPath)
     } else {
       await page.goto(target, { waitUntil: 'networkidle' })
       await page.waitForTimeout(opts.waitMs)
@@ -333,7 +381,7 @@ async function main(): Promise<void> {
       }
     }
 
-    if (!opts.battle && !opts.hero && !opts.gachaTicket) {
+    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal) {
       await page.screenshot({ path: outPath, fullPage: opts.fullPage })
     }
     if (resultPath) {
