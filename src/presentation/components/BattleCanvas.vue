@@ -29,6 +29,7 @@ import {
   floatBaseY,
   unitPosition,
 } from '../utils/battle-layout.ts'
+import BattleLogPanel from './BattleLogPanel.vue'
 
 const props = defineProps<{
   battle: BattleResult | null
@@ -533,6 +534,14 @@ const currentRound = computed(() => {
 const totalRounds = computed(() => timeline.value?.rounds.length ?? 0)
 
 /**
+ * 已经发生的战报条目数。
+ *
+ * ⚠ 取自 `projectState(t).eventIndex`——与画面**同源**，
+ *   文字战报列表不会和画面对不上（倍速 / 跳转 / 重播都一样）。
+ */
+const visibleLogCount = computed(() => lastState.value?.eventIndex ?? 0)
+
+/**
  * 当前在场的单位数（援军未入场不计入）。
  *
  * 只作 DOM 侧断言用——端到端用例据此判断「画面上真的有人」，
@@ -630,6 +639,9 @@ onBeforeUnmount(() => {
         第 {{ currentRound }} / {{ totalRounds }} 回合
       </span>
     </div>
+
+    <!-- 文字战报：可滚动列表，整体回顾这场战斗 -->
+    <BattleLogPanel v-if="battle" :log="battle.log" :visible-count="visibleLogCount" />
   </div>
 </template>
 

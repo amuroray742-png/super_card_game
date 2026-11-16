@@ -138,6 +138,22 @@ export function buildTimeline(log: BattleLogEntry[], roster: BattleUnitRosterEnt
 }
 
 /**
+ * 时刻 t **已经发生**的战报条目（文字战报列表用）。
+ *
+ * ⚠ 与画面同源：条目范围由时间推导，表现层不自行判断「哪些事件算发生了」，
+ *   也不自行拼装战报文字——文案一律取 core 产出的 `entry.text`。
+ *   与 `projectState(t).eventIndex` 等价（`timeline.events` 与 `log` 一一对应）。
+ */
+export function visibleLogEntries(timeline: BattleTimeline, t: number): BattleLogEntry[] {
+  const out: BattleLogEntry[] = []
+  for (const ev of timeline.events) {
+    if (ev.at > t) break
+    out.push(ev.entry)
+  }
+  return out
+}
+
+/**
  * 时刻 t 的战场状态。
  *
  * 血量按事件累加；「本次变化前 / 变化后 / 变化时刻」一并返回，

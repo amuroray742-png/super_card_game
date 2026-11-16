@@ -225,4 +225,66 @@ test.describe('战斗演出（§6.3 数值型轻演出）', () => {
     await expect(page.getByText('请先在阵位中编队')).toBeVisible()
     await expect(page.locator('canvas.battle-canvas')).toHaveCount(0)
   })
+
+  test('文字战报是可滚动列表，随演出增长，跳过后给出完整战报', async ({ page }) => {
+    await bootLoggedIn(page)
+    await pullHeroes(page)
+    await setupTeam(page)
+
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+    await page.getByRole('button', { name: '观战', exact: true }).click()
+
+    const panel = page.locator('[data-testid="battle-log"]')
+    const list = page.locator('[data-testid="battle-log-list"]')
+    await expect(panel).toBeVisible()
+    await expect(list).toBeVisible()
+
+    // 开局只有回合分隔，没有正文条目
+    await expect(list.locator('.log-round').first()).toContainText('第 1 回合')
+    expect(await list.locator('.log-line').count()).toBe(0)
+
+    // 演出推进 → 条目逐渐出现（与画面同源，不是事后一次性铺满）
+    await expect
+      .poll(async () => list.locator('.log-line').count(), { timeout: 15_000 })
+      .toBeGreaterThan(3)
+
+    // 跳到结束 → 完整战报都在列表里
+    await page.getByRole('button', { name: '跳过', exact: true }).click()
+    await expect
+      .poll(async () => list.locator('.log-line').count(), { timeout: 10_000 })
+      .toBeGreaterThan(5)
+
+    // 战报文字取自 core：条目内容是中文句子，不是内部 id
+    const firstLine = await list.locator('.log-line').first().innerText()
+    expect(firstLine.length).toBeGreaterThan(2)
+    expect(firstLine).not.toContain('#')
+
+    // 内容超出可视高度时列表可滚动，且自动跟底
+    const { scrollHeight, clientHeight, scrollTop } = await list.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      scrollTop: el.scrollTop,
+    }))
+    expect(scrollHeight).toBeGreaterThanOrEqual(clientHeight)
+    if (scrollHeight > clientHeight + 4) {
+      // 自动跟底：播放中列表贴着底部
+      expect(scrollHeight - scrollTop - clientHeight).toBeLessThanOrEqual(32)
+      // 手动上滚后能停住，并出现「回到最新」按钮
+      await list.evaluate((el) => {
+        el.scrollTop = 0
+      })
+      await expect(page.locator('[data-testid="log-latest"]')).toBeVisible()
+      await page.locator('[data-testid="log-latest"]').click()
+      await expect
+        .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+        .toBeLessThanOrEqual(32)
+    }
+
+    // 折叠 / 展开
+    await page.locator('.log-title').click()
+    await expect(list).toBeHidden()
+    await page.locator('.log-title').click()
+    await expect(list).toBeVisible()
+  })
 })

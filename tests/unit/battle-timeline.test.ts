@@ -13,6 +13,7 @@ import {
   projectState,
   collectEffects,
   tweenedHp,
+  visibleLogEntries,
   EVENT_DURATION,
   HP_TWEEN_MS,
   FLOAT_MERGE_MS,
@@ -184,6 +185,47 @@ describe('状态投影', () => {
     expect(unit.hpChangedAt).toBe(AT.damage)
     expect(tweenedHp(unit, AT.damage)).toBe(500)
     expect(tweenedHp(unit, AT.damage + HP_TWEEN_MS)).toBeCloseTo(380, 6)
+  })
+})
+
+describe('文字战报（可见条目）', () => {
+  it('条目范围与 projectState 的 eventIndex 完全一致', () => {
+    const tl = buildTimeline(log, roster)
+    for (const t of [0, AT.round1, AT.skill, AT.damage, AT.crit, AT.death, tl.duration]) {
+      expect(visibleLogEntries(tl, t)).toHaveLength(projectState(tl, t).eventIndex)
+    }
+  })
+
+  it('t=0 时只有「第 1 回合」这一条（战斗起点）', () => {
+    const tl = buildTimeline(log, roster)
+    // 首个事件（回合分隔）的时刻就是 0，因此 t=0 时它已经发生
+    expect(visibleLogEntries(tl, 0)).toHaveLength(1)
+    expect(visibleLogEntries(tl, 0)[0].kind).toBe('round')
+  })
+
+  it('只包含已经发生的条目，且文案原样取自 core', () => {
+    const tl = buildTimeline(log, roster)
+    const entries = visibleLogEntries(tl, AT.damage + 1)
+    expect(entries.length).toBeGreaterThan(0)
+    // 时刻 ≤ t 的事件才可见
+    for (let i = 0; i < entries.length; i++) {
+      expect(tl.events[i].at).toBeLessThanOrEqual(AT.damage + 1)
+    }
+    // 文案不被表现层改写
+    expect(entries[0].text).toBe(log[0].text)
+    expect(entries[entries.length - 1].text).toBe(log[entries.length - 1].text)
+  })
+
+  it('播完后包含全部条目', () => {
+    const tl = buildTimeline(log, roster)
+    expect(visibleLogEntries(tl, tl.duration)).toHaveLength(log.length)
+  })
+
+  it('跳回合 / 重播后重新推导，不会残留上一次的条目', () => {
+    const tl = buildTimeline(log, roster)
+    // 先看到后面，再跳回前面
+    expect(visibleLogEntries(tl, tl.duration)).toHaveLength(log.length)
+    expect(visibleLogEntries(tl, AT.round1)).toHaveLength(1)
   })
 })
 

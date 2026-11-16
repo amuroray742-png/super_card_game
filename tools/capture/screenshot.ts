@@ -254,6 +254,10 @@ async function runBattleScenario(
   await page.locator('canvas.battle-canvas').waitFor({ state: 'visible' })
   // 让演出推进几秒，好让画面上有伤害数字与血条变化
   await page.waitForTimeout(opts.waitMs)
+  // 把战斗区滚进视口：画布 + 控制条 + 文字战报列表要一起入镜
+  // （战报列表在画布下方，不滚动就只截到画布）
+  await page.locator('.battle-box').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
   await page.screenshot({ path: outPath })
 
   // 4) 结算面板：跳过演出后出战后结算
