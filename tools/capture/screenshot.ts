@@ -32,6 +32,10 @@
  * # 英灵详情场景（注册账号 → 十连 → 圣殿点开第一个英灵）
  * npx tsx tools/capture/screenshot.ts --hero --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/hero.png
+ *
+ * # 抽卡券场景（注册账号 → 十连扣光结晶 → 召唤页看十连改用抽卡券）
+ * npx tsx tools/capture/screenshot.ts --gacha-ticket --api http://127.0.0.1:8791 \
+ *   --url http://127.0.0.1:4188 --out artifacts/art-preview/gacha-ticket.png
  * ```
  */
 import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test'
@@ -58,6 +62,8 @@ interface Options {
   battle: boolean
   /** 英灵详情场景（登录 → 十连 → 圣殿点开第一个英灵） */
   hero: boolean
+  /** 抽卡券场景：召唤页「结晶耗尽 → 十连改用抽卡券」 */
+  gachaTicket: boolean
   /** 隔离后端地址（观战场景要注册账号） */
   api: string
   /** 指定关卡 id（走关卡详情页的「战斗预览」；不填则走推征页的「观战」） */
@@ -78,6 +84,7 @@ function parseArgs(argv: string[]): Options {
     pull: argv.includes('--pull'),
     battle: argv.includes('--battle'),
     hero: argv.includes('--hero'),
+    gachaTicket: argv.includes('--gacha-ticket'),
     api: get('--api') ?? '',
     stage: get('--stage') ?? '',
     fullPage: argv.includes('--full-page'),
@@ -160,6 +167,25 @@ async function setupAccount(context: BrowserContext, page: Page, opts: Options):
   await page.getByRole('button', { name: '收下' }).click()
   await page.waitForTimeout(400)
   return base
+}
+
+/**
+ * 抽卡券场景：注册 → 首次十连（扣光 3000 结晶）→ 回召唤页。
+ *
+ * 截图用于验收「结晶耗尽后十连自动改用抽卡券」：
+ * 十连按钮的扣费文案应从「结晶 3000」变成「券 10」，资源条显示结晶 0 / 券 10。
+ */
+async function runGachaTicketScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  const base = await setupAccount(context, page, opts)
+  await page.goto(`${base}/#/gacha`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: outPath })
+  return ''
 }
 
 /**
@@ -271,8 +297,8 @@ async function runBattleScenario(
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   assertSafeOrigin(opts.url)
-  if ((opts.battle || opts.hero) && !opts.api) {
-    throw new Error('观战 / 英灵详情场景需要 --api <隔离后端地址>（用于注册临时账号）')
+  if ((opts.battle || opts.hero || opts.gachaTicket) && !opts.api) {
+    throw new Error('观战 / 英灵详情 / 抽卡券场景需要 --api <隔离后端地址>（用于注册临时账号）')
   }
 
   const target = `${opts.url.replace(/\/$/, '')}/#${opts.route}`
@@ -296,6 +322,8 @@ async function main(): Promise<void> {
       resultPath = await runHeroScenario(context, page, opts, outPath)
     } else if (opts.battle) {
       resultPath = await runBattleScenario(context, page, opts, outPath)
+    } else if (opts.gachaTicket) {
+      await runGachaTicketScenario(context, page, opts, outPath)
     } else {
       await page.goto(target, { waitUntil: 'networkidle' })
       await page.waitForTimeout(opts.waitMs)
@@ -305,7 +333,7 @@ async function main(): Promise<void> {
       }
     }
 
-    if (!opts.battle && !opts.hero) {
+    if (!opts.battle && !opts.hero && !opts.gachaTicket) {
       await page.screenshot({ path: outPath, fullPage: opts.fullPage })
     }
     if (resultPath) {
