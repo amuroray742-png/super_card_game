@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { registerAccount, seedSession, uniqueUsername } from './helpers'
+import { registerAccount, seedSession, skipGachaReveal, uniqueUsername } from './helpers'
 
 /**
  * 英灵养成端到端用例（属性面板 + 技能升级 + 喂经验扣经验池）。
@@ -25,6 +25,8 @@ async function bootLoggedIn(page: Page): Promise<void> {
 /** 新手十连，拿到一批英灵 */
 async function pullHeroes(page: Page): Promise<void> {
   await page.locator('button', { hasText: '十连' }).first().click()
+  // 演出会停在 SSR 爆点等玩家点击 → 这里直接跳过演出拿结算
+  await skipGachaReveal(page)
   await page.getByRole('button', { name: '收下' }).click()
   await expect(page.locator('.dialog')).toHaveCount(0)
 }

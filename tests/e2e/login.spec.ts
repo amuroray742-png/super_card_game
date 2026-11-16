@@ -7,6 +7,7 @@ import {
   registerViaUi,
   seedApiBase,
   seedSession,
+  skipGachaReveal,
   uniqueUsername,
 } from './helpers'
 
@@ -79,6 +80,8 @@ test.describe('登录系统', () => {
     await pageA.goto('/#/gacha')
     await pageA.waitForLoadState('networkidle')
     await pageA.locator('button', { hasText: '十连' }).first().click()
+    // 演出会停在 SSR 爆点等玩家点击 → 这里直接跳过演出拿结算
+    await skipGachaReveal(pageA)
     await pageA.getByRole('button', { name: '收下' }).click()
 
     // 设备 B：全新浏览器上下文（没有任何本地存档），用同一账号登录

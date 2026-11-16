@@ -13,7 +13,7 @@
  * - N / R：安静翻开；
  * - SR：光晕 + 铃音；
  * - SSR：**全屏爆点**（光爆 + 放射光束 + 粒子爆炸 + 震屏），独占时间，
- *   放完后进入**驻留**（画面停住 + 「点击任意处继续」提示），玩家可随时跳过。
+ *   放完后画面**停住等玩家点击**（不自动结束），玩家点一下才继续翻下一张。
  *
  * 音效为 WebAudio **合成**（无语音、不含任何配音素材）。
  */
@@ -41,8 +41,27 @@ const emit = defineEmits<{ (e: 'finished'): void }>()
 /** 事件表（一次演出内不变） */
 const plan = planReveal(props.items)
 
-/** 当前时刻（ms）——组件唯一的可变状态 */
+/**
+ * 演出时间轴（ms）：推进到**闸门点**（`plan.gates`）时**冻结**，
+ * 等玩家点击放行后才继续往后翻卡。
+ */
 const t = ref(0)
+
+/**
+ * 墙钟（ms）：一直推进。
+ *
+ * 只驱动「氛围动效」（提示脉动、光束流转、卡片浮动）：
+ * 时间轴冻结时画面不能整个死掉。
+ * **不参与任何演出事实的推导**（事实一律来自 `projectReveal(t)`）。
+ */
+const clock = ref(0)
+
+/**
+ * 闸门闩锁：时间轴正停在闸门上、等玩家点击。
+ *
+ * 这是「等输入」的闩锁，**不是演出状态**；画面仍全部由 `projectReveal(t)` 推导。
+ */
+const waiting = ref(false)
 
 /** 画面状态：全部由 `t` 推导 */
 const state = computed<RevealState>(() => projectReveal(t.value, plan))
@@ -143,46 +162,52 @@ const titleStyle = computed(() => {
 const burstStyle = computed(() => {
   const b = state.value.burst
   const p = b?.progress ?? 0
-  const hold = b?.hold ?? 0
-  // 驻留期间保持暗角（画面停住但不失掉「爆点」的氛围）
-  const core = Math.max(ease.burst(p), hold > 0 ? 0.42 : 0)
+  const release = b?.release ?? 0
+  // 停住等待期间保持暗角（画面停住但不失掉「爆点」的氛围）
+  const core = Math.max(ease.burst(p), b?.waiting ? 0.42 : 0)
+  // 收束时整体压暗（改渐变本身的透明度，不用整层 opacity——见上方警告）
+  const k = 1 - release
   return {
-    background: `radial-gradient(circle at 50% 46%, rgba(44, 34, 18, ${(0.55 + core * 0.4).toFixed(3)}) 0%, rgba(10, 8, 5, 0.92) 55%, rgba(4, 3, 2, 0.99) 100%)`,
+    background: `radial-gradient(circle at 50% 46%, rgba(44, 34, 18, ${((0.55 + core * 0.4) * k).toFixed(3)}) 0%, rgba(10, 8, 5, ${(0.92 * k).toFixed(3)}) 55%, rgba(4, 3, 2, ${(0.99 * k).toFixed(3)}) 100%)`,
   }
 })
 
-/** 放射光束：随时间加速旋转；驻留期间保持缓慢流转 */
+/** 放射光束：随时间加速旋转；停住期间保持缓慢流转 */
 const raysStyle = computed(() => {
   const b = state.value.burst
   const p = b?.progress ?? 0
-  const hold = b?.hold ?? 0
-  const drift = hold > 0 ? (t.value - (b?.event.fxEndAt ?? 0)) * 0.035 : 0
+  const release = b?.release ?? 0
+  // 停住期间光束缓慢流转：用墙钟（时间轴冻结了，但画面要「活着」）
+  const drift = Math.max(0, clock.value - (b?.event.fxEndAt ?? 0)) * 0.035
+  const base = 0.55 + ease.burst(p) * 0.45
+  // 停住期间缓缓压暗一点，让卡面更突出
+  const dim = 1 - 0.22 * clamp01(Math.max(0, clock.value - (b?.event.fxEndAt ?? 0)) / 600)
   return {
     transform: `rotate(${(p * 120 + drift).toFixed(2)}deg) scale(${(0.85 + p * 0.4).toFixed(3)})`,
-    opacity: (hold > 0 ? 0.42 : 0.55 + ease.burst(p) * 0.45).toFixed(3),
+    opacity: (base * dim * (1 - release)).toFixed(3),
   }
 })
 
-/** 爆点背光：从中心射出的竖直光束；驻留期间留一点余韵 */
+/** 爆点背光：从中心射出的竖直光束；停住期间留一点余韵 */
 const beamStyle = computed(() => {
   const b = state.value.burst
   const p = b?.progress ?? 0
-  const hold = b?.hold ?? 0
+  const release = b?.release ?? 0
   const core = ease.burst(p)
   return {
-    opacity: (Math.max(core, hold > 0 ? 0.16 : 0) * 0.95).toFixed(3),
+    opacity: (Math.max(core, b?.waiting ? 0.16 : 0) * 0.95 * (1 - release)).toFixed(3),
     transform: `translate(-50%, -50%) scaleX(${(0.45 + core * 0.85).toFixed(3)})`,
   }
 })
 
-/** 爆点大字（SSR）冲击：砸下来 → 定住 → 驻留末尾淡出 */
+/** 爆点大字（SSR）冲击：砸下来 → 定住 → 点击继续后才淡出 */
 const wordStyle = computed(() => {
   const b = state.value.burst
   const p = b?.progress ?? 0
-  const hold = b?.hold ?? 0
+  const release = b?.release ?? 0
   const inA = clamp01(p / 0.14)
-  // 动画期间一直亮着（玩家要看得清），驻留末尾才淡出
-  const outA = hold > 0 ? clamp01((1 - hold) / 0.32) : 1
+  // 停住期间一直亮着（玩家要看得清），点击放行后才淡出
+  const outA = 1 - release
   const scale = p < 0.14 ? 1.65 - ease.outCubic(p / 0.14) * 0.65 : 1
   return {
     opacity: (inA * outA * 0.9).toFixed(3),
@@ -190,23 +215,23 @@ const wordStyle = computed(() => {
   }
 })
 
-/** 爆点主卡：回弹入场 → 悬浮 → 驻留（轻微起伏）→ 末尾淡出 */
+/** 爆点主卡：回弹入场 → 悬浮 → 停住（轻微起伏）→ 点击后淡出 */
 const burstCardStyle = computed(() => {
   const b = state.value.burst
   const p = b?.progress ?? 0
-  const hold = b?.hold ?? 0
+  const release = b?.release ?? 0
   let scale: number
   if (p < 0.2) scale = 0.55 + ease.outBack(p / 0.2) * 0.55
   else scale = 1.1 - (p - 0.2) * 0.13
-  // 驻留：轻微悬浮 + 呼吸，避免画面完全静止
+  // 爆点动画结束后：轻微悬浮 + 呼吸，避免画面完全静止（走墙钟）
+  const bob = Math.sin((clock.value / 1000) * 2)
   let dy = 0
-  if (hold > 0) {
-    const bob = Math.sin((t.value / 1000) * 2)
+  if (p >= 0.999) {
     scale = 1 + bob * 0.014
     dy = bob * 7
   }
   const fadeIn = p < 0.12 ? p / 0.12 : 1
-  const fadeOut = hold > 0 ? clamp01((1 - hold) / 0.28) : 1
+  const fadeOut = 1 - release
   return {
     transform: `translate(-50%, calc(-50% + ${dy.toFixed(1)}px)) scale(${scale.toFixed(3)})`,
     opacity: (fadeIn * fadeOut).toFixed(3),
@@ -214,15 +239,15 @@ const burstCardStyle = computed(() => {
 })
 
 /**
- * 驻留提示「点击任意处继续」。
+ * 停住提示「点击任意处继续」。
  *
- * 脉动同样走 `t` 推导（不用 CSS animation——动画优先级高于行内样式，
+ * 脉动同样走推导（不用 CSS animation——动画优先级高于行内样式，
  * 会把行内 opacity 顶掉，同 AGENTS.md 铁律 #23 记的坑）。
  */
 const holdHintStyle = computed(() => {
-  const hold = state.value.burst?.hold ?? 0
-  const a = clamp01((hold - 0.1) / 0.22)
-  const pulse = 0.68 + 0.32 * Math.sin((t.value / 1000) * 3.2)
+  const fxEndAt = state.value.burst?.event.fxEndAt ?? 0
+  const a = clamp01((clock.value - fxEndAt) / 260)
+  const pulse = 0.68 + 0.32 * Math.sin((clock.value / 1000) * 3.2)
   return { opacity: (a * pulse).toFixed(3) }
 })
 
@@ -404,7 +429,20 @@ function loop(ts: number): void {
   // 卡顿时限幅，避免一帧跳太多导致演出"瞬移"
   const dt = Math.min(64, ts - lastTs)
   lastTs = ts
-  t.value = Math.min(plan.duration, t.value + dt)
+  // 墙钟一直走（氛围动效用）；时间轴遇到闸门就冻结
+  clock.value += dt
+  if (!waiting.value) {
+    const next = t.value + dt
+    // 下一道闸门（尚未到达的 SSR 爆点结束点）
+    const gate = plan.gates.find((g) => g > t.value)
+    if (gate !== undefined && next >= gate) {
+      // 精确落在闸门点上：画面停住，等玩家点击
+      t.value = gate
+      waiting.value = true
+    } else {
+      t.value = Math.min(plan.duration, next)
+    }
+  }
   const st = state.value
   // 时间跳变（跳过）时不要把「跳过的卡牌」当成逐张翻开，否则会齐响一片
   fireSounds(st, t.value - lastProjectedT > 150)
@@ -417,9 +455,23 @@ function loop(ts: number): void {
   raf = requestAnimationFrame(loop)
 }
 
+/**
+ * 舞台点击：
+ * - 正停在闸门上（等玩家点击）→ **放行**：时间轴继续，演一段收束再翻下一张；
+ * - 否则 → 直接跳到结算（等同右上角「跳过」）。
+ */
+function onStageClick(): void {
+  if (waiting.value) {
+    waiting.value = false
+    return
+  }
+  skip()
+}
+
 function skip(): void {
   if (t.value >= plan.duration) return
   playRevealSound('skip')
+  waiting.value = false
   t.value = plan.duration
   draw()
 }
@@ -445,7 +497,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="reveal" data-testid="gacha-reveal" :style="rootStyle" @click="skip">
+  <div class="reveal" data-testid="gacha-reveal" :style="rootStyle" @click="onStageClick">
     <canvas ref="canvasRef" class="fx"></canvas>
 
     <!-- 蓄力 -->
@@ -492,9 +544,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 驻留提示：爆点放完后画面停住，玩家可点击继续 -->
+    <!-- 停住提示：爆点放完后画面停住，玩家点击才继续 -->
     <div
-      v-if="state.burst && state.burst.hold > 0"
+      v-if="state.burst && state.burst.waiting"
       class="hold-hint"
       data-testid="gacha-hold-hint"
       :style="holdHintStyle"

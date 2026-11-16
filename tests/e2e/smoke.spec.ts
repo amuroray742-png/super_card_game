@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { registerAccount, seedSession, uniqueUsername } from './helpers'
+import { registerAccount, seedSession, skipGachaReveal, uniqueUsername } from './helpers'
 
 /**
  * 端到端冒烟用例（§15.2）。
@@ -123,6 +123,8 @@ test.describe('新手保底（§7.3 第 3 条）', () => {
     await expect(page.getByRole('button', { name: '初临之赐' })).toBeVisible()
 
     await page.locator('button', { hasText: '十连' }).first().click()
+    // 演出会停在 SSR 爆点等玩家点击 → 这里直接跳过演出拿结算
+    await skipGachaReveal(page)
 
     // 结果弹窗中至少 1 位传说英灵
     const dialog = page.locator('.dialog')
@@ -154,6 +156,7 @@ test.describe('抽卡券可用于十连（逐抽计价）', () => {
 
     // 第一次十连：扣 3000 结晶，抽卡券不动
     await tenBtn.click()
+    await skipGachaReveal(page)
     await page.getByRole('button', { name: '收下' }).click()
     await expect(page.locator('.dialog')).toHaveCount(0)
     await expect(crystals).toHaveText('0')
@@ -162,6 +165,7 @@ test.describe('抽卡券可用于十连（逐抽计价）', () => {
     // 结晶用尽 → 十连改用抽卡券（券够就能召唤）
     await expect(tenBtn).toContainText('券 10')
     await tenBtn.click()
+    await skipGachaReveal(page)
     await page.getByRole('button', { name: '收下' }).click()
     await expect(page.locator('.dialog')).toHaveCount(0)
     await expect(crystals).toHaveText('0')
@@ -187,6 +191,7 @@ test.describe('抽卡券可用于十连（逐抽计价）', () => {
 
     // 先单抽一次（结晶优先 → 扣 300 结晶），把结晶压到只够 9 抽
     await singleBtn.click()
+    await skipGachaReveal(page)
     await page.getByRole('button', { name: '收下' }).click()
     await expect(page.locator('.dialog')).toHaveCount(0)
     await expect(crystals).toHaveText('2,700')
@@ -195,6 +200,7 @@ test.describe('抽卡券可用于十连（逐抽计价）', () => {
     // 结晶只够 9 抽 → 十连必须用 9 抽结晶 + 1 张券补齐，按钮文案与实际扣费一致
     await expect(tenBtn).toContainText('结晶 2700 + 券 1')
     await tenBtn.click()
+    await skipGachaReveal(page)
     await page.getByRole('button', { name: '收下' }).click()
     await expect(page.locator('.dialog')).toHaveCount(0)
 
@@ -205,7 +211,7 @@ test.describe('抽卡券可用于十连（逐抽计价）', () => {
 })
 
 test.describe('抽卡演出（分级演出）', () => {
-  test('十连：逐张翻牌 → SSR 全屏爆点 → 演完才出结算', async ({ page }) => {
+  test('十连：逐张翻牌 → SSR 全屏爆点 → 停住等点击 → 点一下才演完', async ({ page }) => {
     await gotoApp(page, '#/gacha')
 
     // 还没抽：没有结算弹窗
@@ -228,7 +234,17 @@ test.describe('抽卡演出（分级演出）', () => {
     await expect(burst.locator('.tag-ssr')).toHaveText('SSR')
     await expect(burst.locator('.name')).not.toBeEmpty()
 
-    // 演完 → 演出层消失，结算弹窗出现
+    // 爆点放完后画面**停住等玩家点击**（不会自己结束）
+    const holdHint = page.getByTestId('gacha-hold-hint')
+    await expect(holdHint).toBeVisible({ timeout: 15000 })
+    // 停多久都不出结算：必须玩家点一下
+    await page.waitForTimeout(3000)
+    await expect(page.locator('.dialog')).toHaveCount(0)
+    await expect(reveal).toBeVisible()
+    await expect(holdHint).toBeVisible()
+
+    // 玩家点一下画面 → 继续演完 → 出结算
+    await reveal.click({ position: { x: 12, y: 12 } })
     await expect(page.locator('.dialog')).toBeVisible({ timeout: 15000 })
     await expect(reveal).toHaveCount(0)
 
@@ -270,7 +286,7 @@ async function pullTen(page: Page): Promise<string[]> {
   await dismissOfflineIfAny(page)
   await page.getByTestId('pull-ten').click()
   // 演出可跳过（这里只为提速，跳过失败不影响断言）
-  await page.getByTestId('gacha-skip').click({ timeout: 1500 }).catch(() => {})
+  await skipGachaReveal(page)
   await page.getByRole('button', { name: '收下' }).click()
   await expect(page.locator('.dialog')).toHaveCount(0)
   return page.locator('.hist-row').allTextContents()
@@ -305,6 +321,8 @@ test.describe('卡面展示（Phase 8b · 3:4 完整卡面）', () => {
   test('抽卡结果以 3:4 完整卡面展示新获得英灵', async ({ page }) => {
     await gotoApp(page, '#/gacha')
     await page.locator('button', { hasText: '十连' }).first().click()
+    // 演出会停在 SSR 爆点等玩家点击 → 这里直接跳过演出拿结算
+    await skipGachaReveal(page)
 
     const dialog = page.locator('.dialog')
     await expect(dialog).toBeVisible()

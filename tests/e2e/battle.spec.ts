@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { registerAccount, seedSession, uniqueUsername, type E2eSession } from './helpers'
+import { registerAccount, seedSession, skipGachaReveal, uniqueUsername, type E2eSession } from './helpers'
 
 /**
  * 战斗演出端到端用例（§6.3「数值型轻演出」）。
@@ -36,6 +36,8 @@ async function bootLoggedIn(page: Page): Promise<E2eSession> {
 /** 新手十连，拿到一批英灵 */
 async function pullHeroes(page: Page): Promise<void> {
   await page.locator('button', { hasText: '十连' }).first().click()
+  // 演出会停在 SSR 爆点等玩家点击 → 这里直接跳过演出拿结算
+  await skipGachaReveal(page)
   await page.getByRole('button', { name: '收下' }).click()
   await expect(page.locator('.dialog')).toHaveCount(0)
 }

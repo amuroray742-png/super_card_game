@@ -113,3 +113,23 @@ export async function loginViaUi(
   // 页面里有两个「登录」按钮（模式切换 + 提交），提交按钮在后面
   await page.getByRole('button', { name: '登录', exact: true }).last().click()
 }
+
+/**
+ * 跳过抽卡演出 → 直接进结算。
+ *
+ * SSR 爆点会**停住等玩家点击**（不自动结束，见 §7.6 实施修正），
+ * 所以「只想拿结算」的用例必须显式跳过（或放行闸门），
+ * 干等结算自己冒出来会一直等到超时。
+ *
+ * 没有 SSR 的短演出可能已经自己演完（跳过按钮已消失），
+ * 此时点不到也无所谓——结算已经出来了。
+ */
+export async function skipGachaReveal(page: Page): Promise<void> {
+  const skip = page.getByTestId('gacha-skip')
+  const shown = await skip
+    .waitFor({ state: 'visible', timeout: 4000 })
+    .then(() => true)
+    .catch(() => false)
+  if (!shown) return
+  await skip.click({ timeout: 3000 }).catch(() => {})
+}

@@ -37,7 +37,7 @@
  * npx tsx tools/capture/screenshot.ts --gacha-ticket --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/gacha-ticket.png
  *
- * # 抽卡演出场景（注册账号 → 十连 → 抓「逐张翻牌」「SSR 全屏爆点」「爆点驻留」三帧）
+ * # 抽卡演出场景（注册账号 → 十连 → 抓「逐张翻牌」「SSR 全屏爆点」「爆点停住等点击」三帧）
  * npx tsx tools/capture/screenshot.ts --gacha-reveal --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/gacha-reveal.png
  * ```
@@ -212,7 +212,7 @@ async function runGachaRevealScenario(
   await page.waitForTimeout(380)
   await page.screenshot({ path: outPath })
 
-  // 驻留：爆点动画放完后画面停住，提示「点击任意处继续」
+  // 停住：爆点动画放完后画面停住等玩家点击，提示「点击任意处继续」
   await page.getByTestId('gacha-hold-hint').waitFor({ state: 'visible', timeout: 20000 })
   await page.waitForTimeout(260)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-hold.png') })

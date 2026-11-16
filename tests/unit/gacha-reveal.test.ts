@@ -41,20 +41,30 @@ describe('抽卡演出 · 排期', () => {
     expect(plan.events[1].startAt).toBe(REVEAL_TIMING.CHARGE_MS + REVEAL_TIMING.FLIP_MS)
   })
 
-  it('SSR 爆点独占时间：下一张卡等爆点（含驻留）结束才翻', () => {
+  it('SSR 爆点独占时间：下一张卡等爆点收束结束才翻', () => {
     const plan = planReveal([item('a', 'SSR'), item('b', 'R')])
     const [first, second] = plan.events
     expect(first.tier).toBe('burst')
     expect(first.fxEndAt).toBe(first.flipEndAt + REVEAL_TIMING.BURST_MS)
-    // 驻留：动画放完后画面停住一段
-    expect(first.holdEndAt).toBe(first.fxEndAt + REVEAL_TIMING.BURST_HOLD_MS)
-    expect(second.startAt).toBe(first.holdEndAt)
+    // 点击继续后演一小段收束，再翻下一张
+    expect(first.releaseEndAt).toBe(first.fxEndAt + REVEAL_TIMING.RELEASE_MS)
+    expect(second.startAt).toBe(first.releaseEndAt)
   })
 
-  it('非爆点卡没有驻留（holdEndAt = fxEndAt）', () => {
+  it('闸门点 = 爆点动画结束时刻（时间轴推进到这里就冻结等点击）', () => {
+    const plan = planReveal([item('a', 'SSR'), item('b', 'R')])
+    expect(plan.gates).toEqual([plan.events[0].fxEndAt])
+  })
+
+  it('没有 SSR 就没有闸门', () => {
     const plan = planReveal([item('a', 'SR'), item('b', 'R')])
-    expect(plan.events[0].holdEndAt).toBe(plan.events[0].fxEndAt)
-    expect(plan.events[1].holdEndAt).toBe(plan.events[1].fxEndAt)
+    expect(plan.gates).toEqual([])
+  })
+
+  it('非爆点卡没有收束（releaseEndAt = fxEndAt）', () => {
+    const plan = planReveal([item('a', 'SR'), item('b', 'R')])
+    expect(plan.events[0].releaseEndAt).toBe(plan.events[0].fxEndAt)
+    expect(plan.events[1].releaseEndAt).toBe(plan.events[1].fxEndAt)
   })
 
   it('SR 光效不阻塞后续翻牌', () => {
@@ -98,42 +108,55 @@ describe('抽卡演出 · 状态推导', () => {
     expect(done.cards[0].revealed).toBe(true)
   })
 
-  it('SSR 爆点窗口内有 burst，驻留结束后没有', () => {
+  it('SSR 爆点窗口内有 burst，收束结束后没有', () => {
     const inside = projectReveal(plan.events[0].fxAt + 100, plan)
     expect(inside.burst).not.toBeNull()
     expect(inside.phase).toBe('burst')
     expect(inside.burst?.event.index).toBe(0)
 
-    const after = projectReveal(plan.events[0].holdEndAt + 10, plan)
+    const after = projectReveal(plan.events[0].releaseEndAt + 10, plan)
     expect(after.burst).toBeNull()
   })
 
-  it('SSR 爆点后会驻留：画面停住、进度停 1、提示玩家可继续', () => {
+  it('停在闸门点：画面停住等点击（进度停 1、收束为 0）', () => {
     const ev = plan.events[0]
-    // 动画刚放完 → 进入驻留
-    const justAfter = projectReveal(ev.fxEndAt + 1, plan)
-    expect(justAfter.phase).toBe('hold')
-    expect(justAfter.burst).not.toBeNull()
-    expect(justAfter.burst?.progress).toBe(1)
-    expect(justAfter.burst?.hold).toBeGreaterThan(0)
-    expect(justAfter.burst?.hold).toBeLessThan(1)
+    const atGate = projectReveal(ev.fxEndAt, plan)
+    expect(atGate.phase).toBe('hold')
+    expect(atGate.burst).not.toBeNull()
+    expect(atGate.burst?.waiting).toBe(true)
+    expect(atGate.burst?.progress).toBe(1)
+    expect(atGate.burst?.release).toBe(0)
+  })
 
-    // 驻留中段：画面仍在（玩家看得清），进度仍在推进
-    const mid = projectReveal(ev.fxEndAt + REVEAL_TIMING.BURST_HOLD_MS * 0.5, plan)
-    expect(mid.phase).toBe('hold')
+  it('闸门点是纯函数：同一个 t 得到同一状态（画面不会自己乱动）', () => {
+    const ev = plan.events[0]
+    expect(projectReveal(ev.fxEndAt, plan)).toEqual(projectReveal(ev.fxEndAt, plan))
+  })
+
+  it('闸门之外不算「等点击」（waiting 只在闸门点上为真）', () => {
+    const ev = plan.events[0]
+    const after = projectReveal(ev.fxEndAt + 1, plan)
+    expect(after.burst?.waiting).toBe(false)
+    expect(after.burst?.release).toBeGreaterThan(0)
+    expect(after.phase).toBe('release')
+  })
+
+  it('点击放行后：收束推进 → 爆点层撤掉 → 继续翻下一张', () => {
+    const ev = plan.events[0]
+    const mid = projectReveal(ev.fxEndAt + REVEAL_TIMING.RELEASE_MS * 0.5, plan)
+    expect(mid.burst?.release).toBeCloseTo(0.5, 2)
     expect(mid.burst?.progress).toBe(1)
-    expect(mid.burst?.hold).toBeCloseTo(0.5, 2)
 
-    // 驻留结束 → 爆点层撤掉
-    const end = projectReveal(ev.holdEndAt, plan)
+    // 收束结束 → 爆点层撤掉
+    const end = projectReveal(ev.releaseEndAt, plan)
     expect(end.burst).toBeNull()
     expect(end.phase).not.toBe('hold')
   })
 
-  it('驻留计入总时长（玩家看得到的那几秒不能被吃掉）', () => {
-    const plan = planReveal([item('a', 'SSR')])
-    const ev = plan.events[0]
-    expect(plan.duration).toBe(ev.holdEndAt + REVEAL_TIMING.SETTLE_MS)
+  it('收束计入总时长', () => {
+    const p = planReveal([item('a', 'SSR')])
+    const ev = p.events[0]
+    expect(p.duration).toBe(ev.releaseEndAt + REVEAL_TIMING.SETTLE_MS)
   })
 
   it('SR 光效强度先起后落', () => {
