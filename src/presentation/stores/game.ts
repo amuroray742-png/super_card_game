@@ -552,6 +552,17 @@ export const useGameStore = defineStore('game', () => {
     if (!(await persist(true))) return null
     return {
       ...summarizePull(outcome),
+      /**
+       * 本次抽到的**完整名册**（含重复），按抽出顺序。
+       *
+       * 事实全部来自 core 的 `executePull` 结果——表现层只展示，
+       * 不得自行推导稀有度 / 是否新获得（铁律 #8 / #16）。
+       */
+      items: outcome.results.map((r) => ({
+        heroId: r.heroId,
+        rarity: r.rarity,
+        isNew: r.isNew,
+      })),
       /** 新手保底是否触发 */
       guaranteedTriggered: outcome.guaranteedTriggered,
       /** 本次是否消耗掉新手保底资格 */

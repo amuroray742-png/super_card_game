@@ -204,6 +204,52 @@ test.describe('抽卡券可用于十连（逐抽计价）', () => {
   })
 })
 
+test.describe('抽卡演出（分级演出）', () => {
+  test('十连：逐张翻牌 → SSR 全屏爆点 → 演完才出结算', async ({ page }) => {
+    await gotoApp(page, '#/gacha')
+
+    // 还没抽：没有结算弹窗
+    await expect(page.locator('.dialog')).toHaveCount(0)
+
+    await page.getByTestId('pull-ten').click()
+
+    // 演出层出现，且带「跳过」
+    const reveal = page.getByTestId('gacha-reveal')
+    await expect(reveal).toBeVisible()
+    await expect(page.getByTestId('gacha-skip')).toBeVisible()
+    // 演出期间不出现结算弹窗（先演后结算）
+    await expect(page.locator('.dialog')).toHaveCount(0)
+    // 十连 = 10 张卡
+    await expect(page.getByTestId('gacha-reveal-card')).toHaveCount(10)
+
+    // 新手保底 → 首个十连必出 1 位 SSR → 一定有全屏爆点
+    const burst = page.getByTestId('gacha-burst')
+    await expect(burst).toBeVisible({ timeout: 15000 })
+    await expect(burst.locator('.tag-ssr')).toHaveText('SSR')
+    await expect(burst.locator('.name')).not.toBeEmpty()
+
+    // 演完 → 演出层消失，结算弹窗出现
+    await expect(page.locator('.dialog')).toBeVisible({ timeout: 15000 })
+    await expect(reveal).toHaveCount(0)
+
+    await page.getByRole('button', { name: '收下' }).click()
+    await expect(page.locator('.dialog')).toHaveCount(0)
+  })
+
+  test('「跳过」立即结束演出并进入结算', async ({ page }) => {
+    await gotoApp(page, '#/gacha')
+    await page.getByTestId('pull-ten').click()
+
+    const reveal = page.getByTestId('gacha-reveal')
+    await expect(reveal).toBeVisible()
+    await page.getByTestId('gacha-skip').click()
+
+    // 跳过 = 把演出时间直接推到末尾（不演完剩余卡牌）
+    await expect(reveal).toHaveCount(0, { timeout: 5000 })
+    await expect(page.locator('.dialog')).toBeVisible({ timeout: 5000 })
+  })
+})
+
 test.describe('卡面展示（Phase 8b · 3:4 完整卡面）', () => {
   test('抽卡结果以 3:4 完整卡面展示新获得英灵', async ({ page }) => {
     await gotoApp(page, '#/gacha')

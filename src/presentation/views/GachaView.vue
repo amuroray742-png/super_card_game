@@ -9,6 +9,9 @@ import { useGameStore } from '../stores/game'
 import { POOLS, resolvePoolHeroIds } from '../../core/config/pools.ts'
 import { GACHA } from '../../core/config/economy.ts'
 import { pullCost, resolvePayment } from '../../core/systems/gacha.ts'
+import { unlockAudio } from '../utils/gacha-audio.ts'
+import type { RevealItem } from '../utils/gacha-reveal.ts'
+import GachaReveal from '../components/GachaReveal.vue'
 import { HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { formatNumber, formatRate } from '../utils/format'
 import type { Rarity } from '../../core/model/types.ts'
@@ -107,13 +110,28 @@ const canTen = computed(
   () => resolvePayment(10, store.save.player.crystals, store.save.player.tickets) !== null,
 )
 
+/** 演出中的名册（非空 = 正在演出；演完才出结算弹窗） */
+const revealItems = ref<RevealItem[] | null>(null)
+/** 本次是否触发新手保底（演出结束后再提示，避免盖住演出） */
+const guaranteeTriggered = ref(false)
+
 async function pull(count: 1 | 10) {
+  // 音频上下文必须在**用户手势**内解锁（移动端自动播放策略）
+  unlockAudio()
   const summary = await store.pull(poolId.value, count)
   // 余额不足 / 存档冲突时 store 已给出提示，这里直接中止
   if (!summary) return
   result.value = summary
+  guaranteeTriggered.value = summary.guaranteedTriggered
+  // 先播演出（蓄力 → 翻牌 → SR 光效 → SSR 爆点），演完再出结算
+  revealItems.value = summary.items
+}
+
+/** 演出结束 → 出结算弹窗 */
+function onRevealFinished() {
+  revealItems.value = null
   resultOpen.value = true
-  if (summary?.guaranteedTriggered) {
+  if (guaranteeTriggered.value) {
     store.notify('新手保底已触发 · 十连内获得 1 位传说英灵', 'ok')
   }
 }
@@ -295,6 +313,14 @@ const DUPLICATE_ROWS: { rarity: Rarity; note: string }[] = [
         <span class="tiny muted">{{ h.isNew ? '新获得' : '重复转化' }}</span>
       </div>
     </section>
+
+    <!-- 抽卡演出（蓄力 → 翻牌 → SR 光效 → SSR 爆点） -->
+    <GachaReveal
+      v-if="revealItems"
+      :items="revealItems"
+      :title="pool.name"
+      @finished="onRevealFinished"
+    />
 
     <!-- 抽卡结果 -->
     <div v-if="resultOpen && result" class="mask" @click.self="resultOpen = false">
