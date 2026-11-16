@@ -568,6 +568,14 @@ export interface SaveData {
    * 旧档没有该字段时按 0 处理（= 永远「不比别人新」）。
    */
   savedAt: number
+  /**
+   * 随机数状态快照（初始种子 + 已消耗个数）。
+   *
+   * **必须随存档持久化**：抽卡序列若不落盘，刷新页面就会从头复现——
+   * 玩家可以「刷新重抽」，且所有玩家的抽卡序列完全相同，
+   * 概率公示宣称的 SSR 0.60% 在实际游戏里会退化成固定脚本（铁律 #24）。
+   */
+  rng: { seed: number; counter: number }
   player: {
     silver: number
     exp: number

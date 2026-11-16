@@ -61,7 +61,8 @@ function previewBattle() {
     enemyScale: stage.value?.enemyScale ?? 1,
     ctx: {
       mode: 'pve',
-      seed: Math.floor(Math.random() * 1e9),
+      // 战斗种子取自 store 的持久化随机序列（铁律 #24）
+      seed: store.nextBattleSeed(),
       teamMods: { bond: getBondMods(store.team) },
     },
   })

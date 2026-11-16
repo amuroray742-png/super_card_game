@@ -57,7 +57,9 @@ function fight() {
     enemyScale: stage.value.enemyScale,
     ctx: {
       mode: 'pve',
-      seed: Math.floor(Math.random() * 1e9),
+      // 战斗种子取自 store 的持久化随机序列：
+      // 表现层不直接用 Math.random（铁律 #6 / #24），且刷新后不会重复同一场战斗
+      seed: store.nextBattleSeed(),
       teamMods: { bond: getBondMods(store.team) },
     },
   })

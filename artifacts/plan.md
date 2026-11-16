@@ -892,6 +892,34 @@ PvP 产出**只进竞技专属池**，与 PVE 经济完全隔离：
 > E2E 覆盖「逐张翻牌 → SSR 全屏爆点 → 演完才出结算」与「跳过立即结束」；
 > 截图工具 `tools/capture/screenshot.ts --gacha-reveal` 抓蓄力 / 翻牌 / 爆点三帧。
 
+> **实施修正（2026-11，抽卡随机性）**：本节「概率公示」承诺的是**随机**抽取，
+> 但实现里**每一次抽卡的随机序列都是固定的**——实测同一账号三次十连抽到的
+> 10 个英灵**完全同序同稀有度**（蔡文姬→徐霞客→赵云→周瑜(SR)→陶渊明→王昭君→
+> 曹大家→商鞅→毕昇→范蠡），且**所有玩家一致**。这不是手感问题，而是
+> §7.2 的公示概率与实际行为**脱节**（合规硬伤）。根因有两层：
+>
+> 1. **浮点种子被截断**（根因）：`executePull(..., rng.next())` 传的是 `[0,1)` 的浮点，
+>    而 `Rng` 构造函数直接 `seed >>> 0` → 浮点被截断成 **0** → 全部落到兜底常量
+>    `0x9e3779b9` → **每次抽卡同一颗种子**。挂机掉落 / 战斗 / 竞技场同理
+>    （它们也传浮点种子）。改为：`Rng` 对浮点种子按 2^32 放大，
+>    并新增 `rng.nextSeed()` 派生整数种子；store 的 4 个调用点统一改用整数种子。
+> 2. **种子写死 + 计数器不落盘**：store 曾写 `new Rng(0x5eed)`，且计数器只在内存里 →
+>    刷新页面即回到序列开头（可无限「刷新重抽」）。改为：存档新增
+>    `rng: { seed, counter }`（存档版本 4→5），载入时 `Rng.fromSnapshot()` 复原、
+>    `persist()` 时同步计数器；新存档的种子来自平台随机源 `platform/random.ts`
+>    （表现层不得直接用 `Math.random()`）。
+>
+> **同批修正**：「是否新获得」原按**批次开始前**的持有快照判定 →
+> 同一批里抽到同一英灵两次时两张都算「新获得」：重复转化（印记 / 银两）少给一份，
+> 结算弹窗的「新获得英灵」又把同一个人列了两次。改为按**逐张累积**判定
+> （`core/systems/gacha.ts` 的 `grantedInBatch`）。
+>
+> 回归守护：`tests/unit/rng-state.test.ts`（快照复原 / 浮点截断 / 两次十连序列不同 /
+> 刷新后不复现）+ `tests/unit/gacha.test.ts`（同批重复按重复转化）
+> + E2E「抽卡随机性」（两次十连序列不同、刷新后不复现）。
+> 另修一条**靠 bug 才通过**的老用例：「重复 SSR 转化为印记 + 同名碎片」原靠
+> 「固定种子恰好抽出项羽」成立，现改为把所有 SSR 放进「已拥有」，不依赖具体序列。
+
 ---
 
 ## 8. 内容设计：全球历史名人英灵池
@@ -1171,6 +1199,8 @@ interface HeroDef {
    > **实施修正（Phase 8b 收尾）**：存档从 v3 升到 v4，新增 `savedAt` 字段与 `save/conflict.ts`（纯逻辑：`nextStamp` / `hasExternalUpdate`），由 `tests/unit/save-conflict.test.ts` 与 `tests/unit/store-save.test.ts` 守护。
    > 历史教训：原实现 `persist()` 无脑覆写存储，某个拿着过期存档的标签页/脚本一写就把另一方的进度整份抹掉，且毫无提示。同时，**localStorage 按 origin 隔离**——自动化脚本只要访问玩家正在游玩的 origin（`localhost:5173`），就会与玩家共用同一份存档。工具侧因此新增 `tools/capture/screenshot.ts`，内置 origin 守卫，禁止对玩家可能正在使用的 origin 截图。
 
+10. **随机数状态随存档持久化**：`SaveData` 带 `rng: { seed, counter }`（存档 v4→v5）。种子与计数器必须落盘——只存内存时刷新页面即回到序列开头（玩家可无限「刷新重抽」）；种子不得写死常量（所有玩家会抽到完全相同的序列）。新存档的种子来自 `platform/random.ts`；表现层禁止直接用 `Math.random()`。详见 §7.6「抽卡随机性」实施修正与铁律 #24。
+
 ### 12.4 核心数据结构（存档）
 
 ```ts
@@ -1179,6 +1209,7 @@ interface SaveData {
   createdAt: number;
   lastTickAt: number;              // 用于离线结算
   savedAt: number;                 // 最后一次成功写入存储的时间戳（多上下文冲突检测）
+  rng: { seed: number; counter: number };  // 随机数状态快照（种子 + 已消耗个数）——刷新后不复现抽卡序列
   player: {
     silver: number; exp: number; shards: Record<string, number>;
     emblems: number; crystals: number; tickets: number;

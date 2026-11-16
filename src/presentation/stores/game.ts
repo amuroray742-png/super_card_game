@@ -22,6 +22,7 @@ import { createNewSave, normalizeSave } from '../../core/save/schema.ts'
 import { hasExternalUpdate, nextStamp, pickNewer } from '../../core/save/conflict.ts'
 import { deserialize, serialize } from '../../core/save/serialize.ts'
 import { storage } from '../../platform/storage.ts'
+import { randomSeed } from '../../platform/random.ts'
 import { systemClock } from '../../core/time.ts'
 import { Rng } from '../../core/rng.ts'
 import { HEROES, HERO_INDEX } from '../../core/config/heroes/index.ts'
@@ -55,7 +56,6 @@ import '../../core/config/relics.ts'
 import '../../core/config/enemies.ts'
 
 export const useGameStore = defineStore('game', () => {
-  const save = ref<SaveData>(createNewSave(Date.now()))
   /**
    * 时钟必须是**会走动**的。
    *
@@ -65,7 +65,20 @@ export const useGameStore = defineStore('game', () => {
    * 不是为了冻结时间；需要伪造时间的测试用 core 层的 `ManualClock`。
    */
   const clock = systemClock
-  const rng = new Rng(0x5eed)
+  const save = ref<SaveData>(createNewSave(clock.now(), randomSeed()))
+
+  /**
+   * 全局随机数发生器。
+   *
+   * ⚠ **种子不得写死常量**（历史教训，铁律 #24）：
+   * 曾经写成 `new Rng(0x5eed)`，且计数器只在内存里 →
+   * ① 所有玩家抽到的英灵序列**完全相同**；
+   * ② 刷新页面后计数器归零，序列从头复现 → 玩家可以无限「刷新重抽」。
+   *
+   * 现在种子与计数器都随存档持久化（`save.rng`），载入时据此复原，
+   * 序列只前进不复现；新存档的种子来自平台随机源（`platform/random.ts`）。
+   */
+  let rng = new Rng(0)
 
   /** 最近一次战斗的完整回放（供 Canvas 渲染器播放） */
   const lastBattle = shallowRef<BattleResult | null>(null)
@@ -100,6 +113,32 @@ export const useGameStore = defineStore('game', () => {
   }
 
   // ─────────────────────────── 持久化 ───────────────────────────
+
+  /**
+   * 从存档恢复随机数状态。
+   *
+   * 旧档（无 `rng` 字段）种子为 0 → 这里补一个**平台随机**种子，
+   * 避免所有旧档玩家共用同一条抽卡序列（铁律 #24）。
+   * 随后按计数器重放，复原到上次退出时的位置——刷新页面不会复现抽卡结果。
+   *
+   * @returns 是否补了种子（旧档首次载入 = true，需要把新种子推上云端，
+   *          否则另一台设备会另生成一条序列）
+   */
+  function restoreRng(): boolean {
+    const state = save.value.rng
+    const assigned = !state.seed
+    if (assigned) {
+      state.seed = randomSeed()
+      state.counter = 0
+    }
+    rng = Rng.fromSnapshot(state.seed, state.counter)
+    return assigned
+  }
+
+  /** 把随机数计数器写回存档（持久化时调用，保证序列只前进不复现） */
+  function persistRngState(): void {
+    save.value.rng.counter = rng.snapshot().counter
+  }
 
   /**
    * 本进程最后一次「读到 / 写入」存档时看到的时间戳。
@@ -150,6 +189,8 @@ export const useGameStore = defineStore('game', () => {
         return false
       }
       save.value.savedAt = stamp
+      // 随机数计数器随存档一起落盘：抽卡序列因此不会在刷新后从头复现
+      persistRngState()
       await storage.save(slot.value, save.value)
       knownStamp = Math.max(knownStamp, stamp)
       pushDirty = true
@@ -278,6 +319,9 @@ export const useGameStore = defineStore('game', () => {
     save.value.savedAt = stamp
     knownStamp = stamp
 
+    // 随机数状态随存档恢复：刷新页面后抽卡序列继续前进，不复现上次的结果
+    const assignedSeed = restoreRng()
+
     // 落盘本地槽位（与云端保持同一份内容）
     try {
       await storage.save(slot.value, save.value)
@@ -292,7 +336,8 @@ export const useGameStore = defineStore('game', () => {
     if (elapsed > 60) void claimOffline()
 
     // 本地比云端新（或云端还没有存档）→ 推上去
-    if (winner !== 'cloud') void pushNow()
+    // 旧档首次补了随机种子 → 也要推上去（否则另一台设备会另生成一条序列）
+    if (winner !== 'cloud' || assignedSeed) void pushNow()
   }
 
   /**
@@ -325,7 +370,9 @@ export const useGameStore = defineStore('game', () => {
     loaded.value = false
     guideSeen.value = false
     knownStamp = 0
-    save.value = createNewSave(clock.now())
+    // 换号 → 换一条随机序列：上一个账号的抽卡位置不能带到新账号
+    save.value = createNewSave(clock.now(), randomSeed())
+    restoreRng()
     // 上一个账号的离线结算报告不能带到新账号上
     offlineReport.value = null
   }
@@ -335,7 +382,9 @@ export const useGameStore = defineStore('game', () => {
    * 不受「其它页面改过存档」的冲突保护限制——玩家就是要清空。
    */
   async function reset() {
-    save.value = createNewSave(clock.now())
+    // 重置 → 换一条全新的随机序列（否则旧档的抽卡位置会被继承）
+    save.value = createNewSave(clock.now(), randomSeed())
+    restoreRng()
     knownStamp = nextStamp(clock.now(), knownStamp)
     save.value.savedAt = knownStamp
     await storage.save(slot.value, save.value)
@@ -416,7 +465,7 @@ export const useGameStore = defineStore('game', () => {
       team.value,
       save.value.idle.currentStage,
       battles,
-      rng.next(),
+      rng.nextSeed(),
     )
     applyRewards(result.rewards)
     if (result.blockedAtStage !== null) {
@@ -441,7 +490,7 @@ export const useGameStore = defineStore('game', () => {
       team.value,
       save.value.idle.currentStage,
       elapsed,
-      rng.next(),
+      rng.nextSeed(),
     )
     applyRewards(result.rewards)
     save.value.lastTickAt = clock.now()
@@ -508,7 +557,7 @@ export const useGameStore = defineStore('game', () => {
         },
         pool,
         count,
-        rng.next(),
+        rng.nextSeed(),
       )
     } catch (err) {
       // 余额不足：拒绝本次抽卡，不产生任何扣费与产出
@@ -867,8 +916,19 @@ export const useGameStore = defineStore('game', () => {
       attackerName: '我',
       defenderId: 'foe',
       defenderName: '试炼对手',
-      seed: rng.next(),
+      seed: rng.nextSeed(),
     })
+  }
+
+  /**
+   * 战斗种子：取自**持久化**的随机数序列。
+   *
+   * 表现层不得直接用 `Math.random()`（铁律 #6 / #24）：
+   * ① 平台随机要走 `platform/random.ts`；
+   * ② 战斗种子走同一条持久化序列，刷新页面不会重复同一场战斗。
+   */
+  function nextBattleSeed(): number {
+    return rng.nextSeed()
   }
 
   /**
@@ -964,6 +1024,8 @@ export const useGameStore = defineStore('game', () => {
     try {
       const loaded = await storage.import(text)
       save.value = normalizeSave(loaded)
+      // 导入的存档自带随机数状态 → 沿用，保持「备份恢复后序列连续」
+      restoreRng()
       // 导入是「玩家主动覆盖」，允许强行写入：先把已知戳提到最高，绕过冲突保护
       knownStamp = nextStamp(clock.now(), knownStamp)
       save.value.savedAt = knownStamp
@@ -1024,6 +1086,7 @@ export const useGameStore = defineStore('game', () => {
     tickIdle,
     claimOffline,
     pull,
+    nextBattleSeed,
     feedExp,
     breakRealm,
     upgradeSkill,

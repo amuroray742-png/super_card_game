@@ -250,6 +250,57 @@ test.describe('抽卡演出（分级演出）', () => {
   })
 })
 
+/**
+ * 离线结算弹窗会盖住抽卡按钮（第一次点击会被弹窗吃掉），
+ * 出现时先收下，否则抽卡根本没发生。
+ */
+async function dismissOfflineIfAny(page: Page): Promise<void> {
+  const offline = page.locator('.dialog').filter({ hasText: '离线推征结算' })
+  const visible = await offline
+    .waitFor({ state: 'visible', timeout: 2500 })
+    .then(() => true)
+    .catch(() => false)
+  if (!visible) return
+  await offline.getByRole('button', { name: '收下' }).click()
+  await expect(offline).toHaveCount(0)
+}
+
+/** 抽一次十连并走完演出 → 结算 */
+async function pullTen(page: Page): Promise<string[]> {
+  await dismissOfflineIfAny(page)
+  await page.getByTestId('pull-ten').click()
+  // 演出可跳过（这里只为提速，跳过失败不影响断言）
+  await page.getByTestId('gacha-skip').click({ timeout: 1500 }).catch(() => {})
+  await page.getByRole('button', { name: '收下' }).click()
+  await expect(page.locator('.dialog')).toHaveCount(0)
+  return page.locator('.hist-row').allTextContents()
+}
+
+test.describe('抽卡随机性（铁律 #24）', () => {
+  test('两次十连抽到的英灵序列不同（不再是固定脚本）', async ({ page }) => {
+    await gotoApp(page, '#/gacha')
+
+    // 第一次十连：新手保底只替换第 10 张，前 9 张是纯随机产出
+    const first = await pullTen(page)
+    await expect(page.locator('.hist-row')).toHaveCount(10)
+
+    const second = await pullTen(page)
+    expect(second.slice(0, 9)).not.toEqual(first.slice(0, 9))
+  })
+
+  test('刷新页面后序列继续前进，不复现上一批', async ({ page }) => {
+    await gotoApp(page, '#/gacha')
+
+    const first = await pullTen(page)
+
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+
+    const second = await pullTen(page)
+    expect(second.slice(0, 9)).not.toEqual(first.slice(0, 9))
+  })
+})
+
 test.describe('卡面展示（Phase 8b · 3:4 完整卡面）', () => {
   test('抽卡结果以 3:4 完整卡面展示新获得英灵', async ({ page }) => {
     await gotoApp(page, '#/gacha')

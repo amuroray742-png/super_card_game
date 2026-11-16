@@ -6,7 +6,7 @@
 import type { SaveData } from '../model/types.ts'
 import { START_RESOURCES } from '../config/economy.ts'
 
-export const SAVE_VERSION = 4
+export const SAVE_VERSION = 5
 
 export type Migration = (save: SaveData) => SaveData
 
@@ -38,6 +38,14 @@ export const MIGRATIONS: Record<number, Migration> = {
     save.savedAt = typeof save.savedAt === 'number' ? save.savedAt : 0
     return save
   },
+  // v4 → v5：补齐随机数状态快照（种子 + 计数器）
+  //
+  // 种子留 0（= 未设置）：由表现层在载入时补一个**平台随机**种子。
+  // 若在这里用常量种子兜底，所有旧档玩家会共用同一条抽卡序列（铁律 #24）。
+  4: (save) => {
+    save.rng = { seed: 0, counter: 0 }
+    return save
+  },
 }
 
 export function emptyArena(): SaveData['arena'] {
@@ -54,14 +62,22 @@ export function emptyArena(): SaveData['arena'] {
   }
 }
 
-/** 新建存档 */
-export function createNewSave(now: number): SaveData {
+/**
+ * 新建存档。
+ *
+ * @param now  创建时间（毫秒）
+ * @param seed 随机数种子。**不得写死常量**——写死会让所有玩家抽到
+ *             完全相同的序列（铁律 #24）。传 0 表示「未设置」，
+ *             由表现层在载入时补平台随机种子。
+ */
+export function createNewSave(now: number, seed = 0): SaveData {
   return {
     version: SAVE_VERSION,
     createdAt: now,
     lastTickAt: now,
     // 新建存档尚未写入存储，时间戳由 store 在首次 persist 时盖上
     savedAt: 0,
+    rng: { seed, counter: 0 },
     player: {
       silver: START_RESOURCES.silver,
       exp: START_RESOURCES.exp,
@@ -108,6 +124,12 @@ export function normalizeSave(raw: unknown): SaveData {
     version: SAVE_VERSION,
     // 旧档没有写入时间戳：按 0 处理，保证「旧档首次写入」不会被判成外部更新
     savedAt: typeof save.savedAt === 'number' ? save.savedAt : 0,
+    // 旧档没有随机数状态：种子留 0（= 未设置），由表现层补平台随机种子。
+    // 这里**不能用常量种子兜底**——那会让所有旧档玩家共用同一条抽卡序列。
+    rng: {
+      seed: typeof save.rng?.seed === 'number' ? save.rng.seed : 0,
+      counter: typeof save.rng?.counter === 'number' ? save.rng.counter : 0,
+    },
     player: { ...base.player, ...(save.player ?? {}) },
     team: { ...base.team, ...(save.team ?? {}) },
     gacha: { ...base.gacha, ...(save.gacha ?? {}) },

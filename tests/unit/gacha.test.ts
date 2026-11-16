@@ -21,6 +21,7 @@ import {
 } from '../../src/core/systems/gacha.ts'
 import { BASE_RATES, GACHA } from '../../src/core/config/economy.ts'
 import { POOL_STANDARD } from '../../src/core/config/pools.ts'
+import { HEROES } from '../../src/core/config/heroes/index.ts'
 import { Rng } from '../../src/core/rng.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
 
@@ -195,20 +196,23 @@ describe('概率公示同源（合规硬要求）', () => {
 
 describe('重复转化（§7.4 合规要点）', () => {
   it('重复 SSR 转化为印记 + 同名碎片', () => {
-    const heroId = 'xiangyu'
+    // 把所有 SSR 都放进「已拥有」：十连必出 SSR（新手保底）→ 必然出现重复 SSR。
+    // ⚠ 旧写法靠「固定种子恰好抽出项羽」才成立——随机序列修好后就不再可靠。
+    const owned: Record<string, ReturnType<typeof createHeroState>> = {}
+    for (const h of HEROES.filter((x) => x.rarity === 'SSR')) {
+      owned[h.id] = createHeroState(h.id, 0)
+    }
     const ctx = {
       pity: { pitySSR: 0, pity10: 0 },
-      owned: { [heroId]: createHeroState(heroId, 0) },
+      owned,
       crystals: 999999,
       tickets: 0,
     }
-    // 强制抽到 SSR：使用十连并检查重复项
     const outcome = executePull(ctx, POOL_STANDARD, 10, 3)
-    const dup = outcome.results.find((r) => !r.isNew)
-    if (dup) {
-      expect(dup.emblems).toBe(GACHA.DUPLICATE_EMBLEM.SSR)
-      expect(dup.shards).toBe(GACHA.DUPLICATE_SSR_SHARDS)
-    }
+    const dup = outcome.results.find((r) => !r.isNew && r.rarity === 'SSR')
+    expect(dup).toBeDefined()
+    expect(dup!.emblems).toBe(GACHA.DUPLICATE_EMBLEM.SSR)
+    expect(dup!.shards).toBe(GACHA.DUPLICATE_SSR_SHARDS)
   })
 
   it('印记数量符合公示表', () => {
@@ -245,6 +249,36 @@ describe('重复转化（§7.4 合规要点）', () => {
     const summary = summarizePull(outcome)
     expect(summary.newHeroes.length).toBeGreaterThan(0)
     expect(summary.emblems).toBeGreaterThanOrEqual(0)
+  })
+
+  it('同一批里抽到同一英灵两次时，第二张按「重复转化」处理', () => {
+    const ctx = {
+      pity: { pitySSR: 0, pity10: 0 },
+      owned: {},
+      crystals: 999999,
+      tickets: 0,
+    }
+    // 找一个会在十连内抽到重复英灵的种子（池子越大重复越常见，搜索仍然有效）
+    let dupSeed = -1
+    for (let seed = 1; seed < 400 && dupSeed < 0; seed++) {
+      const outcome = executePull(ctx, POOL_STANDARD, 10, seed)
+      const ids = outcome.results.map((r) => r.heroId)
+      if (new Set(ids).size !== ids.length) dupSeed = seed
+    }
+    expect(dupSeed).toBeGreaterThan(0)
+
+    const outcome = executePull(ctx, POOL_STANDARD, 10, dupSeed)
+    const ids = outcome.results.map((r) => r.heroId)
+    const repeated = ids.find((id, i) => ids.indexOf(id) !== i)!
+    const sameHero = outcome.results.filter((r) => r.heroId === repeated)
+    expect(sameHero).toHaveLength(2)
+    // 第一张新获得 → 第二张必须算重复（给印记 / 银两），否则玩家少拿一份转化
+    expect(sameHero[0].isNew).toBe(true)
+    expect(sameHero[1].isNew).toBe(false)
+    expect(sameHero[1].emblems).toBe(GACHA.DUPLICATE_EMBLEM[sameHero[1].rarity])
+    // 「新获得英灵」列表里同一个人只出现一次
+    const newHeroes = summarizePull(outcome).newHeroes
+    expect(newHeroes.filter((id) => id === repeated)).toHaveLength(1)
   })
 })
 

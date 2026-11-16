@@ -184,6 +184,16 @@ export function executePull(
 
   let batchHasSRPlus = false
 
+  /**
+   * 本批次内已发放的英灵。
+   *
+   * 「是否新获得」必须按**逐张累积**的持有状态判定，而不是批次开始前的快照——
+   * 否则同一批里抽到同一英灵两次时，两张都会被算成「新获得」：
+   * 重复转化（印记 / 碎片 / 银两）少给一份，
+   * 「新获得英灵」列表里同一个人还会出现两次（历史教训）。
+   */
+  const grantedInBatch = new Set<string>()
+
   for (let i = 0; i < count; i++) {
     const draw = drawRarity(rng, pity, {
       isTenPull: count === GACHA.TEN_PULL_COUNT,
@@ -212,7 +222,8 @@ export function executePull(
       pity = { pitySSR: 0, pity10: 0 }
     }
 
-    const isNew = !ctx.owned[heroId]
+    const isNew = !ctx.owned[heroId] && !grantedInBatch.has(heroId)
+    if (isNew) grantedInBatch.add(heroId)
 
     let emblems = 0
     let shards = 0
