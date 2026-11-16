@@ -139,6 +139,41 @@ test.describe('新手保底（§7.3 第 3 条）', () => {
   })
 })
 
+test.describe('抽卡券可用于十连（逐抽计价）', () => {
+  test('结晶耗尽后十连自动改用抽卡券，余额不会被扣成负数', async ({ page }) => {
+    await gotoApp(page, '#/gacha')
+
+    const tenBtn = page.getByTestId('pull-ten')
+    const crystals = page.getByTestId('gacha-crystals')
+    const tickets = page.getByTestId('gacha-tickets')
+
+    // 新手资源：3000 结晶 + 10 张券 → 结晶优先
+    await expect(tenBtn).toContainText('结晶 3000')
+    await expect(crystals).toHaveText('3,000')
+    await expect(tickets).toHaveText('10')
+
+    // 第一次十连：扣 3000 结晶，抽卡券不动
+    await tenBtn.click()
+    await page.getByRole('button', { name: '收下' }).click()
+    await expect(page.locator('.dialog')).toHaveCount(0)
+    await expect(crystals).toHaveText('0')
+    await expect(tickets).toHaveText('10')
+
+    // 结晶用尽 → 十连改用抽卡券（券够就能召唤）
+    await expect(tenBtn).toContainText('券 10')
+    await tenBtn.click()
+    await page.getByRole('button', { name: '收下' }).click()
+    await expect(page.locator('.dialog')).toHaveCount(0)
+    await expect(crystals).toHaveText('0')
+    await expect(tickets).toHaveText('0')
+
+    // 券也用尽 → 按钮禁用，资源不得出现负数
+    await expect(tenBtn).toBeDisabled()
+    await expect(crystals).toHaveText('0')
+    await expect(tickets).toHaveText('0')
+  })
+})
+
 test.describe('卡面展示（Phase 8b · 3:4 完整卡面）', () => {
   test('抽卡结果以 3:4 完整卡面展示新获得英灵', async ({ page }) => {
     await gotoApp(page, '#/gacha')

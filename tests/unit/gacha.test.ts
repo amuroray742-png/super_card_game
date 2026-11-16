@@ -249,9 +249,14 @@ describe('重复转化（§7.4 合规要点）', () => {
 })
 
 describe('抽卡费用', () => {
-  it('单抽与十连费用正确', () => {
-    expect(pullCost(1)).toEqual({ crystals: GACHA.COST_SINGLE, tickets: 1 })
-    expect(pullCost(10)).toEqual({ crystals: GACHA.COST_TEN, tickets: 0 })
+  const TEN = GACHA.TEN_PULL_COUNT
+
+  it('单抽与十连费用正确（逐抽计价）', () => {
+    expect(pullCost(1)).toEqual({ crystals: GACHA.COST_SINGLE, tickets: GACHA.TICKET_PER_PULL })
+    expect(pullCost(TEN)).toEqual({
+      crystals: GACHA.COST_SINGLE * TEN,
+      tickets: GACHA.TICKET_PER_PULL * TEN,
+    })
   })
 
   it('单抽优先扣圣杯结晶，结晶不足时改用抽卡券', () => {
@@ -263,15 +268,38 @@ describe('抽卡费用', () => {
     expect(resolvePayment(1, 0, 1)).toEqual({ crystals: 0, tickets: 1 })
   })
 
-  it('十连只收圣杯结晶，不消耗抽卡券', () => {
-    expect(resolvePayment(10, GACHA.COST_TEN, 99)).toEqual({
-      crystals: GACHA.COST_TEN,
+  it('十连可用抽卡券整付（10 张券抵 10 抽）', () => {
+    expect(resolvePayment(TEN, 0, TEN)).toEqual({ crystals: 0, tickets: TEN })
+    expect(resolvePayment(TEN, 0, TEN + 5)).toEqual({ crystals: 0, tickets: TEN })
+  })
+
+  it('十连优先扣圣杯结晶，结晶够时不动券', () => {
+    expect(resolvePayment(TEN, GACHA.COST_SINGLE * TEN, 99)).toEqual({
+      crystals: GACHA.COST_SINGLE * TEN,
       tickets: 0,
     })
   })
 
+  it('十连支持结晶与券混合支付（结晶优先、券补差额）', () => {
+    // 1500 结晶付 5 抽，5 张券付另外 5 抽
+    expect(resolvePayment(TEN, 1500, 5)).toEqual({ crystals: 1500, tickets: 5 })
+    // 结晶只够 9 抽 → 差 1 抽用券补
+    expect(resolvePayment(TEN, GACHA.COST_SINGLE * 9, 1)).toEqual({
+      crystals: GACHA.COST_SINGLE * 9,
+      tickets: 1,
+    })
+    // 不足一整抽的零头不参与计价（按整抽计）
+    expect(resolvePayment(TEN, GACHA.COST_SINGLE * 9 + 299, 1)).toEqual({
+      crystals: GACHA.COST_SINGLE * 9,
+      tickets: 1,
+    })
+  })
+
   it('余额不足时返回 null（抽卡总闸门不得被绕过）', () => {
-    expect(resolvePayment(10, GACHA.COST_TEN - 1, 99)).toBeNull()
+    // 券不够 10 张
+    expect(resolvePayment(TEN, 0, TEN - 1)).toBeNull()
+    // 结晶差 1 抽且无券
+    expect(resolvePayment(TEN, GACHA.COST_SINGLE * TEN - 1, 0)).toBeNull()
     expect(resolvePayment(1, 0, 0)).toBeNull()
   })
 
@@ -288,13 +316,25 @@ describe('抽卡费用', () => {
 
   it('余额充足时不会把资源扣成负数', () => {
     const outcome = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: GACHA.COST_TEN, tickets: 0 },
+      { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: GACHA.COST_SINGLE * TEN, tickets: 0 },
       POOL_STANDARD,
       10,
       1,
     )
-    expect(outcome.crystalsUsed).toBe(GACHA.COST_TEN)
+    expect(outcome.crystalsUsed).toBe(GACHA.COST_SINGLE * TEN)
     expect(outcome.ticketsUsed).toBe(0)
+  })
+
+  it('用抽卡券支付十连时产出 10 个结果且不扣结晶', () => {
+    const outcome = executePull(
+      { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: 0, tickets: TEN },
+      POOL_STANDARD,
+      TEN,
+      7,
+    )
+    expect(outcome.results.length).toBe(TEN)
+    expect(outcome.crystalsUsed).toBe(0)
+    expect(outcome.ticketsUsed).toBe(TEN)
   })
 })
 

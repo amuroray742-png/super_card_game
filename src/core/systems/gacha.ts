@@ -55,15 +55,25 @@ export interface PullContext {
 }
 
 /**
- * 抽卡费用
+ * 抽卡费用（**逐抽计价**）
  *
  * 口径（§7.5：圣杯结晶为主抽卡货币，抽卡券为免费补充）：
- * - 十连：圣杯结晶 3000，**不收抽卡券**。
- * - 单抽：圣杯结晶 300 **或** 抽卡券 1（二选一，实际扣哪一项由 `resolvePayment` 决定）。
+ * - 每一抽的价是「圣杯结晶 300 **或** 抽卡券 1」——单抽与十连**同一个单价**。
+ * - 单抽 = 1 抽 → 结晶 300 或 券 1；十连 = 10 抽 → 结晶 3000 或 券 10。
+ * - 两者**可混合**：结晶优先，结晶不够的部分用抽卡券补（实际扣哪一项由
+ *   `resolvePayment` 决定，表现层只展示、不自行推导）。
  */
-export function pullCost(count: number): { crystals: number; tickets: number } {
-  if (count === 10) return { crystals: GACHA.COST_TEN, tickets: 0 }
-  return { crystals: GACHA.COST_SINGLE, tickets: GACHA.TICKET_PER_PULL }
+export function pullCost(count: 1 | 10): { crystals: number; tickets: number } {
+  const pulls = pullCount(count)
+  return {
+    crystals: GACHA.COST_SINGLE * pulls,
+    tickets: GACHA.TICKET_PER_PULL * pulls,
+  }
+}
+
+/** 抽卡次数 → 实际抽数（单抽 1 抽，十连 `GACHA.TEN_PULL_COUNT` 抽） */
+function pullCount(count: 1 | 10): number {
+  return count === GACHA.TEN_PULL_COUNT ? GACHA.TEN_PULL_COUNT : 1
 }
 
 /** 抽卡货币不足 */
@@ -78,27 +88,27 @@ export class InsufficientFundsError extends Error {
 }
 
 /**
- * 结算一次抽卡的**实际扣费**。
+ * 结算一次抽卡的**实际扣费**（逐抽计价）。
  *
- * - 十连：只收圣杯结晶，余额不足返回 null。
- * - 单抽：优先圣杯结晶（主货币 / 抽卡总闸门），结晶不足时自动改用抽卡券。
+ * 每一抽的价是「圣杯结晶 300 **或** 抽卡券 1」：
+ * - 优先用圣杯结晶（主抽卡货币）付，**能整抽用结晶的部分尽量用结晶**；
+ * - 结晶不够的差额用抽卡券补（1 张券抵 1 抽）；
+ * - 两者都凑不齐本次抽数 → 余额不足，返回 `null`。
  *
  * ⚠ 旧实现无论余额多少都照扣，结晶可被扣成负数，等于取消抽卡总闸门。
  *
  * @returns 实际扣费明细；余额不足时返回 null（调用方必须拒绝本次抽卡）
  */
 export function resolvePayment(
-  count: number,
+  count: 1 | 10,
   crystals: number,
   tickets: number,
 ): { crystals: number; tickets: number } | null {
-  const cost = pullCost(count)
-  if (cost.tickets === 0) {
-    return crystals >= cost.crystals ? { crystals: cost.crystals, tickets: 0 } : null
-  }
-  if (crystals >= cost.crystals) return { crystals: cost.crystals, tickets: 0 }
-  if (tickets >= cost.tickets) return { crystals: 0, tickets: cost.tickets }
-  return null
+  const pulls = pullCount(count)
+  const byCrystal = Math.min(pulls, Math.floor(crystals / GACHA.COST_SINGLE))
+  const byTicket = Math.min(pulls - byCrystal, tickets)
+  if (byCrystal + byTicket < pulls) return null
+  return { crystals: byCrystal * GACHA.COST_SINGLE, tickets: byTicket }
 }
 
 function rarityRank(rarity: Rarity): number {
@@ -160,7 +170,8 @@ export function executePull(
     preferredHeroId && byRarity.SSR?.includes(preferredHeroId)
       ? preferredHeroId
       : byRarity.SSR?.[0]
-  const needGuarantee = ctx.newbieUsed !== true && count === 10 && guaranteeTarget !== undefined
+  const needGuarantee =
+    ctx.newbieUsed !== true && count === GACHA.TEN_PULL_COUNT && guaranteeTarget !== undefined
 
   /**
    * 新手资格在**首次十连**时即消耗，无论该十连是否自然抽到 SSR。
@@ -175,7 +186,7 @@ export function executePull(
 
   for (let i = 0; i < count; i++) {
     const draw = drawRarity(rng, pity, {
-      isTenPull: count === 10,
+      isTenPull: count === GACHA.TEN_PULL_COUNT,
       batchHasSRPlus,
       batchIndex: i,
       availableRarities,

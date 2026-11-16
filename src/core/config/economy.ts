@@ -287,11 +287,11 @@ export const GACHA = {
   SOFT_PITY_START: 71,
   /** 十连保底最低稀有度 */
   TEN_PULL_FLOOR: 'SR' as Rarity,
-  /** 单抽消耗圣杯结晶 */
+  /** 每一抽的圣杯结晶价（逐抽计价：单抽与十连共用同一单价） */
   COST_SINGLE: 300,
-  /** 十连消耗圣杯结晶 */
-  COST_TEN: 3000,
-  /** 抽卡券消耗 */
+  /** 十连抽数（十连 = 10 抽，结晶价 = COST_SINGLE × TEN_PULL_COUNT） */
+  TEN_PULL_COUNT: 10,
+  /** 每抽消耗的抽卡券数量（1 张券恰好抵 1 抽） */
   TICKET_PER_PULL: 1,
   /** 重复转化（§7.4） */
   DUPLICATE_EMBLEM: {

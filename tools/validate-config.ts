@@ -248,8 +248,15 @@ if (GACHA.SOFT_PITY_START > GACHA.PITY_SSR_MAX) {
 if (GACHA.TEN_PULL_FLOOR !== 'SR') {
   err('C/NUM', `十连保底最低稀有度为 ${GACHA.TEN_PULL_FLOOR}，合规要求必须为 SR`)
 }
-if (GACHA.COST_TEN !== GACHA.COST_SINGLE * 10) {
-  warn('C/NUM', `十连价格 ${GACHA.COST_TEN} ≠ 单抽 ${GACHA.COST_SINGLE} × 10`)
+// 抽卡逐抽计价：十连的结晶价 = 单抽 × 十连抽数（由 pullCost 推导，故此处只校验基础量）
+if (GACHA.TEN_PULL_COUNT !== 10) {
+  err('C/NUM', `十连抽数为 ${GACHA.TEN_PULL_COUNT}，应为 10`)
+}
+if (GACHA.COST_SINGLE <= 0) {
+  err('C/NUM', '单抽价格必须为正')
+}
+if (GACHA.TICKET_PER_PULL !== 1) {
+  err('C/NUM', `每抽消耗抽卡券 ${GACHA.TICKET_PER_PULL} 张，应为 1 张（1 张券恰好抵 1 抽）`)
 }
 
 if (STAR.MIN < 1 || STAR.MAX < STAR.MIN) err('C/NUM', '星级区间非法')

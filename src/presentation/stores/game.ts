@@ -513,7 +513,10 @@ export const useGameStore = defineStore('game', () => {
     } catch (err) {
       // 余额不足：拒绝本次抽卡，不产生任何扣费与产出
       if (err instanceof InsufficientFundsError) {
-        notify('圣杯结晶与抽卡券都不足，无法召唤', 'warn')
+        notify(
+          `余额不足（结晶 ${err.owned.crystals}/${err.required.crystals}、抽卡券 ${err.owned.tickets}/${err.required.tickets}），无法召唤`,
+          'warn',
+        )
         return null
       }
       throw err

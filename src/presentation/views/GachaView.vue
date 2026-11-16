@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { POOLS, resolvePoolHeroIds } from '../../core/config/pools.ts'
 import { GACHA } from '../../core/config/economy.ts'
+import { pullCost, resolvePayment } from '../../core/systems/gacha.ts'
 import { HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { formatNumber, formatRate } from '../utils/format'
 import type { Rarity } from '../../core/model/types.ts'
@@ -81,22 +82,30 @@ const resultOpen = ref(false)
 const result = ref<{ emblems: number; shards: number; silver: number; newHeroes: string[] } | null>(null)
 
 /**
- * 单抽的实际扣费口径（core.resolvePayment 的表现层镜像）：
- * 优先圣杯结晶，结晶不足时自动改用抽卡券。
+ * 抽卡的实际扣费口径：**直接取 core 的 `resolvePayment`**，表现层不自行推导。
+ *
+ * 逐抽计价：每一抽是「结晶 300 或 券 1」，结晶优先、券补差额。
+ * 余额不足时显示需求（结晶 N 或券 M），按钮同时禁用。
  */
-const singleCostText = computed(() => {
+function costText(count: 1 | 10): string {
   const p = store.save.player
-  if (p.crystals >= GACHA.COST_SINGLE) return `结晶 ${GACHA.COST_SINGLE}`
-  if (p.tickets >= GACHA.TICKET_PER_PULL) return `券 ${GACHA.TICKET_PER_PULL}`
-  return `结晶 ${GACHA.COST_SINGLE} 或券 ${GACHA.TICKET_PER_PULL}`
-})
+  const cost = pullCost(count)
+  const pay = resolvePayment(count, p.crystals, p.tickets)
+  if (!pay) return `结晶 ${cost.crystals} 或券 ${cost.tickets}`
+  if (pay.tickets === 0) return `结晶 ${pay.crystals}`
+  if (pay.crystals === 0) return `券 ${pay.tickets}`
+  return `结晶 ${pay.crystals} + 券 ${pay.tickets}`
+}
+
+const singleCostText = computed(() => costText(1))
+const tenCostText = computed(() => costText(10))
 
 const canSingle = computed(
-  () =>
-    store.save.player.crystals >= GACHA.COST_SINGLE ||
-    store.save.player.tickets >= GACHA.TICKET_PER_PULL,
+  () => resolvePayment(1, store.save.player.crystals, store.save.player.tickets) !== null,
 )
-const canTen = computed(() => store.save.player.crystals >= GACHA.COST_TEN)
+const canTen = computed(
+  () => resolvePayment(10, store.save.player.crystals, store.save.player.tickets) !== null,
+)
 
 async function pull(count: 1 | 10) {
   const summary = await store.pull(poolId.value, count)
@@ -225,22 +234,37 @@ const DUPLICATE_ROWS: { rarity: Rarity; note: string }[] = [
     <section class="panel">
       <div class="panel-title"><span>召唤</span></div>
       <div class="row" style="gap: 6px">
-        <button class="btn btn-sm" style="flex: 1" :disabled="!canSingle" @click="pull(1)">
+        <button
+          class="btn btn-sm"
+          style="flex: 1"
+          data-testid="pull-single"
+          :disabled="!canSingle"
+          @click="pull(1)"
+        >
           单抽<br />
           <span class="tiny">{{ singleCostText }}</span>
         </button>
-        <button class="btn btn-sm btn-primary" style="flex: 1" :disabled="!canTen" @click="pull(10)">
+        <button
+          class="btn btn-sm btn-primary"
+          style="flex: 1"
+          data-testid="pull-ten"
+          :disabled="!canTen"
+          @click="pull(10)"
+        >
           十连<br />
-          <span class="tiny">结晶 {{ GACHA.COST_TEN }}</span>
+          <span class="tiny">{{ tenCostText }}</span>
         </button>
       </div>
+      <p class="tiny muted" style="margin: 8px 0 0; line-height: 1.7">
+        抽卡券 1 张抵 1 抽（单抽与十连通用）。结算时优先扣圣杯结晶，结晶不够的部分自动改用抽卡券。
+      </p>
       <div class="row-between tiny" style="margin-top: 8px">
         <span class="muted">圣杯结晶</span>
-        <b>{{ formatNumber(store.save.player.crystals) }}</b>
+        <b data-testid="gacha-crystals">{{ formatNumber(store.save.player.crystals) }}</b>
       </div>
       <div class="row-between tiny">
         <span class="muted">抽卡券</span>
-        <b>{{ formatNumber(store.save.player.tickets) }}</b>
+        <b data-testid="gacha-tickets">{{ formatNumber(store.save.player.tickets) }}</b>
       </div>
     </section>
 
