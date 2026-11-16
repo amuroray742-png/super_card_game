@@ -15,6 +15,10 @@
  * - `SR`：金色/蓝色光晕 + 轻音效；
  * - `SSR`：**全屏爆点**（光爆 + 放射光束 + 粒子爆炸 + 震屏），并**独占时间**——
  *   爆点没演完，后面的卡牌不翻（爆点必须是全场焦点）。
+ *
+ * SSR 爆点之后还有一段**驻留**（`BURST_HOLD_MS`）：画面停住让玩家看清
+ * 「谁 · 什么稀有度 · 是不是新获得」，同时提示可点击继续——
+ * 玩家可以自己跳过（点画面任意处 / 右上角「跳过」）。
  */
 import type { Rarity } from '../../core/model/types.ts'
 import { Rng } from '../../core/rng.ts'
@@ -32,7 +36,7 @@ export interface RevealItem {
 /** 特效档位 */
 export type RevealTier = 'plain' | 'glow' | 'burst'
 
-export type RevealPhase = 'charge' | 'flip' | 'burst' | 'settle' | 'done'
+export type RevealPhase = 'charge' | 'flip' | 'burst' | 'hold' | 'settle' | 'done'
 
 export interface RevealEvent {
   /** 卡序（0 起） */
@@ -45,8 +49,10 @@ export interface RevealEvent {
   flipEndAt: number
   /** 特效起始时刻（glow / burst） */
   fxAt: number
-  /** 特效结束时刻 */
+  /** 特效**动画**结束时刻 */
   fxEndAt: number
+  /** 爆点驻留结束时刻（仅 burst 有值；其余等于 fxEndAt） */
+  holdEndAt: number
 }
 
 export interface RevealPlan {
@@ -72,8 +78,8 @@ export interface RevealState {
   /** 蓄力进度 0..1 */
   charge: number
   cards: RevealCardState[]
-  /** 当前进行中的全屏爆点（SSR） */
-  burst: { event: RevealEvent; progress: number } | null
+  /** 当前进行中的全屏爆点（SSR）：progress = 动画进度，hold = 驻留进度 */
+  burst: { event: RevealEvent; progress: number; hold: number } | null
   /** 收尾进度 0..1 */
   settle: number
   done: boolean
@@ -90,8 +96,15 @@ export const REVEAL_TIMING = {
   FLIP_STAGGER_MS: 120,
   /** SR 光效时长（与后续翻牌重叠，不阻塞） */
   GLOW_MS: 560,
-  /** SSR 全屏爆点时长（**独占时间**，阻塞后续翻牌） */
+  /** SSR 全屏爆点**动画**时长（**独占时间**，阻塞后续翻牌） */
   BURST_MS: 1150,
+  /**
+   * SSR 爆点后的**驻留**时长。
+   *
+   * 爆点动画放完不立刻切走，画面停住让玩家看清是谁出的；
+   * 玩家也可以随时点击继续（点画面任意处 / 右上角「跳过」）。
+   */
+  BURST_HOLD_MS: 1800,
   /** 收尾（光效落定）时长 */
   SETTLE_MS: 200,
 } as const
@@ -140,7 +153,8 @@ export function revealTier(rarity: Rarity): RevealTier {
  * 排期规则：
  * - 蓄力结束后开始逐张翻牌；
  * - `SR` 的光效与后续翻牌**重叠**（不阻塞）；
- * - `SSR` 的全屏爆点**独占**时间：爆点结束前，下一张卡不翻。
+ * - `SSR` 的全屏爆点**独占**时间：爆点结束前，下一张卡不翻；
+ * - 爆点动画放完后进入**驻留**（画面停住），驻留结束才算这一张翻完。
  */
 export function planReveal(items: readonly RevealItem[]): RevealPlan {
   const events: RevealEvent[] = []
@@ -157,13 +171,15 @@ export function planReveal(items: readonly RevealItem[]): RevealPlan {
         : tier === 'glow'
           ? fxAt + REVEAL_TIMING.GLOW_MS
           : fxAt
-    events.push({ index, item, tier, startAt, flipEndAt, fxAt, fxEndAt })
-    // 爆点独占时间；其余情况下一张紧接翻牌
-    t = tier === 'burst' ? fxEndAt : flipEndAt
+    // 爆点动画放完后进入驻留：画面停住让玩家看清，玩家也可点击继续
+    const holdEndAt = tier === 'burst' ? fxEndAt + REVEAL_TIMING.BURST_HOLD_MS : fxEndAt
+    events.push({ index, item, tier, startAt, flipEndAt, fxAt, fxEndAt, holdEndAt })
+    // 爆点独占时间（含驻留）；其余情况下一张紧接翻牌
+    t = tier === 'burst' ? holdEndAt : flipEndAt
   }
 
   const last = events[events.length - 1]
-  const tail = last ? Math.max(last.flipEndAt, last.fxEndAt) : REVEAL_TIMING.CHARGE_MS
+  const tail = last ? Math.max(last.flipEndAt, last.holdEndAt) : REVEAL_TIMING.CHARGE_MS
   return {
     events,
     burstEvents: events.filter((e) => e.tier === 'burst'),
@@ -194,8 +210,14 @@ export function projectReveal(t: number, plan: RevealPlan): RevealState {
 
   let burst: RevealState['burst'] = null
   for (const e of plan.burstEvents) {
-    if (t >= e.fxAt && t < e.fxEndAt) {
-      burst = { event: e, progress: clamp01((t - e.fxAt) / REVEAL_TIMING.BURST_MS) }
+    if (t >= e.fxAt && t < e.holdEndAt) {
+      burst = {
+        event: e,
+        // 动画进度：驻留期间停在 1
+        progress: clamp01((t - e.fxAt) / REVEAL_TIMING.BURST_MS),
+        // 驻留进度：0 = 动画刚放完，1 = 驻留结束
+        hold: clamp01((t - e.fxEndAt) / REVEAL_TIMING.BURST_HOLD_MS),
+      }
     }
   }
 
@@ -203,7 +225,7 @@ export function projectReveal(t: number, plan: RevealPlan): RevealState {
   const settle = clamp01((t - (plan.duration - REVEAL_TIMING.SETTLE_MS)) / REVEAL_TIMING.SETTLE_MS)
 
   let phase: RevealPhase
-  if (burst) phase = 'burst'
+  if (burst) phase = burst.hold > 0 ? 'hold' : 'burst'
   else if (t < REVEAL_TIMING.CHARGE_MS) phase = 'charge'
   else if (t >= plan.duration) phase = 'done'
   else if (t >= plan.duration - REVEAL_TIMING.SETTLE_MS) phase = 'settle'

@@ -41,12 +41,20 @@ describe('抽卡演出 · 排期', () => {
     expect(plan.events[1].startAt).toBe(REVEAL_TIMING.CHARGE_MS + REVEAL_TIMING.FLIP_MS)
   })
 
-  it('SSR 爆点独占时间：下一张卡等爆点结束才翻', () => {
+  it('SSR 爆点独占时间：下一张卡等爆点（含驻留）结束才翻', () => {
     const plan = planReveal([item('a', 'SSR'), item('b', 'R')])
     const [first, second] = plan.events
     expect(first.tier).toBe('burst')
     expect(first.fxEndAt).toBe(first.flipEndAt + REVEAL_TIMING.BURST_MS)
-    expect(second.startAt).toBe(first.fxEndAt)
+    // 驻留：动画放完后画面停住一段
+    expect(first.holdEndAt).toBe(first.fxEndAt + REVEAL_TIMING.BURST_HOLD_MS)
+    expect(second.startAt).toBe(first.holdEndAt)
+  })
+
+  it('非爆点卡没有驻留（holdEndAt = fxEndAt）', () => {
+    const plan = planReveal([item('a', 'SR'), item('b', 'R')])
+    expect(plan.events[0].holdEndAt).toBe(plan.events[0].fxEndAt)
+    expect(plan.events[1].holdEndAt).toBe(plan.events[1].fxEndAt)
   })
 
   it('SR 光效不阻塞后续翻牌', () => {
@@ -90,14 +98,42 @@ describe('抽卡演出 · 状态推导', () => {
     expect(done.cards[0].revealed).toBe(true)
   })
 
-  it('SSR 爆点窗口内有 burst，且窗口外没有', () => {
+  it('SSR 爆点窗口内有 burst，驻留结束后没有', () => {
     const inside = projectReveal(plan.events[0].fxAt + 100, plan)
     expect(inside.burst).not.toBeNull()
     expect(inside.phase).toBe('burst')
     expect(inside.burst?.event.index).toBe(0)
 
-    const after = projectReveal(plan.events[0].fxEndAt + 10, plan)
+    const after = projectReveal(plan.events[0].holdEndAt + 10, plan)
     expect(after.burst).toBeNull()
+  })
+
+  it('SSR 爆点后会驻留：画面停住、进度停 1、提示玩家可继续', () => {
+    const ev = plan.events[0]
+    // 动画刚放完 → 进入驻留
+    const justAfter = projectReveal(ev.fxEndAt + 1, plan)
+    expect(justAfter.phase).toBe('hold')
+    expect(justAfter.burst).not.toBeNull()
+    expect(justAfter.burst?.progress).toBe(1)
+    expect(justAfter.burst?.hold).toBeGreaterThan(0)
+    expect(justAfter.burst?.hold).toBeLessThan(1)
+
+    // 驻留中段：画面仍在（玩家看得清），进度仍在推进
+    const mid = projectReveal(ev.fxEndAt + REVEAL_TIMING.BURST_HOLD_MS * 0.5, plan)
+    expect(mid.phase).toBe('hold')
+    expect(mid.burst?.progress).toBe(1)
+    expect(mid.burst?.hold).toBeCloseTo(0.5, 2)
+
+    // 驻留结束 → 爆点层撤掉
+    const end = projectReveal(ev.holdEndAt, plan)
+    expect(end.burst).toBeNull()
+    expect(end.phase).not.toBe('hold')
+  })
+
+  it('驻留计入总时长（玩家看得到的那几秒不能被吃掉）', () => {
+    const plan = planReveal([item('a', 'SSR')])
+    const ev = plan.events[0]
+    expect(plan.duration).toBe(ev.holdEndAt + REVEAL_TIMING.SETTLE_MS)
   })
 
   it('SR 光效强度先起后落', () => {

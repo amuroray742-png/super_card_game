@@ -12,7 +12,8 @@
  * 分级演出（稀有度决定档位，事实由 core 的抽卡结果给出）：
  * - N / R：安静翻开；
  * - SR：光晕 + 铃音；
- * - SSR：**全屏爆点**（光爆 + 放射光束 + 粒子爆炸 + 震屏），独占时间。
+ * - SSR：**全屏爆点**（光爆 + 放射光束 + 粒子爆炸 + 震屏），独占时间，
+ *   放完后进入**驻留**（画面停住 + 「点击任意处继续」提示），玩家可随时跳过。
  *
  * 音效为 WebAudio **合成**（无语音、不含任何配音素材）。
  */
@@ -140,37 +141,48 @@ const titleStyle = computed(() => {
  *   层透明度会把光束一起压成灰色（看着像「没打光」）。
  */
 const burstStyle = computed(() => {
-  const p = state.value.burst?.progress ?? 0
-  const core = ease.burst(p)
+  const b = state.value.burst
+  const p = b?.progress ?? 0
+  const hold = b?.hold ?? 0
+  // 驻留期间保持暗角（画面停住但不失掉「爆点」的氛围）
+  const core = Math.max(ease.burst(p), hold > 0 ? 0.42 : 0)
   return {
     background: `radial-gradient(circle at 50% 46%, rgba(44, 34, 18, ${(0.55 + core * 0.4).toFixed(3)}) 0%, rgba(10, 8, 5, 0.92) 55%, rgba(4, 3, 2, 0.99) 100%)`,
   }
 })
 
-/** 放射光束：随时间加速旋转 */
+/** 放射光束：随时间加速旋转；驻留期间保持缓慢流转 */
 const raysStyle = computed(() => {
-  const p = state.value.burst?.progress ?? 0
+  const b = state.value.burst
+  const p = b?.progress ?? 0
+  const hold = b?.hold ?? 0
+  const drift = hold > 0 ? (t.value - (b?.event.fxEndAt ?? 0)) * 0.035 : 0
   return {
-    transform: `rotate(${(p * 120).toFixed(2)}deg) scale(${(0.85 + p * 0.4).toFixed(3)})`,
-    opacity: (0.55 + ease.burst(p) * 0.45).toFixed(3),
+    transform: `rotate(${(p * 120 + drift).toFixed(2)}deg) scale(${(0.85 + p * 0.4).toFixed(3)})`,
+    opacity: (hold > 0 ? 0.42 : 0.55 + ease.burst(p) * 0.45).toFixed(3),
   }
 })
 
-/** 爆点背光：从中心射出的竖直光束 */
+/** 爆点背光：从中心射出的竖直光束；驻留期间留一点余韵 */
 const beamStyle = computed(() => {
-  const p = state.value.burst?.progress ?? 0
+  const b = state.value.burst
+  const p = b?.progress ?? 0
+  const hold = b?.hold ?? 0
   const core = ease.burst(p)
   return {
-    opacity: (core * 0.95).toFixed(3),
+    opacity: (Math.max(core, hold > 0 ? 0.16 : 0) * 0.95).toFixed(3),
     transform: `translate(-50%, -50%) scaleX(${(0.45 + core * 0.85).toFixed(3)})`,
   }
 })
 
-/** 爆点大字（SSR）冲击：砸下来 → 定住 → 淡出 */
+/** 爆点大字（SSR）冲击：砸下来 → 定住 → 驻留末尾淡出 */
 const wordStyle = computed(() => {
-  const p = state.value.burst?.progress ?? 0
+  const b = state.value.burst
+  const p = b?.progress ?? 0
+  const hold = b?.hold ?? 0
   const inA = clamp01(p / 0.14)
-  const outA = p > 0.62 ? clamp01((1 - p) / 0.38) : 1
+  // 动画期间一直亮着（玩家要看得清），驻留末尾才淡出
+  const outA = hold > 0 ? clamp01((1 - hold) / 0.32) : 1
   const scale = p < 0.14 ? 1.65 - ease.outCubic(p / 0.14) * 0.65 : 1
   return {
     opacity: (inA * outA * 0.9).toFixed(3),
@@ -178,17 +190,40 @@ const wordStyle = computed(() => {
   }
 })
 
-/** 爆点主卡：回弹入场 → 悬浮 → 淡出 */
+/** 爆点主卡：回弹入场 → 悬浮 → 驻留（轻微起伏）→ 末尾淡出 */
 const burstCardStyle = computed(() => {
-  const p = state.value.burst?.progress ?? 0
+  const b = state.value.burst
+  const p = b?.progress ?? 0
+  const hold = b?.hold ?? 0
   let scale: number
   if (p < 0.2) scale = 0.55 + ease.outBack(p / 0.2) * 0.55
   else scale = 1.1 - (p - 0.2) * 0.13
-  const fade = p < 0.12 ? p / 0.12 : p > 0.86 ? Math.max(0, (1 - p) / 0.14) : 1
-  return {
-    transform: `translate(-50%, -50%) scale(${scale.toFixed(3)})`,
-    opacity: fade.toFixed(3),
+  // 驻留：轻微悬浮 + 呼吸，避免画面完全静止
+  let dy = 0
+  if (hold > 0) {
+    const bob = Math.sin((t.value / 1000) * 2)
+    scale = 1 + bob * 0.014
+    dy = bob * 7
   }
+  const fadeIn = p < 0.12 ? p / 0.12 : 1
+  const fadeOut = hold > 0 ? clamp01((1 - hold) / 0.28) : 1
+  return {
+    transform: `translate(-50%, calc(-50% + ${dy.toFixed(1)}px)) scale(${scale.toFixed(3)})`,
+    opacity: (fadeIn * fadeOut).toFixed(3),
+  }
+})
+
+/**
+ * 驻留提示「点击任意处继续」。
+ *
+ * 脉动同样走 `t` 推导（不用 CSS animation——动画优先级高于行内样式，
+ * 会把行内 opacity 顶掉，同 AGENTS.md 铁律 #23 记的坑）。
+ */
+const holdHintStyle = computed(() => {
+  const hold = state.value.burst?.hold ?? 0
+  const a = clamp01((hold - 0.1) / 0.22)
+  const pulse = 0.68 + 0.32 * Math.sin((t.value / 1000) * 3.2)
+  return { opacity: (a * pulse).toFixed(3) }
 })
 
 /** 白光闪：爆点瞬间炸开再收敛 */
@@ -455,6 +490,16 @@ onBeforeUnmount(() => {
         <span class="name">{{ nameOf(burstIndex) }}</span>
         <span class="sub">{{ isNewOf(burstIndex) ? '新获得' : '重复转化' }}</span>
       </div>
+    </div>
+
+    <!-- 驻留提示：爆点放完后画面停住，玩家可点击继续 -->
+    <div
+      v-if="state.burst && state.burst.hold > 0"
+      class="hold-hint"
+      data-testid="gacha-hold-hint"
+      :style="holdHintStyle"
+    >
+      点击任意处继续
     </div>
 
     <button class="skip" data-testid="gacha-skip" @click.stop="skip">跳过</button>
@@ -796,6 +841,22 @@ onBeforeUnmount(() => {
     rgba(255, 240, 210, 0) 86%
   );
   pointer-events: none;
+}
+
+/* ── 驻留提示（SSR 爆点后停住）───────────────────── */
+.hold-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 11%;
+  transform: translateX(-50%);
+  z-index: 5;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  color: var(--c-gold-2);
+  text-shadow: 0 0 16px rgba(232, 200, 122, 0.55);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 /* ── 跳过 ─────────────────────────────────────────── */
