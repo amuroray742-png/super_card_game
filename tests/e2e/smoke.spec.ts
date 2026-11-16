@@ -172,6 +172,36 @@ test.describe('抽卡券可用于十连（逐抽计价）', () => {
     await expect(crystals).toHaveText('0')
     await expect(tickets).toHaveText('0')
   })
+
+  test('十连混合支付只扣对应余额（结晶 2700 + 券 1）', async ({ page }) => {
+    await gotoApp(page, '#/gacha')
+
+    const singleBtn = page.getByTestId('pull-single')
+    const tenBtn = page.getByTestId('pull-ten')
+    const crystals = page.getByTestId('gacha-crystals')
+    const tickets = page.getByTestId('gacha-tickets')
+
+    // 新手资源：3000 结晶 + 10 张券
+    await expect(crystals).toHaveText('3,000')
+    await expect(tickets).toHaveText('10')
+
+    // 先单抽一次（结晶优先 → 扣 300 结晶），把结晶压到只够 9 抽
+    await singleBtn.click()
+    await page.getByRole('button', { name: '收下' }).click()
+    await expect(page.locator('.dialog')).toHaveCount(0)
+    await expect(crystals).toHaveText('2,700')
+    await expect(tickets).toHaveText('10')
+
+    // 结晶只够 9 抽 → 十连必须用 9 抽结晶 + 1 张券补齐，按钮文案与实际扣费一致
+    await expect(tenBtn).toContainText('结晶 2700 + 券 1')
+    await tenBtn.click()
+    await page.getByRole('button', { name: '收下' }).click()
+    await expect(page.locator('.dialog')).toHaveCount(0)
+
+    // 只扣对应余额：结晶清零（2700），抽卡券只扣 1 张（10 → 9）
+    await expect(crystals).toHaveText('0')
+    await expect(tickets).toHaveText('9')
+  })
 })
 
 test.describe('卡面展示（Phase 8b · 3:4 完整卡面）', () => {

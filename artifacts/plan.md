@@ -851,7 +851,10 @@ PvP 产出**只进竞技专属池**，与 PVE 经济完全隔离：
 > 判定落在 `core/systems/gacha.ts` 的 `resolvePayment()`（返回 `null` 即余额不足），
 > `executePull()` 据此抛 `InsufficientFundsError`，表现层只负责提示。
 > UI 上「实际扣哪一项」也**直接取 `resolvePayment()`**，不在表现层复算（铁律 #4）。
-> 单测见 `tests/unit/gacha.test.ts` 的「抽卡费用」，E2E 覆盖「结晶耗尽 → 十连改走抽卡券」。
+> 单测见 `tests/unit/gacha.test.ts` 的「抽卡费用」，E2E 覆盖「结晶耗尽 → 十连改走抽卡券」
+> 与「十连混合支付只扣对应余额（结晶 2700 + 券 1）」——后者走真实玩家路径
+> （新手 3000 结晶 + 10 券 → 先单抽一次扣掉 300 结晶 → 结晶只够 9 抽，
+> 十连必须 9 抽结晶 + 1 张券补齐），断言只扣对应余额、另一项分毫不动。
 
 **预留付费位**：首发无任何真实支付入口，但 `platform/payment` 适配层定义好接口（`createOrder` / `verifyReceipt`），后续接入不改业务逻辑。
 
