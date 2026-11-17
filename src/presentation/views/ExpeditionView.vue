@@ -95,6 +95,7 @@ async function idle(battles: number) {
       r.exp ? `经验 ${formatNumber(r.exp)}` : '',
       r.skillStones ? `术式结晶 ${r.skillStones}` : '',
       r.relicStones ? `强化石 ${r.relicStones}` : '',
+      r.relics && r.relics.length > 0 ? `遗物 ${r.relics.length}` : '',
     ].filter(Boolean)
     store.notify(parts.length ? parts.join(' · ') : '推征完成')
   }

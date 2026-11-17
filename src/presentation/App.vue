@@ -55,6 +55,7 @@ const offlineRewards = computed(() => {
     { label: '术式结晶', value: r.skillStones ?? 0 },
     { label: '强化石', value: r.relicStones ?? 0 },
     { label: '英灵印记', value: r.emblems ?? 0 },
+    { label: '遗物', value: r.relics?.length ?? 0 },
   ].filter((x) => x.value > 0)
 })
 

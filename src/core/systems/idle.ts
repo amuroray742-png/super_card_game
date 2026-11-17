@@ -190,6 +190,8 @@ function scaleRewards(rewards: RewardBundle, ratio: number): RewardBundle {
   if (out.skillStones !== undefined) out.skillStones = Math.floor(out.skillStones * ratio)
   if (out.relicStones !== undefined) out.relicStones = Math.floor(out.relicStones * ratio)
   if (out.emblems !== undefined) out.emblems = Math.floor(out.emblems * ratio)
+  // ⚠ 遗物**不按倍率缩放**：遗物是「实例」（实物），外推段没有对应实例，
+  //   按比例裁数组会造出不存在的东西。这里原样保留（模拟段内的遗物照发）。
   return out
 }
 
@@ -234,6 +236,14 @@ export function rollRewards(stage: StageDef, rng: Rng): RollResult {
     relics.push(rng.pick(pool))
   }
 
+  // 遗物清单**同时**放进 rewards：表现层只认 `rewards` 这一份口径（铁律 #4）。
+  //
+  // ⚠ 历史 bug：遗物只留在 core 的独立数组 `relics` 里，`rewards.relics` 从未被赋值，
+  //   而表现层的 `applyRewards` **只读 `rewards`** → 挂机 / 离线结算产出的遗物
+  //   100% 被丢弃，玩家一个遗物都拿不到（整条遗物养成线是死的）。
+  //   `newRelics` 保留给表现层做「本次获得提示」，但**入库只认 rewards.relics**。
+  if (relics.length > 0) rewards.relics = [...relics]
+
   return { rewards, relics }
 }
 
@@ -245,6 +255,10 @@ function mergeRewards(target: RewardBundle, source: RewardBundle, shards: Record
   target.emblems = (target.emblems ?? 0) + (source.emblems ?? 0)
   if (source.shards) {
     for (const [k, v] of Object.entries(source.shards)) shards[k] = (shards[k] ?? 0) + v
+  }
+  // 遗物：合并进 rewards（多场战斗的遗物清单必须累加，否则只剩最后一场的）
+  if (source.relics && source.relics.length > 0) {
+    target.relics = [...(target.relics ?? []), ...source.relics]
   }
 }
 

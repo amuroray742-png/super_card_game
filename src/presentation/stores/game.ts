@@ -514,6 +514,9 @@ export const useGameStore = defineStore('game', () => {
       }
     }
     if (rewards.relics) {
+      // 遗物入库的唯一入口：core 把遗物清单放在 `rewards.relics`（铁律 #4 单一数据源）。
+      // ⚠ 这里曾经是死代码——core 的 `rollRewards` 只把遗物放进独立数组，
+      //   `rewards.relics` 从未被赋值 → 挂机/离线产出的遗物 100% 被丢弃。
       for (const defId of rewards.relics) {
         save.value.relics.push(generateRelic(defId, rng, 1))
       }

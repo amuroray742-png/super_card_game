@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   computeOfflineEfficiency,
   offlineEffectiveSeconds,
+  runIdle,
   settleOffline,
   OFFLINE_CAP_SECONDS,
 } from '../../src/core/systems/idle.ts'
@@ -76,5 +77,45 @@ describe('离线结算', () => {
     const result = settleOffline(team, 1, 2 * 3600, 3)
     expect(result.rewards.exp).toBeGreaterThan(0)
     expect(result.rewards.silver).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * 遗物掉落。
+ *
+ * ⚠ 历史 bug：遗物只放进 core 的独立数组 `relics`，`rewards.relics` 从未被赋值，
+ *   而表现层的 `applyRewards` 只读 `rewards` → 挂机/离线的遗物 100% 被丢弃。
+ *   这里锁住「遗物必须进 rewards」这条口径（表现层只认 rewards，铁律 #4）。
+ */
+describe('遗物掉落', () => {
+  it('挂机产出的遗物进 rewards（与 newRelics 一致）', () => {
+    const team = [maxedHero('xiangyu')]
+    const result = runIdle(team, 1, 3, 12345)
+    expect(result.battles).toBeGreaterThan(0)
+    expect(result.rewards.relics?.length ?? 0).toBeGreaterThan(0)
+    expect(result.rewards.relics).toEqual(result.newRelics)
+  })
+
+  it('多场战斗的遗物会累加（不是只剩最后一场的）', () => {
+    const team = [maxedHero('xiangyu')]
+    const one = runIdle(team, 1, 1, 999)
+    const many = runIdle(team, 1, 5, 999)
+    expect(one.rewards.relics!.length).toBe(1)
+    expect(many.rewards.relics!.length).toBe(5)
+  })
+
+  it('离线结算同样把遗物放进 rewards', () => {
+    const team = [maxedHero('xiangyu')]
+    const result = settleOffline(team, 1, 2 * 3600, 3)
+    expect(result.rewards.relics?.length ?? 0).toBeGreaterThan(0)
+  })
+
+  it('遗物 id 是真实存在的遗物定义', () => {
+    const team = [maxedHero('xiangyu')]
+    const result = runIdle(team, 1, 2, 4242)
+    for (const id of result.rewards.relics ?? []) {
+      expect(typeof id).toBe('string')
+      expect(id.length).toBeGreaterThan(0)
+    }
   })
 })

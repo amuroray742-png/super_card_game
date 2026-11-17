@@ -225,6 +225,24 @@
     > 结算弹窗又把同一个人列了两次。核心在 `core/systems/gacha.ts`
     > 用 `grantedInBatch` 逐张累积判定。
 
+26. **掉落产出必须走 `rewards` 这一份口径，不得有「第二个数组」**：
+    - core 结算掉落时，**所有**可入库资源（含遗物这类「实例」）
+      都必须放进 `RewardBundle`（`rewards.relics` / `rewards.shards` / …）。
+      表现层 `applyRewards()` **只读 `rewards`**——它不认 core 的旁路返回值。
+    - 「旁路数组」是这条铁律最危险的形态：core 里 `rollRewards()` 把遗物放进
+      独立数组 `relics`，`mergeRewards()` 也不合并它 → `rewards.relics` **从未被赋值**，
+      而 store 的入库分支是**死代码** → 挂机 / 离线产出的遗物 **100% 被丢弃**。
+      掉落表明明写着「每场必掉 1 件遗物」，仓库却永远是空的。
+    - 旁路返回值（如 `newRelics`）**只能**用于「本次获得提示」这类展示，
+      **不得**成为入库依据——否则「入库口径」和「提示口径」会分叉。
+    - 遗物是**实例**（实物），**不按倍率缩放**：`scaleRewards()` 的外推段没有对应实例，
+      按比例裁数组会造出不存在的东西。
+    - 任何新增掉落类型都要同时过三关：① 进了 `rewards`；② `applyRewards` 有入库分支；
+      ③ 有**真实链路**回归测试（单测走 store + E2E 走推征 → 仓库）。
+    > 教训：同铁律 #22——「配置齐全」≠「功能可用」。
+    > 掉落表、遗物配置、套装效果、强化石一应俱全，但玩家一个遗物都拿不到。
+    > 由 `tests/unit/store-relic.test.ts`（真实链路 5 例）+ `tests/e2e/relic.spec.ts` 守护。
+
 ## 数值调参的既定流程
 
 数值改动**只改** `src/core/config/economy.ts`（以及对应的配置表），然后按序执行：
