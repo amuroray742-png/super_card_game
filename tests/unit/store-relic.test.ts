@@ -38,6 +38,9 @@ vi.mock('../../src/platform/storage.ts', () => ({
 
 const { useGameStore } = await import('../../src/presentation/stores/game.ts')
 const { createHeroState } = await import('../../src/core/systems/growth.ts')
+const { generateRelic } = await import('../../src/core/systems/relic.ts')
+const { getEquippedRelics } = await import('../../src/core/systems/loadout.ts')
+const { Rng } = await import('../../src/core/rng.ts')
 
 const SLOT = 'main'
 
@@ -109,5 +112,95 @@ describe('遗物获取链路', () => {
     expect(result).not.toBeNull()
     expect(result!.rewards.relics?.length ?? 0).toBeGreaterThan(0)
     expect(store.save.relics.length).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * 一键推荐装备（真实 store 链路）。
+ *
+ * ⚠ 守的是「点了按钮之后遗物真的穿上了、战力真的涨了」，
+ *   不是「core 里有个推荐函数」——同 AGENTS.md 铁律 #22 的教训。
+ */
+describe('遗物一键推荐装备', () => {
+  beforeEach(async () => {
+    mem.clear()
+    setActivePinia(createPinia())
+    const store = useGameStore()
+    await store.load()
+    store.save.heroes['xiangyu'] = {
+      ...createHeroState('xiangyu', 0),
+      level: 240,
+      star: 6,
+      skillLevels: [20, 20, 20],
+    }
+    store.save.team.slots[0] = 'xiangyu'
+  })
+
+  it('一键推荐：6 个槽位被填上，战力不低于之前', async () => {
+    const store = useGameStore()
+    // 造 8 件遗物：4 件战神套 + 4 件探破套
+    const rng = new Rng(424242)
+    const pool = [
+      'set_zhanshen_1',
+      'set_zhanshen_2',
+      'set_zhanshen_3',
+      'set_zhanshen_4',
+      'set_tanpo_1',
+      'set_tanpo_2',
+      'set_tanpo_3',
+      'set_tanpo_4',
+    ]
+    store.save.relics = pool.map((id) => generateRelic(id, rng, 60))
+
+    const before = store.relicAdvice('xiangyu')
+    expect(before).not.toBeNull()
+    expect(before!.currentPower).toBeGreaterThan(0)
+
+    const advice = await store.autoEquipRelics('xiangyu')
+    expect(advice).not.toBeNull()
+    expect(advice!.gain).toBeGreaterThan(0)
+
+    // 6 个槽位真的穿上了
+    const equipped = getEquippedRelics(store.save, 'xiangyu')
+    expect(equipped.filter(Boolean)).toHaveLength(6)
+
+    // 战力确实涨了（重新取属性，与推荐算的是同一套口径）
+    const after = store.relicAdvice('xiangyu')
+    expect(after!.currentPower).toBeGreaterThanOrEqual(before!.currentPower)
+  })
+
+  it('一键推荐不抢其他英灵身上的遗物', async () => {
+    const store = useGameStore()
+    const rng = new Rng(99)
+    store.save.heroes['hanxin'] = { ...createHeroState('hanxin', 0), level: 60 }
+    store.save.relics = [
+      generateRelic('set_zhanshen_1', rng, 60),
+      generateRelic('set_zhanshen_2', rng, 60),
+      generateRelic('set_zhanshen_3', rng, 60),
+      generateRelic('set_zhanshen_4', rng, 60),
+      generateRelic('set_tanpo_1', rng, 60),
+    ]
+    // 先给 hanxin 穿上 4 件战神套
+    store.save.equipped['hanxin#0'] = { heroId: 'hanxin', relicId: store.save.relics[0].uid }
+    store.save.equipped['hanxin#1'] = { heroId: 'hanxin', relicId: store.save.relics[1].uid }
+    store.save.equipped['hanxin#2'] = { heroId: 'hanxin', relicId: store.save.relics[2].uid }
+    store.save.equipped['hanxin#3'] = { heroId: 'hanxin', relicId: store.save.relics[3].uid }
+
+    await store.autoEquipRelics('xiangyu')
+
+    // xiangyu 身上只能出现没被 hanxin 占用的那件
+    const mine = getEquippedRelics(store.save, 'xiangyu').filter(Boolean).map((r) => r!.uid)
+    expect(mine).toEqual([store.save.relics[4].uid])
+    // hanxin 的 4 件没被抢走
+    expect(getEquippedRelics(store.save, 'hanxin').filter(Boolean)).toHaveLength(4)
+  })
+
+  it('仓库为空时一键推荐不报错、不动装备', async () => {
+    const store = useGameStore()
+    store.save.relics = []
+    const advice = await store.autoEquipRelics('xiangyu')
+    expect(advice).not.toBeNull()
+    expect(advice!.gain).toBe(0)
+    expect(getEquippedRelics(store.save, 'xiangyu').filter(Boolean)).toHaveLength(0)
   })
 })

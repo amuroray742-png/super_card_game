@@ -29,10 +29,11 @@ import { HEROES, HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { STAGES } from '../../core/config/stages.ts'
 import { runIdle, settleOffline } from '../../core/systems/idle.ts'
 import { getTeamPower, computeBondState, isTeamEmpty } from '../../core/systems/team.ts'
-import { getEquippedRelics, equipRelic, unequipRelic, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
+import { getEquippedRelics, equipRelic, unequipRelic, equippedOwnerMap, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { executePull, summarizePull, InsufficientFundsError } from '../../core/systems/gacha.ts'
 import { getPool, groupByRarity, resolvePoolHeroIds } from '../../core/config/pools.ts'
-import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, generateRelic } from '../../core/systems/relic.ts'
+import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, generateRelic, RELIC_SETS } from '../../core/systems/relic.ts'
+import { recommendRelicLoadout, type RelicAdvice } from '../../core/systems/relic-advice.ts'
 import {
   applyExp,
   applySkillUp,
@@ -872,6 +873,51 @@ export const useGameStore = defineStore('game', () => {
     await persist()
   }
 
+  /**
+   * 遗物一键推荐（§5.4）。
+   *
+   * 规则一律由 core 的 `recommendRelicLoadout` 产出，表现层不自己算
+   * 「哪件更强」——那会与战斗里的属性口径分叉（铁律 #2）。
+   *
+   * ⚠ 候选池**不包含**装备在其他英灵身上的遗物：
+   *   一键推荐不抢占别人的装备（抢了会让别人的战力凭空掉一截）。
+   */
+  function relicAdvice(heroId: string): RelicAdvice | null {
+    const def = HERO_INDEX.get(heroId)
+    const state = heroIndex.value.get(heroId)
+    if (!def || !state) return null
+    const current = getEquippedRelics(save.value, heroId)
+    const owners = equippedOwnerMap(save.value)
+    const candidates = save.value.relics.filter((r) => {
+      const owner = owners.get(r.uid)
+      return owner === undefined || owner === heroId
+    })
+    const rt: HeroRuntime = { def, state, relics: current, slot: 0 }
+    return recommendRelicLoadout(rt, candidates, current)
+  }
+
+  /** 一键按推荐装备遗物 */
+  async function autoEquipRelics(heroId: string): Promise<RelicAdvice | null> {
+    const advice = relicAdvice(heroId)
+    if (!advice) return null
+    // 清掉该英灵现有装备，再按推荐铺回去
+    for (let slot = 0; slot < RELIC_SLOT_COUNT; slot++) {
+      unequipRelic(save.value, heroId, slot)
+    }
+    advice.slots.forEach((relic, slot) => {
+      if (relic) equipRelic(save.value, heroId, slot, relic.uid)
+    })
+    if (!(await persist())) return null
+    const sets = Object.entries(advice.activeTiers)
+      .filter(([, tier]) => tier > 0)
+      .map(([setId, tier]) => `${RELIC_SETS.get(setId)?.name ?? setId} ${tier} 件`)
+    notify(
+      `已按推荐装备 · 战力 +${formatNumber(advice.gain)}${sets.length ? ' · ' + sets.join(' / ') : ''}`,
+      'ok',
+    )
+    return advice
+  }
+
   // ─────────────────────────── 圣杯重启 ───────────────────────────
 
   const rebirthPreview = computed(() => previewRebirth(save.value))
@@ -1102,6 +1148,8 @@ export const useGameStore = defineStore('game', () => {
     removePreset,
     equip,
     unequip,
+    relicAdvice,
+    autoEquipRelics,
     doRebirth,
     runArenaMatch,
     settleArena,

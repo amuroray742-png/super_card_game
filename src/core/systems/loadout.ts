@@ -68,3 +68,17 @@ export function unequipRelic(save: SaveData, heroId: string, slot: number): void
 export function listEquipped(save: SaveData, heroId: string): RelicInstance[] {
   return getEquippedRelics(save, heroId).filter((r): r is RelicInstance => r !== null)
 }
+
+/**
+ * 每件遗物当前装备在谁身上（uid → heroId）。
+ *
+ * 一键推荐用：候选池只收「没装备在任何英灵身上」+「已装备在目标英灵身上」的遗物，
+ * **不抢占其他英灵的装备**（抢了会让别人的战力凭空掉一截）。
+ */
+export function equippedOwnerMap(save: SaveData): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const entry of Object.values(save.equipped)) {
+    out.set(entry.relicId, entry.heroId)
+  }
+  return out
+}

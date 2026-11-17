@@ -120,6 +120,27 @@ export function enemyArtPath(defId: string): string {
 }
 
 /**
+ * 遗物图标资源扩展名。
+ *
+ * 当前为程序化 SVG（`tools/relic-icons/generate.ts` 产出，60 张徽章）；
+ * 后续若接 AI 生图，只改这里即可，界面与逻辑都不用动。
+ */
+export const RELIC_ICON_EXT = '.svg'
+
+/**
+ * 取遗物图标路径。
+ *
+ * 遗物素材按遗物**基础定义 id** 命名（`public/relics/<defId>.svg`），
+ * 与英灵卡面 / 敌人立绘共用「路径由 core 给出」的唯一口径（AGENTS.md 铁律 #8）——
+ * 表现层不得自行拼接 `/relics/xxx.svg`。
+ *
+ * @param defId 遗物定义 id（如 `set_zhanshen_1`）
+ */
+export function relicIconPath(defId: string): string {
+  return `/relics/${defId}${RELIC_ICON_EXT}`
+}
+
+/**
  * 头像裁取约定（§6.3 战斗演出）。
  *
  * 源区是**正方形**：边长 = `sizeRatio × 图片宽度`，水平居中，

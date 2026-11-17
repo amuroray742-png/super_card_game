@@ -71,6 +71,23 @@ async function relicsOf(page: Page): Promise<Array<{ defId: string; uid: string;
   })
 }
 
+/** 读取某英灵当前已装备的遗物数量 */
+async function equippedCountOf(page: Page, heroId: string): Promise<number> {
+  return page.evaluate((id) => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))
+    if (!key) return 0
+    const save = JSON.parse(localStorage.getItem(key)!) as {
+      equipped?: Record<string, { heroId: string }>
+    }
+    return Object.values(save.equipped ?? {}).filter((e) => e.heroId === id).length
+  }, heroId)
+}
+
+/** 从详情页 URL 里取英灵 id */
+function heroIdFromUrl(page: Page): string {
+  return page.url().split('/hero/')[1]?.split('?')[0]?.split('#')[0] ?? ''
+}
+
 test.describe('遗物获取途径（挂机掉落入库）', () => {
   test('推征产出的遗物真的进了仓库，刷新后也不丢', async ({ page }) => {
     await bootLoggedIn(page)
@@ -141,5 +158,124 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
     await expect
       .poll(async () => (await relicsOf(page)).length, { timeout: 10_000 })
       .toBeGreaterThan(afterFirst)
+  })
+})
+
+/**
+ * 遗物图标。
+ *
+ * 遗物原本**完全没有图标**：仓库里 60 件遗物长得一模一样，
+ * 玩家只能靠名字认——同套装同稀有度的几件根本分不清。
+ */
+test.describe('遗物图标', () => {
+  test('仓库里每件遗物都有自己的图标，路径由 core 给出', async ({ page }) => {
+    await bootLoggedIn(page)
+    await pullHeroes(page)
+    await setupTeam(page)
+
+    // 推征产遗物
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+    await page.getByRole('button', { name: '推征 10 场' }).click()
+    await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
+
+    // 铸造页：每件遗物都有图标
+    await page.goto('/#/forge')
+    await page.waitForLoadState('networkidle')
+    const icons = page.locator('.relic-cell img.relic-icon')
+    await expect(icons.first()).toBeVisible()
+    const cellCount = await page.locator('.relic-cell').count()
+    expect(await icons.count()).toBe(cellCount)
+
+    // 路径口径：/relics/<遗物定义 id>.svg（表现层不自己拼，铁律 #8）
+    const srcs = await icons.evaluateAll((els) =>
+      els.map((el) => (el as HTMLImageElement).getAttribute('src') ?? ''),
+    )
+    for (const src of srcs) {
+      expect(src).toMatch(/^\/relics\/set_[a-z]+_\d+\.svg$/)
+    }
+
+    // 图标真的加载出来了（不是 404 的空图）
+    const loaded = await icons.evaluateAll((els) =>
+      els.every((el) => (el as HTMLImageElement).naturalWidth > 0),
+    )
+    expect(loaded).toBe(true)
+  })
+})
+
+/**
+ * 一键推荐装备 + 套装效果可见。
+ *
+ * ⚠ 套装 2/4/6 阶梯加成**早就存在**（配置 + 战斗计算都已接上），
+ *   但界面完全没展示 → 玩家不知道「再凑 1 件就能开 4 件套」，养成线等于隐形。
+ */
+test.describe('一键推荐装备与套装效果', () => {
+  test('英灵页一键推荐：6 槽填满、战力提升、套装档位可见', async ({ page }) => {
+    await bootLoggedIn(page)
+    await pullHeroes(page)
+    await setupTeam(page)
+
+    // 推征产遗物
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+    await page.getByRole('button', { name: '推征 10 场' }).click()
+    await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
+
+    // 进英灵详情页
+    await page.goto('/#/temple')
+    await page.waitForLoadState('networkidle')
+    await page.locator('.hero-cell').first().click()
+    await expect(page).toHaveURL(/#\/hero\//)
+
+    // 一键推荐按钮在，且给出了战力增量
+    const btn = page.getByTestId('relic-recommend')
+    await btn.scrollIntoViewIfNeeded()
+    await expect(btn).toBeVisible()
+    await expect(btn).toContainText('一键推荐装备')
+
+    // 套装的 2/4/6 阶梯在页面上看得见（哪怕当前一件都没装）
+    await expect(page.getByText('套装效果', { exact: true })).toBeVisible()
+    await expect(page.getByText('2 / 4 / 6 件可激活阶梯加成')).toBeVisible()
+
+    // 点一键推荐 → 6 个槽位填满
+    await btn.click()
+    await expect(page.locator('.relic-slot.filled')).toHaveCount(6, { timeout: 10_000 })
+
+    // 套装效果区现在显示了具体套装与档位
+    const setPanel = page.locator('.set-row')
+    await expect(setPanel.first()).toBeVisible()
+    await expect(setPanel.first()).toContainText('件')
+    // 至少有一档写着「还差 N 件」或「已生效」
+    await expect(page.getByText(/已生效|还差 \d+ 件/).first()).toBeVisible()
+
+    // 战力确实涨了（推荐完按钮应变为「已是推荐配置」）
+    await expect(page.getByText('当前已是最优配置')).toBeVisible()
+
+    // 存档里确实给这名英灵穿上了 6 件
+    const heroId = heroIdFromUrl(page)
+    expect(heroId).not.toBe('')
+    await expect.poll(() => equippedCountOf(page, heroId), { timeout: 10_000 }).toBe(6)
+  })
+
+  test('套装效果区会指出「还差几件」并提示仓库里可换的件', async ({ page }) => {
+    await bootLoggedIn(page)
+    await pullHeroes(page)
+    await setupTeam(page)
+
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+    await page.getByRole('button', { name: '推征 10 场' }).click()
+    await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
+
+    await page.goto('/#/temple')
+    await page.waitForLoadState('networkidle')
+    await page.locator('.hero-cell').first().click()
+    await expect(page).toHaveURL(/#\/hero\//)
+    await page.getByTestId('relic-recommend').scrollIntoViewIfNeeded()
+    await page.getByTestId('relic-recommend').click()
+    await expect(page.locator('.relic-slot.filled')).toHaveCount(6, { timeout: 10_000 })
+
+    // 套装区有「还差 N 件」的阶梯提示
+    await expect(page.getByText(/还差 \d+ 件/).first()).toBeVisible()
   })
 })

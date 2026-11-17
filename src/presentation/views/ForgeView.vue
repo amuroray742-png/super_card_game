@@ -7,6 +7,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { RELIC_DEFS, RELIC_SETS, getRelicMods, getSetModsBySetIds } from '../../core/systems/relic.ts'
+import { relicIconPath } from '../../core/config/art.ts'
 import { formatNumber } from '../utils/format'
 import type { Rarity, RelicInstance, StatMod } from '../../core/model/types.ts'
 
@@ -201,6 +202,14 @@ function statText(mod: StatMod): string {
           :class="{ on: selectedUid === r.uid }"
           @click="selectedUid = r.uid"
         >
+          <img
+            class="relic-icon"
+            :src="relicIconPath(r.defId)"
+            :alt="RELIC_DEFS.get(r.defId)?.name ?? r.defId"
+            width="44"
+            height="44"
+            loading="lazy"
+          />
           <span class="tag" :class="`tag-${(RELIC_DEFS.get(r.defId)?.rarity ?? 'N').toLowerCase()}`">
             {{ RELIC_DEFS.get(r.defId)?.rarity ?? 'N' }}
           </span>
@@ -338,6 +347,13 @@ function statText(mod: StatMod): string {
   background: var(--c-bg-2);
   text-align: left;
   min-height: 72px;
+}
+
+.relic-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: block;
 }
 
 .relic-cell.on {

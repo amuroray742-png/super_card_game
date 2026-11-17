@@ -18,7 +18,8 @@ import {
   realmBreakCost,
   atRealmGate,
 } from '../../core/systems/growth.ts'
-import { RELIC_DEFS, getHeroSetMods } from '../../core/systems/relic.ts'
+import { RELIC_DEFS, RELIC_SETS, getHeroSetMods } from '../../core/systems/relic.ts'
+import { relicIconPath } from '../../core/config/art.ts'
 import { resolveStats, computePower, getRealm, nextRealm } from '../../core/systems/stats.ts'
 import { RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { formatNumber } from '../utils/format'
@@ -249,6 +250,72 @@ function unequip(slot: number) {
 
 function relicName(relic: RelicInstance): string {
   return RELIC_DEFS.get(relic.defId)?.name ?? relic.defId
+}
+
+// ─────────────────────────── 套装效果 ───────────────────────────
+
+/**
+ * 该英灵身上的套装进度。
+ *
+ * ⚠ 套装效果**早已存在**（`config/relics.ts` 的 2/4/6 档 + `getSetMods`，
+ *   战斗与战力计算都已接上），但界面**完全没展示**它——
+ *   玩家不知道「再凑 1 件就能开 4 件套」，这条养成线等于隐形。
+ *
+ * 档位判定一律读 `RELIC_SETS[].bonuses`（不硬编码 2/4/6，配置改了自动跟）。
+ */
+const setRows = computed(() => {
+  const counts = new Map<string, number>()
+  for (const r of relicSlots.value) {
+    if (!r) continue
+    const def = RELIC_DEFS.get(r.defId)
+    if (!def) continue
+    counts.set(def.setId, (counts.get(def.setId) ?? 0) + 1)
+  }
+
+  // 仓库里每个套装共有多少件（含未装备的）——用来提示「还能换」
+  const owned = new Map<string, number>()
+  for (const r of store.save.relics) {
+    const def = RELIC_DEFS.get(r.defId)
+    if (!def) continue
+    owned.set(def.setId, (owned.get(def.setId) ?? 0) + 1)
+  }
+
+  return [...counts.entries()]
+    .map(([setId, count]) => {
+      const set = RELIC_SETS.get(setId)
+      const tiers = (set?.bonuses ?? []).map((b) => ({
+        pieces: b.pieces,
+        desc: b.desc,
+        active: count >= b.pieces,
+        need: Math.max(0, b.pieces - count),
+      }))
+      const next = tiers.find((t) => !t.active)
+      return {
+        setId,
+        name: set?.name ?? setId,
+        desc: set?.desc ?? '',
+        count,
+        tiers,
+        nextPieces: next?.pieces ?? 0,
+        nextNeed: next?.need ?? 0,
+        // 仓库里该套装还有几件是**没装在这名英灵身上**的
+        spare: Math.max(0, (owned.get(setId) ?? 0) - count),
+      }
+    })
+    .sort((a, b) => b.count - a.count)
+})
+
+// ─────────────────────────── 一键推荐装备 ───────────────────────────
+
+/**
+ * 遗物推荐方案（由 core 的 `recommendRelicLoadout` 产出）。
+ *
+ * ⚠ 表现层不自己算「哪件更强」——那会与战斗里的属性口径分叉（铁律 #2）。
+ */
+const relicAdvice = computed(() => store.relicAdvice(heroId.value))
+
+async function applyRecommendation() {
+  await store.autoEquipRelics(heroId.value)
 }
 
 /**
@@ -517,15 +584,82 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
             :class="{ filled: !!relic }"
             @click="relic ? (menuSlot = menuSlot === slot ? null : slot) : openPicker(slot)"
           >
+            <img
+              v-if="relic"
+              class="relic-icon"
+              :src="relicIconPath(relic.defId)"
+              :alt="relicName(relic)"
+              width="36"
+              height="36"
+              loading="lazy"
+            />
             <span class="tiny">{{ slot + 1 }}</span>
             <span v-if="relic" class="relic-name">{{ relicName(relic) }}</span>
             <span v-else class="tiny dim">空</span>
-            <span v-if="relic" class="tiny muted">Lv{{ relic.level }}</span>
+            <span v-if="relic" class="tiny muted">
+              {{ RELIC_SETS.get(RELIC_DEFS.get(relic.defId)?.setId ?? '')?.name ?? '—' }} · Lv{{ relic.level }}
+            </span>
           </button>
         </div>
+
+        <!-- 一键推荐装备 -->
+        <button
+          class="btn btn-sm btn-block"
+          style="margin-top: 8px"
+          data-testid="relic-recommend"
+          :disabled="!relicAdvice || relicAdvice.gain <= 0"
+          @click="applyRecommendation"
+        >
+          <template v-if="relicAdvice && relicAdvice.gain > 0">
+            一键推荐装备（战力 +{{ formatNumber(relicAdvice.gain) }}）
+          </template>
+          <template v-else>一键推荐装备</template>
+        </button>
+        <div v-if="relicAdvice && relicAdvice.gain <= 0" class="tiny muted" style="margin-top: 4px">
+          当前已是最优配置（仓库里没有更强的遗物可换）。
+        </div>
+        <div v-else class="tiny muted" style="margin-top: 4px">
+          推荐只在未装备在其他英灵身上的遗物中挑选，不会抢走别人的装备。
+        </div>
+
         <p class="tiny muted" style="margin: 8px 0 0">
           点击空槽选择遗物，点击已装备遗物可强化、分解或卸下。
         </p>
+      </section>
+
+      <!-- 套装效果（2 / 4 / 6 件阶梯加成） -->
+      <section class="panel">
+        <div class="panel-title">
+          <span>套装效果</span>
+          <span class="tiny muted">{{ setRows.length ? `${setRows.length} 套在身` : '无' }}</span>
+        </div>
+        <div v-if="setRows.length === 0" class="empty" style="padding: 14px">
+          尚未装备套装件<br />
+          <span class="tiny">同套装装备 2 / 4 / 6 件可激活阶梯加成</span>
+        </div>
+        <div v-for="row in setRows" :key="row.setId" class="set-row">
+          <div class="row-between">
+            <b>{{ row.name }}</b>
+            <span class="tag" :class="row.tiers.some((t) => t.active) ? 'tag-sr' : ''">
+              {{ row.count }} 件
+            </span>
+          </div>
+          <div class="tiny muted" style="margin-top: 2px">{{ row.desc }}</div>
+          <div
+            v-for="tier in row.tiers"
+            :key="tier.pieces"
+            class="tiny"
+            :class="tier.active ? 'ok-text' : 'muted'"
+          >
+            {{ tier.pieces }} 件 · {{ tier.desc }}
+            <template v-if="tier.active">（已生效）</template>
+            <template v-else-if="tier.need > 0">（还差 {{ tier.need }} 件）</template>
+          </div>
+          <div v-if="row.spare > 0" class="tiny muted" style="margin-top: 2px">
+            仓库里还有 {{ row.spare }} 件「{{ row.name }}」可换
+            <template v-if="row.nextNeed > 0">（换上即可补齐 {{ row.nextPieces }} 件套）</template>
+          </div>
+        </div>
       </section>
 
       <!-- 羁绊 -->
@@ -566,6 +700,14 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
           class="list-item pick-row"
           @click="chooseRelic(r.uid)"
         >
+          <img
+            class="relic-icon"
+            :src="relicIconPath(r.defId)"
+            :alt="relicName(r)"
+            width="36"
+            height="36"
+            loading="lazy"
+          />
           <div style="flex: 1; min-width: 0">
             <div class="row" style="gap: 6px">
               <span class="tag" :class="`tag-${(RELIC_DEFS.get(r.defId)?.rarity ?? 'N').toLowerCase()}`">
@@ -573,7 +715,9 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
               </span>
               <b>{{ relicName(r) }}</b>
             </div>
-            <div class="tiny muted" style="margin-top: 2px">强化 +{{ r.level }}</div>
+            <div class="tiny muted" style="margin-top: 2px">
+              {{ RELIC_SETS.get(RELIC_DEFS.get(r.defId)?.setId ?? '')?.name ?? '—' }} · 强化 +{{ r.level }}
+            </div>
           </div>
           <span class="tiny muted">装备</span>
         </button>
@@ -738,6 +882,24 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
   border-style: solid;
   border-color: var(--c-gold);
   background: #2a2419;
+}
+
+.relic-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: block;
+  flex: none;
+}
+
+.set-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--c-line);
+  line-height: 1.7;
+}
+
+.set-row:last-child {
+  border-bottom: none;
 }
 
 .relic-name {

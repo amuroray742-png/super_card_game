@@ -31,9 +31,10 @@
 8. **存档结构也必须有唯一约定**：装备槽位 key 格式、掉落表 id、卡池 id 等由 `core/systems/loadout.ts`
    与 `core/config/` 定义，表现层不得自行拼接（否则 core 与 UI 会各写一套 key 规则）。
    **美术路径与裁取约定同样只有一个来源**：`src/core/config/art.ts` 的 `portraitPath` / `enemyArtPath` /
-   `AVATAR_CROP`。表现层禁止自己拼 `/enemies/<id>.svg`、也禁止自己算「头像裁哪一块」——
+   `relicIconPath` / `AVATAR_CROP`。表现层禁止自己拼 `/enemies/<id>.svg`、也禁止自己算「头像裁哪一块」——
    敌人 id 在战斗里带 `#序号` 后缀（`boss_abyss#0`），自行拼接会取不到图；
    裁取参数一旦两处各写一套，换美术资源就会集体错位。
+   遗物图标同理：路径只能是 `relicIconPath(defId)`，素材由 `npm run art:relic` 产出到 `public/relics/`。
 9. **禁用词表是单一数据源**：只改 `src/content/compliance/forbidden-words.md`，扫描器只解析该文件，
    不得在扫描器代码里硬编码词条。
 10. **核心循环入口必须可达**：抽卡 / 编队 / 推征等主循环页面必须在导航或主界面上有显式入口，
@@ -243,6 +244,20 @@
     > 掉落表、遗物配置、套装效果、强化石一应俱全，但玩家一个遗物都拿不到。
     > 由 `tests/unit/store-relic.test.ts`（真实链路 5 例）+ `tests/e2e/relic.spec.ts` 守护。
 
+27. **养成线的规则必须在玩家眼前，否则等于不存在**：任何**会改变战斗结果**的养成规则，
+    都必须在对应页面把「当前进度 / 已生效 / 还差几件」写出来。
+    - 套装 2/4/6 件阶梯加成**早就配好了、也早就接进战斗**（`getSetMods` → `resolveStats`），
+      但界面**一个字都没提** → 玩家不知道「再凑 1 件就能开 4 件套」，
+      这条养成线等于隐形，玩家自然不会去凑。
+    - 判定口径一律读配置（`RELIC_SETS[].bonuses`），**不硬编码 2/4/6**——
+      套装档位改了，展示与计算要一起跟着改。
+    - 规则 → 数值 → 展示三者必须**同源**：界面上写的「已生效 / 还差 N 件」
+      要与战斗里实际吃到的加成来自同一份配置（铁律 #2 / #8）。
+    > 教训：「逻辑接上了」≠「玩家看得见」。这条比 #22 更隐蔽——
+    > #22 是功能不通，这里是功能通了但没人知道，两种都会让养成线形同虚设。
+    > 由 `tests/unit/relic-advice.test.ts`（2/4/6 档真的进属性）+
+    > `tests/e2e/relic.spec.ts`（页面上看得见 2/4/6 档与「还差 N 件」）守护。
+
 ## 数值调参的既定流程
 
 数值改动**只改** `src/core/config/economy.ts`（以及对应的配置表），然后按序执行：
@@ -330,6 +345,7 @@ npm run balance:rates    # 十连综合概率（精确 DP）取数
 npm run validate:config  # 配置完整性校验（id 唯一、引用存在、数值区间）
 npm run scan:forbidden   # 禁用词扫描（含 server/）
 npm run art:placeholder  # 生成占位头像
+npm run art:relic        # 生成遗物图标徽章（60 张 → public/relics/）
 npm run art:transcode    # 卡面 JPEG → WebP 转码（体积 25.9MB → 3.9MB）
 npm run art:capture      # 界面截图（必须指向隔离 origin，见铁律 #13）
 npm run test:e2e         # Playwright 端到端（需先 npx playwright install chromium）

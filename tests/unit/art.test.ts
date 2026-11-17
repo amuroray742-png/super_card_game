@@ -5,7 +5,19 @@
  * 也不得自行剥敌人 id 的 `#序号` 后缀。
  */
 import { describe, expect, it } from 'vitest'
-import { portraitPath, enemyArtPath, AVATAR_CROP } from '../../src/core/config/art.ts'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  portraitPath,
+  enemyArtPath,
+  relicIconPath,
+  RELIC_ICON_EXT,
+  AVATAR_CROP,
+} from '../../src/core/config/art.ts'
+import { RELICS } from '../../src/core/config/relics.ts'
+
+const ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
 describe('美术路径约定', () => {
   it('英灵：已产出 AI 卡面的走 WebP，其余回落 SVG 占位', () => {
@@ -17,6 +29,26 @@ describe('美术路径约定', () => {
   it('敌人：按基础定义 id 取占位头像', () => {
     expect(enemyArtPath('boss_abyss')).toBe('/enemies/boss_abyss.svg')
     expect(enemyArtPath('wanderer')).toBe('/enemies/wanderer.svg')
+  })
+})
+
+describe('遗物图标约定', () => {
+  it('按遗物定义 id 取图标路径', () => {
+    expect(relicIconPath('set_zhanshen_1')).toBe('/relics/set_zhanshen_1.svg')
+  })
+
+  it('每一件遗物都有对应的图标文件（配置齐全 ≠ 资源齐全）', () => {
+    const dir = join(ROOT, 'public/relics')
+    const missing = RELICS.filter((r) => !existsSync(join(dir, `${r.id}${RELIC_ICON_EXT}`)))
+    expect(missing.map((r) => r.id)).toEqual([])
+  })
+
+  it('图标是独立文档（不共用渐变 id，避免同页多图串色）', () => {
+    const dir = join(ROOT, 'public/relics')
+    const one = RELICS[0]
+    const svg = readFileSync(join(dir, `${one.id}${RELIC_ICON_EXT}`), 'utf8')
+    expect(svg).toContain('<svg')
+    expect(svg).toContain('viewBox="0 0 128 128"')
   })
 })
 

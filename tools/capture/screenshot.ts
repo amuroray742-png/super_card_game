@@ -40,6 +40,10 @@
  * # 抽卡演出场景（注册账号 → 十连 → 抓「逐张翻牌」「SSR 全屏爆点」「爆点停住等点击」三帧）
  * npx tsx tools/capture/screenshot.ts --gacha-reveal --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/gacha-reveal.png
+ *
+ * # 遗物场景（注册账号 → 十连 → 编队 → 推征产遗物 → 铸造页 + 英灵页）
+ * npx tsx tools/capture/screenshot.ts --relic --api http://127.0.0.1:8791 \
+ *   --url http://127.0.0.1:4188 --out artifacts/art-preview/relic.png
  * ```
  */
 import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test'
@@ -70,6 +74,8 @@ interface Options {
   gachaTicket: boolean
   /** 抽卡演出场景：抓「逐张翻牌」与「SSR 全屏爆点」两帧 */
   gachaReveal: boolean
+  /** 遗物场景：登录 → 十连 → 编队 → 推征产遗物 → 铸造页 + 英灵页 */
+  relic: boolean
   /** 隔离后端地址（观战场景要注册账号） */
   api: string
   /** 指定关卡 id（走关卡详情页的「战斗预览」；不填则走推征页的「观战」） */
@@ -92,6 +98,7 @@ function parseArgs(argv: string[]): Options {
     hero: argv.includes('--hero'),
     gachaTicket: argv.includes('--gacha-ticket'),
     gachaReveal: argv.includes('--gacha-reveal'),
+    relic: argv.includes('--relic'),
     api: get('--api') ?? '',
     stage: get('--stage') ?? '',
     fullPage: argv.includes('--full-page'),
@@ -179,6 +186,13 @@ async function setupAccount(context: BrowserContext, page: Page, opts: Options):
   const base = opts.url.replace(/\/$/, '')
   await page.goto(`${base}/#/gacha`, { waitUntil: 'networkidle' })
   await page.locator('button', { hasText: '十连' }).first().click()
+  // ⚠ 抽卡演出会**停在 SSR 爆点等玩家点击**（不会自己演完），
+  //   不跳过的话「收下」按钮永远不出现，脚本会一直等到超时。
+  const skip = page.getByTestId('gacha-skip')
+  await skip.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
+  if (await skip.isVisible().catch(() => false)) {
+    await skip.click({ timeout: 3000 }).catch(() => {})
+  }
   await page.getByRole('button', { name: '收下' }).click()
   await page.waitForTimeout(400)
   return base
@@ -345,11 +359,86 @@ async function runBattleScenario(
   return opts.out.replace(/\.png$/, '') + '-result.png'
 }
 
+/**
+ * 遗物场景：登录 → 十连 → 编队 → 推征挂机（产遗物）→ 铸造页 + 英灵页。
+ *
+ * 截图用于验收三件事：
+ * 1. **遗物图标**：仓库里每件遗物都该有自己的徽章（不是一排同名文字）；
+ * 2. **一键推荐装备**：英灵页的「一键推荐装备」按钮与战力增量；
+ * 3. **套装效果可见**：2/4/6 件阶梯加成与「还差几件」的提示。
+ *
+ * ⚠ 为什么要先推征：遗物**只**从推征（挂机）与离线结算产出，
+ *   新号仓库是空的 → 截出来的图只能看到空态。
+ * ⚠ 满编 6 人：人不够会在第 1 关卡关，卡关后不再有掉落。
+ */
+async function runRelicScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  const base = await setupAccount(context, page, opts)
+
+  // 编队（满编 6 人，保证推征打得赢、掉得到遗物）
+  await page.goto(`${base}/#/formation`, { waitUntil: 'networkidle' })
+  for (const [slotText, index] of [
+    ['空位 1', 0],
+    ['空位 2', 1],
+    ['空位 3', 2],
+    ['空位 4', 3],
+    ['空位 5', 4],
+    ['空位 6', 5],
+  ] as const) {
+    await page.locator('.slot', { hasText: slotText }).click()
+    const dialog = page.locator('.dialog')
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.locator('.pick-row').nth(index).click()
+    await dialog.waitFor({ state: 'detached' })
+  }
+
+  // 推征挂机 → 产遗物（每场必掉 1 件）
+  await page.goto(`${base}/#/expedition`, { waitUntil: 'networkidle' })
+  for (let i = 0; i < 3; i++) {
+    await page.locator('button', { hasText: '推征 10 场' }).click()
+    await page.waitForTimeout(700)
+  }
+
+  // 铸造页：遗物仓库（图标 + 套装名）
+  await page.goto(`${base}/#/forge`, { waitUntil: 'networkidle' })
+  await page.locator('.relic-cell').first().waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-forge.png'), fullPage: opts.fullPage })
+
+  // 英灵页：一键推荐装备 + 套装效果
+  // ⚠ 页面是**内部滚动容器**（.body），不是整页滚动 → fullPage 拍不到下半部分，
+  //   必须先把「遗物槽」滚进视口再拍。
+  await page.goto(`${base}/#/temple`, { waitUntil: 'networkidle' })
+  await page.locator('.hero-cell').first().click()
+  await page.waitForTimeout(2600)
+  await page.getByTestId('relic-recommend').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: outPath })
+
+  // 点「一键推荐装备」→ 槽位填满、套装档位亮起
+  await page.getByTestId('relic-recommend').click()
+  await page.waitForTimeout(900)
+  await page.getByTestId('relic-recommend').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-equipped.png') })
+
+  // 套装效果区（往下滚一点）
+  await page.getByText('套装效果', { exact: true }).scrollIntoViewIfNeeded()
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-set.png') })
+
+  return ''
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   assertSafeOrigin(opts.url)
-  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal) && !opts.api) {
-    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出场景需要 --api <隔离后端地址>（用于注册临时账号）')
+  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic) && !opts.api) {
+    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物场景需要 --api <隔离后端地址>（用于注册临时账号）')
   }
 
   const target = `${opts.url.replace(/\/$/, '')}/#${opts.route}`
@@ -373,6 +462,8 @@ async function main(): Promise<void> {
       resultPath = await runHeroScenario(context, page, opts, outPath)
     } else if (opts.battle) {
       resultPath = await runBattleScenario(context, page, opts, outPath)
+    } else if (opts.relic) {
+      await runRelicScenario(context, page, opts, outPath)
     } else if (opts.gachaTicket) {
       await runGachaTicketScenario(context, page, opts, outPath)
     } else if (opts.gachaReveal) {
@@ -386,7 +477,7 @@ async function main(): Promise<void> {
       }
     }
 
-    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal) {
+    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic) {
       await page.screenshot({ path: outPath, fullPage: opts.fullPage })
     }
     if (resultPath) {
