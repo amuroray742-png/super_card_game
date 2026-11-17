@@ -33,7 +33,9 @@ async function runMatch() {
     store.notify('请先在阵位中编队', 'warn')
     return
   }
-  const result = store.runArenaMatch()
+  // 对局与结算由服务端一次完成（原子），这里拿回结果回显
+  const result = await store.runArenaMatch()
+  if (!result) return
   match.value = result
   // 结算入账：段位分 / 勋章 / 竞技专属产出（不回流 PVE 经济）
   const reward = await store.settleArena(result)

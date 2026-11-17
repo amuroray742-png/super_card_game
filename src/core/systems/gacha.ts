@@ -76,14 +76,26 @@ function pullCount(count: 1 | 10): number {
   return count === GACHA.TEN_PULL_COUNT ? GACHA.TEN_PULL_COUNT : 1
 }
 
-/** 抽卡货币不足 */
+/**
+ * 抽卡货币不足。
+ *
+ * ⚠ 刻意**不用** TypeScript 参数属性（`constructor(readonly required: …)`）：
+ *   参数属性不可擦除，Node 的原生 TS 类型擦除（`node file.ts`）会报
+ *   `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`。服务端要 import core（AGENTS.md 铁律 #28），
+ *   所以 core 里所有类都必须写成「显式字段 + 构造体内赋值」。
+ */
 export class InsufficientFundsError extends Error {
+  readonly required: { crystals: number; tickets: number }
+  readonly owned: { crystals: number; tickets: number }
+
   constructor(
-    readonly required: { crystals: number; tickets: number },
-    readonly owned: { crystals: number; tickets: number },
+    required: { crystals: number; tickets: number },
+    owned: { crystals: number; tickets: number },
   ) {
     super('抽卡货币不足')
     this.name = 'InsufficientFundsError'
+    this.required = required
+    this.owned = owned
   }
 }
 

@@ -17,6 +17,7 @@ import type {
   RewardBundle,
   BattleResult,
   Rarity,
+  ArenaMatch,
 } from '../../core/model/types.ts'
 import { createNewSave, normalizeSave } from '../../core/save/schema.ts'
 import { hasExternalUpdate, nextStamp, pickNewer } from '../../core/save/conflict.ts'
@@ -27,13 +28,12 @@ import { systemClock } from '../../core/time.ts'
 import { Rng } from '../../core/rng.ts'
 import { HEROES, HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { STAGES } from '../../core/config/stages.ts'
-import { runIdle, settleOffline } from '../../core/systems/idle.ts'
 import { getTeamPower, computeBondState, isTeamEmpty } from '../../core/systems/team.ts'
-import { getEquippedRelics, equipRelic, unequipRelic, equippedOwnerMap, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
-import { executePull, summarizePull, InsufficientFundsError } from '../../core/systems/gacha.ts'
+import { type OfflineSettlementResult } from '../../core/systems/idle.ts'
+import { getEquippedRelics, equippedOwnerMap, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { getPool, groupByRarity, resolvePoolHeroIds } from '../../core/config/pools.ts'
 import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, generateRelic, RELIC_SETS } from '../../core/systems/relic.ts'
-import { recommendRelicLoadout, type RelicAdvice } from '../../core/systems/relic-advice.ts'
+import { type RelicAdvice } from '../../core/systems/relic-advice.ts'
 import {
   applyExp,
   applySkillUp,
@@ -47,7 +47,7 @@ import {
 } from '../../core/systems/growth.ts'
 import { computeEffectiveRates } from '../../core/systems/gachaRates.ts'
 import { previewRebirth, performRebirth } from '../../core/systems/rebirth.ts'
-import { buildArenaLoadout, arenaSnapshotHash, resolveArenaMatch, arenaContext, resolveArenaRewards } from '../../core/systems/arena.ts'
+import { arenaSnapshotHash, resolveArenaMatch, arenaContext, resolveArenaRewards, type ArenaReward } from '../../core/systems/arena.ts'
 import { DAILY, LEVEL, REDEEM_CODES } from '../../core/config/economy.ts'
 import { ACCOUNT, ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../core/config/account.ts'
 import { dayIndex } from '../../core/time.ts'
@@ -55,6 +55,23 @@ import { useAccountStore } from './account.ts'
 import { formatNumber } from '../utils/format.ts'
 import '../../core/config/relics.ts'
 import '../../core/config/enemies.ts'
+import {
+  applyAction,
+  computeRelicAdvice,
+  syncRngState,
+  type ActionContext,
+  type ActionOutcome,
+  type ActionResultMap,
+  type GameAction,
+  type GameActionType,
+} from '../../core/systems/actions.ts'
+import {
+  buildArenaSnapshot,
+  buildEquippedMap,
+  buildHeroIndex,
+  buildRelicsByUid,
+  buildTeam,
+} from '../../core/systems/derive.ts'
 
 export const useGameStore = defineStore('game', () => {
   /**
@@ -81,10 +98,45 @@ export const useGameStore = defineStore('game', () => {
    */
   let rng = new Rng(0)
 
+  /**
+   * Action context.
+   *
+   * Time and random source are both injected; core does not read the clock,
+   * nor does it use Math.random().
+   */
+  function actionCtx(): ActionContext {
+    return { now: clock.now(), rng, randomSeed }
+  }
+
+  /**
+   * Run one action and surface the outcome.
+   *
+   * The action layer lives in core (iron rule #29): validation and mutation
+   * both happen there; the presentation layer only echoes the result.
+   *
+   * @param critical critical = a charge / irreversible action. This kind of
+   *                 action pushes to the cloud immediately; the rest go through
+   *                 debounce, so idle settlement and similar high-frequency
+   *                 writes do not flood the endpoint.
+   */
+  async function runAction<T extends GameActionType>(
+    action: Extract<GameAction, { type: T }>,
+    critical = false,
+  ): Promise<ActionResultMap[T] | null> {
+    const outcome: ActionOutcome<ActionResultMap[T]> = applyAction(save.value, action, actionCtx())
+    if (!outcome.ok) {
+      if (!outcome.silent) notify(outcome.message, 'warn')
+      return null
+    }
+    if (!(await persist(critical))) return null
+    if (outcome.message) notify(outcome.message, outcome.messageKind ?? 'ok')
+    return outcome.result
+  }
+
   /** 最近一次战斗的完整回放（供 Canvas 渲染器播放） */
   const lastBattle = shallowRef<BattleResult | null>(null)
   /** 离线结算结果 */
-  const offlineReport = shallowRef<ReturnType<typeof settleOffline> | null>(null)
+  const offlineReport = shallowRef<OfflineSettlementResult | null>(null)
   /** 全局提示 */
   const toast = ref<{ text: string; kind: 'info' | 'ok' | 'warn' } | null>(null)
   /** 新手引导步骤（-1 = 结束） */
@@ -383,8 +435,13 @@ export const useGameStore = defineStore('game', () => {
    * 不受「其它页面改过存档」的冲突保护限制——玩家就是要清空。
    */
   async function reset() {
+    // 重置是「玩家主动覆盖」，允许强行写入（绕过冲突保护）
+    const outcome = applyAction(save.value, { type: 'save.reset' }, actionCtx())
+    if (!outcome.ok) {
+      if (!outcome.silent) notify(outcome.message, 'warn')
+      return
+    }
     // 重置 → 换一条全新的随机序列（否则旧档的抽卡位置会被继承）
-    save.value = createNewSave(clock.now(), randomSeed())
     restoreRng()
     knownStamp = nextStamp(clock.now(), knownStamp)
     save.value.savedAt = knownStamp
@@ -396,46 +453,15 @@ export const useGameStore = defineStore('game', () => {
 
   // ─────────────────────────── 运行时装配 ───────────────────────────
 
-  const heroIndex = computed(() => {
-    const map = new Map<string, HeroState>()
-    for (const [id, state] of Object.entries(save.value.heroes)) map.set(id, state)
-    return map
-  })
+  const heroIndex = computed(() => buildHeroIndex(save.value))
 
-  const relicsByUid = computed(() => {
-    const map = new Map<string, RelicInstance>()
-    for (const r of save.value.relics) map.set(r.uid, r)
-    return map
-  })
+  const relicsByUid = computed(() => buildRelicsByUid(save.value))
 
   /** 某英灵的 6 个遗物槽 */
-  const equippedMap = computed(() => {
-    const map = new Map<string, (RelicInstance | null)[]>()
-    for (const heroId of Object.keys(save.value.heroes)) {
-      map.set(heroId, getEquippedRelics(save.value, heroId))
-    }
-    return map
-  })
+  const equippedMap = computed(() => buildEquippedMap(save.value))
 
   /** 当前编队的运行时对象 */
-  const team = computed<HeroRuntime[]>(() => {
-    const out: HeroRuntime[] = []
-    for (let slot = 0; slot < save.value.team.slots.length; slot++) {
-      const id = save.value.team.slots[slot]
-      if (!id) continue
-      const def = HERO_INDEX.get(id)
-      const state = heroIndex.value.get(id)
-      if (!def || !state) continue
-      out.push({
-        def,
-        state,
-        relics: equippedMap.value.get(id) ?? new Array(RELIC_SLOT_COUNT).fill(null),
-        // 真实编队槽位号（0-2 前排 / 3-5 后排），不能用紧凑序号
-        slot,
-      })
-    }
-    return out
-  })
+  const team = computed<HeroRuntime[]>(() => buildTeam(save.value))
 
   const teamPower = computed(() => getTeamPower(team.value, { mode: 'pve' }))
   const bondStates = computed(() => computeBondState(team.value))
@@ -462,165 +488,23 @@ export const useGameStore = defineStore('game', () => {
   /** 推进挂机：跑 battles 场，结算掉落 */
   async function tickIdle(battles = 1) {
     if (teamEmpty.value) return null
-    const result = runIdle(
-      team.value,
-      save.value.idle.currentStage,
-      battles,
-      rng.nextSeed(),
-    )
-    applyRewards(result.rewards)
-    if (result.blockedAtStage !== null) {
-      save.value.idle.currentStage = result.blockedAtStage
-    } else {
-      save.value.idle.currentStage = result.reachedStage
-    }
-    save.value.campaign.clearedStage = Math.max(save.value.campaign.clearedStage, result.reachedStage)
-    save.value.idle.totalIdleSeconds += battles * 6
-    save.value.lastTickAt = clock.now()
-    // 写入失败（存档冲突）时本次结算整体回滚，不能把没落盘的收益报给玩家
-    if (!(await persist())) return null
-    return result
+    return runAction({ type: 'idle.tick', battles })
   }
 
   /** 离线结算 */
   async function claimOffline() {
     if (teamEmpty.value) return null
-    const elapsed = Math.max(0, Math.floor((clock.now() - save.value.lastTickAt) / 1000))
-    if (elapsed < 60) return null
-    const result = settleOffline(
-      team.value,
-      save.value.idle.currentStage,
-      elapsed,
-      rng.nextSeed(),
-    )
-    applyRewards(result.rewards)
-    save.value.lastTickAt = clock.now()
-    if (!(await persist())) return null
-    offlineReport.value = result
-    return result
-  }
-
-  function applyRewards(rewards: RewardBundle) {
-    const p = save.value.player
-    if (rewards.silver) p.silver += rewards.silver
-    if (rewards.exp) p.exp += rewards.exp
-    if (rewards.emblems) p.emblems += rewards.emblems
-    if (rewards.crystals) p.crystals += rewards.crystals
-    if (rewards.tickets) p.tickets += rewards.tickets
-    if (rewards.skillStones) p.skillStones += rewards.skillStones
-    if (rewards.relicStones) p.relicStones += rewards.relicStones
-    if (rewards.shards) {
-      for (const [id, n] of Object.entries(rewards.shards)) {
-        p.shards[id] = (p.shards[id] ?? 0) + n
-      }
-    }
-    if (rewards.relics) {
-      // 遗物入库的唯一入口：core 把遗物清单放在 `rewards.relics`（铁律 #4 单一数据源）。
-      // ⚠ 这里曾经是死代码——core 的 `rollRewards` 只把遗物放进独立数组，
-      //   `rewards.relics` 从未被赋值 → 挂机/离线产出的遗物 100% 被丢弃。
-      for (const defId of rewards.relics) {
-        save.value.relics.push(generateRelic(defId, rng, 1))
-      }
-    }
-    if (rewards.heroes) {
-      for (const heroId of rewards.heroes) grantHero(heroId)
-    }
+    const res = await runAction({ type: 'idle.claimOffline' })
+    if (res) offlineReport.value = res
+    return res
   }
 
   // ─────────────────────────── 英灵 ───────────────────────────
 
-  function grantHero(heroId: string): boolean {
-    if (save.value.heroes[heroId]) return false
-    const def = HERO_INDEX.get(heroId)
-    if (!def) return false
-    save.value.heroes[heroId] = {
-      id: heroId,
-      level: 1,
-      exp: 0,
-      star: 1,
-      skillLevels: [1, 1, 1],
-      shards: 0,
-      coreAwakened: false,
-      obtainedAt: clock.now(),
-    }
-    return true
-  }
-
   /** 抽卡 */
   async function pull(poolId: string, count: 1 | 10) {
-    const pool = getPool(poolId)
-    let outcome: ReturnType<typeof executePull>
-    try {
-      outcome = executePull(
-        {
-          pity: { pitySSR: save.value.gacha.pitySSR, pity10: save.value.gacha.pity10 },
-          owned: save.value.heroes,
-          crystals: save.value.player.crystals,
-          tickets: save.value.player.tickets,
-          newbieUsed: save.value.gacha.newbieUsed,
-        },
-        pool,
-        count,
-        rng.nextSeed(),
-      )
-    } catch (err) {
-      // 余额不足：拒绝本次抽卡，不产生任何扣费与产出
-      if (err instanceof InsufficientFundsError) {
-        notify(
-          `余额不足（结晶 ${err.owned.crystals}/${err.required.crystals}、抽卡券 ${err.owned.tickets}/${err.required.tickets}），无法召唤`,
-          'warn',
-        )
-        return null
-      }
-      throw err
-    }
-    save.value.player.crystals -= outcome.crystalsUsed
-    save.value.player.tickets -= outcome.ticketsUsed
-    save.value.gacha.pitySSR = outcome.pity.pitySSR
-    save.value.gacha.pity10 = outcome.pity.pity10
-    if (outcome.newbieUsedConsumed) {
-      save.value.gacha.newbieUsed = true
-    }
-
-    for (const r of outcome.results) {
-      save.value.gacha.history.push({
-        poolId,
-        heroId: r.heroId,
-        rarity: r.rarity,
-        isNew: r.isNew,
-        at: clock.now(),
-      })
-      if (r.isNew) {
-        grantHero(r.heroId)
-      } else {
-        // 重复 → 通用英灵印记 + 同名碎片 + 银两（合规：重复不直接提升强度）
-        save.value.player.emblems += r.emblems
-        save.value.player.shards[r.heroId] = (save.value.player.shards[r.heroId] ?? 0) + r.shards
-        save.value.player.silver += r.silver
-      }
-    }
-    save.value.stats.totalPulls += count
-    // 写入冲突 → 本次召唤整体作废（不会「扣了费却没出货」），由 persist 统一提示
-    // 扣费动作 → 立即推云端
-    if (!(await persist(true))) return null
-    return {
-      ...summarizePull(outcome),
-      /**
-       * 本次抽到的**完整名册**（含重复），按抽出顺序。
-       *
-       * 事实全部来自 core 的 `executePull` 结果——表现层只展示，
-       * 不得自行推导稀有度 / 是否新获得（铁律 #8 / #16）。
-       */
-      items: outcome.results.map((r) => ({
-        heroId: r.heroId,
-        rarity: r.rarity,
-        isNew: r.isNew,
-      })),
-      /** 新手保底是否触发 */
-      guaranteedTriggered: outcome.guaranteedTriggered,
-      /** 本次是否消耗掉新手保底资格 */
-      newbieUsedConsumed: outcome.newbieUsedConsumed,
-    }
+    // 扣费动作 → critical（立即推云端）；冲突时整份存档回滚，不会「扣了费却没出货」
+    return runAction({ type: 'gacha.pull', poolId, count }, true)
   }
 
   /**
@@ -671,251 +555,71 @@ export const useGameStore = defineStore('game', () => {
    * 不会消失，它存在英灵自己的 `hero.exp` 里，突破境界后立刻兑现。
    */
   async function feedExp(heroId: string, amount: number) {
-    const state = save.value.heroes[heroId]
-    if (!state) return
-    const need = Math.max(0, Math.floor(amount))
-    if (need <= 0) return
-    if (state.level >= LEVEL.MAX) {
-      notify('该英灵已达最高等级', 'warn')
-      return
-    }
-    const p = save.value.player
-    // 先判余额再扣费：余额不足直接拒绝，不允许出现负数资源（铁律 #10）
-    if (p.exp < need) {
-      notify(`经验不足（${formatNumber(p.exp)} / ${formatNumber(need)}）`, 'warn')
-      return
-    }
-    p.exp -= need
-    const res = applyExp(state, need)
-    // 扣费动作走 critical：立即推云端；冲突时整份存档回滚，不会「扣了经验没升级」
-    if (!(await persist(true))) return
-    const name = HERO_INDEX.get(heroId)?.name ?? '英灵'
-    if (res.levelsGained > 0) {
-      notify(`${name} 提升了 ${res.levelsGained} 级`, 'ok')
-    } else if (res.blockedByRealm) {
-      notify(`${name} 已达境界门槛，需突破境界才能继续升级`, 'warn')
-    } else {
-      notify(`已投入 ${formatNumber(need)} 经验`, 'ok')
-    }
+    return runAction({ type: 'hero.feedExp', heroId, amount }, true)
   }
 
   /**
    * 境界突破：消耗**英灵印记**把英灵送进下一个境界。
-   *
-   * ⚠ 这条链路此前从未实现过：`applyExp` 的等级硬上限是 `next.minLevel - 1`，
-   *   而 `REALMS[].breakMaterial` 指向的道具 id 全项目无定义、无掉落、无 UI，
-   *   于是英灵实测卡死在 Lv60（经验池喂干也升不了级）。
    */
   async function breakRealm(heroId: string) {
-    const state = save.value.heroes[heroId]
-    if (!state) return
-    const cost = realmBreakCost(state.level)
-    if (!cost) {
-      notify('已达最高境界', 'warn')
-      return
-    }
-    if (!atRealmGate(state.level)) {
-      notify('尚未达到境界门槛', 'warn')
-      return
-    }
-    const p = save.value.player
-    if (p.emblems < cost.emblems) {
-      notify(`英灵印记不足（${formatNumber(p.emblems)} / ${cost.emblems}）`, 'warn')
-      return
-    }
-    p.emblems -= cost.emblems
-    if (!applyRealmBreak(state)) {
-      // 兜底：状态不允许突破时把印记还回去
-      p.emblems += cost.emblems
-      notify('当前无法突破境界', 'warn')
-      return
-    }
-    // 突破前已投入但卡在门槛上的经验，立刻兑现成等级
-    const res = applyExp(state, 0)
-    if (!(await persist(true))) return
-    const name = HERO_INDEX.get(heroId)?.name ?? '英灵'
-    notify(
-      res.levelsGained > 0
-        ? `${name} 突破境界，提升 ${res.levelsGained} 级`
-        : `${name} 已突破境界`,
-      'ok',
-    )
+    return runAction({ type: 'hero.breakRealm', heroId }, true)
   }
 
   async function upgradeSkill(heroId: string, index: number) {
-    const state = save.value.heroes[heroId]
-    if (!state) return
-    const current = state.skillLevels[index] ?? 0
-
-    // 先判上限（受境界门槛约束），再判资源。
-    // ⚠ 顺序反了会让技能已满级的玩家看到「资源不足」——那是误导。
-    if (current >= skillLevelCap(state.level)) {
-      notify('当前等级无法继续提升', 'warn')
-      return
-    }
-    const cost = skillUpCost(current)
-    if (!cost) {
-      notify('当前等级无法继续提升', 'warn')
-      return
-    }
-    const p = save.value.player
-    // ⚠ 扣的是**术式结晶**（skillStones），不是圣杯结晶（crystals）。
-    //   原实现扣 crystals → 玩家术式结晶堆到 2 万也升不动技能（还白扣抽卡资源）。
-    if (p.skillStones < cost.skillStones || p.silver < cost.silver) {
-      notify('资源不足', 'warn')
-      return
-    }
-    if (!applySkillUp(state, index)) {
-      notify('当前等级无法继续提升', 'warn')
-      return
-    }
-    p.skillStones -= cost.skillStones
-    p.silver -= cost.silver
-    // 冲突时整份存档回滚，扣费与提升一起撤销
-    if (!(await persist(true))) return
-    notify('技能等级已提升', 'ok')
+    return runAction({ type: 'hero.upgradeSkill', heroId, index }, true)
   }
 
   async function upgradeStar(heroId: string) {
-    const state = save.value.heroes[heroId]
-    if (!state) return
-    const cost = starUpCost(state.star)
-    if (!cost) {
-      notify('已达最高星级', 'warn')
-      return
-    }
-    const shards = save.value.player.shards[heroId] ?? 0
-    if (shards < cost.shards || save.value.player.emblems < cost.emblems) {
-      notify('碎片或印记不足', 'warn')
-      return
-    }
-    save.value.player.shards[heroId] = shards - cost.shards
-    save.value.player.emblems -= cost.emblems
-    applyStarUp(state)
-    if (!(await persist(true))) return
-    notify('星级已提升', 'ok')
+    return runAction({ type: 'hero.upgradeStar', heroId }, true)
   }
 
   async function upgradeRelic(uid: string) {
-    const relic = relicsByUid.value.get(uid)
-    if (!relic) return
-    const cost = relicUpgradeCost(relic.level)
-    if (!cost) {
-      notify('已达最高强化等级', 'warn')
-      return
-    }
-    if (save.value.player.silver < cost.silver || save.value.player.relicStones < cost.stones) {
-      notify('银两或强化石不足', 'warn')
-      return
-    }
-    save.value.player.silver -= cost.silver
-    save.value.player.relicStones -= cost.stones
-    applyRelicUpgrade(relic)
-    await persist(true)
+    return runAction({ type: 'relic.upgrade', uid }, true)
   }
 
   async function decomposeRelic(uid: string) {
-    const idx = save.value.relics.findIndex((r) => r.uid === uid)
-    if (idx < 0) return
-    const relic = save.value.relics[idx]
-    const value = decomposeValue(relic)
-    save.value.player.silver += value.silver
-    save.value.player.relicStones += value.stones
-    save.value.relics.splice(idx, 1)
-    for (const key of Object.keys(save.value.equipped)) {
-      if (save.value.equipped[key].relicId === uid) delete save.value.equipped[key]
-    }
-    if (!(await persist(true))) return
-    notify('已分解遗物', 'ok')
+    return runAction({ type: 'relic.decompose', uid }, true)
   }
 
   // ─────────────────────────── 编队 ───────────────────────────
 
   async function setSlot(index: number, heroId: string | null) {
-    const slots = save.value.team.slots
-    if (heroId) {
-      const existing = slots.indexOf(heroId)
-      if (existing >= 0) slots[existing] = null
-    }
-    slots[index] = heroId
-    await persist()
+    return runAction({ type: 'team.setSlot', index, heroId })
   }
 
   async function savePreset(name: string) {
-    save.value.team.presets.push({
-      id: `preset_${Date.now()}`,
-      name,
-      slots: [...save.value.team.slots],
-    })
-    if (!(await persist())) return
-    notify('编队已保存', 'ok')
+    return runAction({ type: 'team.savePreset', name })
   }
 
   async function applyPreset(id: string) {
-    const preset = save.value.team.presets.find((p) => p.id === id)
-    if (!preset) return
-    save.value.team.slots = [...preset.slots]
-    await persist()
+    return runAction({ type: 'team.applyPreset', presetId: id })
   }
 
   async function removePreset(id: string) {
-    save.value.team.presets = save.value.team.presets.filter((p) => p.id !== id)
-    await persist()
+    return runAction({ type: 'team.removePreset', presetId: id })
   }
 
   async function equip(heroId: string, slot: number, relicId: string) {
-    equipRelic(save.value, heroId, slot, relicId)
-    await persist()
+    return runAction({ type: 'relic.equip', heroId, slot, relicId })
   }
 
   async function unequip(heroId: string, slot: number) {
-    unequipRelic(save.value, heroId, slot)
-    await persist()
+    return runAction({ type: 'relic.equip', heroId, slot, relicId: null })
   }
 
   /**
-   * 遗物一键推荐（§5.4）。
+   * 遗物一键推荐的**预览**（纯计算，不改存档）。
    *
    * 规则一律由 core 的 `recommendRelicLoadout` 产出，表现层不自己算
    * 「哪件更强」——那会与战斗里的属性口径分叉（铁律 #2）。
-   *
-   * ⚠ 候选池**不包含**装备在其他英灵身上的遗物：
-   *   一键推荐不抢占别人的装备（抢了会让别人的战力凭空掉一截）。
    */
   function relicAdvice(heroId: string): RelicAdvice | null {
-    const def = HERO_INDEX.get(heroId)
-    const state = heroIndex.value.get(heroId)
-    if (!def || !state) return null
-    const current = getEquippedRelics(save.value, heroId)
-    const owners = equippedOwnerMap(save.value)
-    const candidates = save.value.relics.filter((r) => {
-      const owner = owners.get(r.uid)
-      return owner === undefined || owner === heroId
-    })
-    const rt: HeroRuntime = { def, state, relics: current, slot: 0 }
-    return recommendRelicLoadout(rt, candidates, current)
+    return computeRelicAdvice(save.value, heroId)
   }
 
   /** 一键按推荐装备遗物 */
   async function autoEquipRelics(heroId: string): Promise<RelicAdvice | null> {
-    const advice = relicAdvice(heroId)
-    if (!advice) return null
-    // 清掉该英灵现有装备，再按推荐铺回去
-    for (let slot = 0; slot < RELIC_SLOT_COUNT; slot++) {
-      unequipRelic(save.value, heroId, slot)
-    }
-    advice.slots.forEach((relic, slot) => {
-      if (relic) equipRelic(save.value, heroId, slot, relic.uid)
-    })
-    if (!(await persist())) return null
-    const sets = Object.entries(advice.activeTiers)
-      .filter(([, tier]) => tier > 0)
-      .map(([setId, tier]) => `${RELIC_SETS.get(setId)?.name ?? setId} ${tier} 件`)
-    notify(
-      `已按推荐装备 · 战力 +${formatNumber(advice.gain)}${sets.length ? ' · ' + sets.join(' / ') : ''}`,
-      'ok',
-    )
-    return advice
+    return runAction({ type: 'relic.autoEquip', heroId })
   }
 
   // ─────────────────────────── 圣杯重启 ───────────────────────────
@@ -923,50 +627,33 @@ export const useGameStore = defineStore('game', () => {
   const rebirthPreview = computed(() => previewRebirth(save.value))
 
   async function doRebirth() {
-    const preview = rebirthPreview.value
-    if (!preview.eligible) {
-      notify(preview.reason || '暂不可重启', 'warn')
-      return null
-    }
-    const result = performRebirth(save.value)
-    // 圣杯重启不可逆 → 立即推云端
-    if (!(await persist(true))) return null
-    notify(`圣杯重启完成 · 永久加成 ${Math.round(result.nextPermBoost * 100)}%`, 'ok')
-    return result
+    return runAction({ type: 'rebirth.do' }, true)
   }
 
   // ─────────────────────────── 竞技场 ───────────────────────────
 
-  const arenaLoadout = computed(() =>
-    buildArenaLoadout({
-      slots: save.value.team.slots,
-      heroes: save.value.heroes,
-      relicSetsByHero: Object.fromEntries(
-        save.value.team.slots
-          .filter((id): id is string => !!id)
-          .map((id) => [
-            id,
-            (equippedMap.value.get(id) ?? []).map((r) => r?.defId ?? null),
-          ]),
-      ),
-      runes: save.value.arena.runes ?? [],
-      arenaLevel: save.value.arena.arenaLevel ?? 1,
-    }),
-  )
+  const arenaLoadout = computed(() => buildArenaSnapshot(save.value))
 
   const arenaHash = computed(() => arenaSnapshotHash(arenaLoadout.value))
 
-  function runArenaMatch() {
-    return resolveArenaMatch({
-      challengeId: 'daily_1',
-      attacker: arenaLoadout.value,
-      defender: arenaLoadout.value,
-      attackerId: 'me',
-      attackerName: '我',
-      defenderId: 'foe',
-      defenderName: '试炼对手',
-      seed: rng.nextSeed(),
-    })
+  /**
+   * 最近一场竞技对局的产出。
+   *
+   * 对局与结算在服务端**一次完成**（原子），这里只暂存结果供界面回显。
+   */
+  let lastArenaReward: ArenaReward | null = null
+
+  /**
+   * 发起一场竞技对局。
+   *
+   * 产出只来自 `resolveArenaRewards`（竞技专属池：勋章 / 竞技材料 / 兑换券），
+   * **绝不回流**银两 / 经验 / 强化石 / 圣杯结晶（合规红线）。
+   */
+  async function runArenaMatch(): Promise<ArenaMatch | null> {
+    const res = await runAction({ type: 'arena.settle' }, true)
+    if (!res) return null
+    lastArenaReward = res.reward
+    return res.match
   }
 
   /**
@@ -981,30 +668,11 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
-   * 结算一场竞技对局：积分入账 + 发放竞技专属产出。
-   *
-   * 产出只来自 `resolveArenaRewards`（竞技专属池：勋章 / 竞技材料 / 兑换券），
-   * **绝不回流**银两 / 经验 / 强化石 / 圣杯结晶（合规红线）。
+   * 取回刚刚那场对局的产出（服务端已入账）。
    */
-  async function settleArena(match: ReturnType<typeof runArenaMatch>) {
-    const a = save.value.arena
-    a.tierPoints = Math.max(0, (a.tierPoints ?? 0) + match.pointsDelta)
-    a.pvpPoints = (a.pvpPoints ?? 0) + (match.result.win ? 20 : 5)
-    a.snapshotHash = arenaHash.value
-    a.defenseLoadout = arenaLoadout.value
-
-    const { reward, weeklyMedals, weeklyTickets } = resolveArenaRewards(
-      match.result.win,
-      a.weeklyMedals ?? 0,
-      a.weeklyTickets ?? 0,
-    )
-    a.medals = (a.medals ?? 0) + reward.medals
-    a.weeklyMedals = weeklyMedals
-    a.weeklyTickets = weeklyTickets
-    // 兑换券进入玩家背包（竞技专属产出，不回流 PVE 经济）
-    if (reward.tickets) save.value.player.tickets += reward.tickets
-
-    if (!(await persist())) return null
+  async function settleArena(_match?: ArenaMatch): Promise<ArenaReward | null> {
+    const reward = lastArenaReward
+    lastArenaReward = null
     return reward
   }
 
@@ -1012,55 +680,13 @@ export const useGameStore = defineStore('game', () => {
 
   /** 每日签到：按 core 配置发放奖励并推进连续签到天数 */
   async function signInDaily() {
-    const d = save.value.daily
-    const today = dayIndex(clock.now())
-    if (d.lastSignInDay === today) {
-      notify('今天已经签到过了', 'warn')
-      return null
-    }
-    // 断签（上次签到不是昨天）则从第一天重新开始
-    const continued = d.lastSignInDay === today - 1
-    const index = continued ? d.signInStreak % DAILY.SIGN_IN_CYCLE : 0
-    const reward = DAILY.SIGN_IN_REWARDS[index]
-
-    const p = save.value.player
-    if (reward.crystals) p.crystals += reward.crystals
-    if (reward.silver) p.silver += reward.silver
-    if (reward.tickets) p.tickets += reward.tickets
-    if (reward.skillStones) p.skillStones += reward.skillStones
-    if (reward.relicStones) p.relicStones += reward.relicStones
-
-    d.signInStreak = index + 1
-    d.lastSignInDay = today
-    // 领奖 → 立即推云端
-    if (!(await persist(true))) return null
-    notify('签到成功', 'ok')
-    return reward
+    return runAction({ type: 'daily.signIn' }, true)
   }
 
   /** 兑换一次性兑换码 */
   async function redeemCode(code: string): Promise<boolean> {
-    const key = code.trim().toUpperCase()
-    if (!key) return false
-    if (save.value.codes.includes(key)) {
-      notify('该兑换码已使用', 'warn')
-      return false
-    }
-    const def = REDEEM_CODES[key]
-    if (!def) {
-      notify('兑换码无效', 'warn')
-      return false
-    }
-    const p = save.value.player
-    if (def.crystals) p.crystals += def.crystals
-    if (def.tickets) p.tickets += def.tickets
-    if (def.emblems) p.emblems += def.emblems
-    if (def.silver) p.silver += def.silver
-    save.value.codes.push(key)
-    // 兑换码是一次性的 → 立即推云端
-    if (!(await persist(true))) return false
-    notify('兑换成功', 'ok')
-    return true
+    const res = await runAction({ type: 'code.redeem', code }, true)
+    return res !== null
   }
 
   /** 导出存档（base64 文本，供玩家备份） */
@@ -1070,23 +696,21 @@ export const useGameStore = defineStore('game', () => {
 
   /** 导入存档（校验失败时不覆盖当前进度） */
   async function importSaveText(text: string): Promise<boolean> {
-    try {
-      const loaded = await storage.import(text)
-      save.value = normalizeSave(loaded)
-      // 导入的存档自带随机数状态 → 沿用，保持「备份恢复后序列连续」
-      restoreRng()
-      // 导入是「玩家主动覆盖」，允许强行写入：先把已知戳提到最高，绕过冲突保护
-      knownStamp = nextStamp(clock.now(), knownStamp)
-      save.value.savedAt = knownStamp
-      await storage.save(slot.value, save.value)
-      // 导入覆盖是不可逆动作：立刻推上云端
-      await pushNow()
-      notify('存档已导入', 'ok')
-      return true
-    } catch {
-      notify('存档数据无效', 'warn')
+    // 导入是「玩家主动覆盖」，允许强行写入：先把已知戳提到最高，绕过冲突保护
+    const outcome = applyAction(save.value, { type: 'save.import', payload: text }, actionCtx())
+    if (!outcome.ok) {
+      if (!outcome.silent) notify(outcome.message, 'warn')
       return false
     }
+    // 导入的存档自带随机数状态 → 沿用，保持「备份恢复后序列连续」
+    restoreRng()
+    knownStamp = nextStamp(clock.now(), knownStamp)
+    save.value.savedAt = knownStamp
+    await storage.save(slot.value, save.value)
+    // 导入覆盖是不可逆动作：立刻推上云端
+    await pushNow()
+    notify('存档已导入', 'ok')
+    return true
   }
 
   /** 标记新手引导已完成 */
