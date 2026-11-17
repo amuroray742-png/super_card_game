@@ -18,7 +18,7 @@ import {
   realmBreakCost,
   atRealmGate,
 } from '../../core/systems/growth.ts'
-import { RELIC_DEFS, RELIC_SETS, getHeroSetMods } from '../../core/systems/relic.ts'
+import { RELIC_DEFS, RELIC_SETS, getHeroSetMods, relicUpgradeCost } from '../../core/systems/relic.ts'
 import { relicIconPath } from '../../core/config/art.ts'
 import { resolveStats, computePower, getRealm, nextRealm } from '../../core/systems/stats.ts'
 import { RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
@@ -215,6 +215,26 @@ const menuRelic = computed(() =>
 
 /** 分解二次确认 */
 const confirmRelic = ref<RelicInstance | null>(null)
+
+/** 菜单里那件遗物的强化花费与可用性（银两 / 强化石不够就把差额写出来） */
+const menuUpgrade = computed(() => {
+  const r = menuRelic.value
+  if (!r) return { cost: null, ok: false, text: '' }
+  const cost = relicUpgradeCost(r.level)
+  if (!cost) return { cost, ok: false, text: '已达最高强化等级' }
+  const p = store.save.player
+  if (p.silver < cost.silver) {
+    return { cost, ok: false, text: `银两不足（${formatNumber(p.silver)} / ${formatNumber(cost.silver)}）` }
+  }
+  if (p.relicStones < cost.stones) {
+    return {
+      cost,
+      ok: false,
+      text: `强化石不足（${formatNumber(p.relicStones)} / ${formatNumber(cost.stones)}）`,
+    }
+  }
+  return { cost, ok: true, text: '' }
+})
 
 function openPicker(slot: number) {
   pickerSlot.value = slot
@@ -735,7 +755,15 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
           强化 +{{ menuRelic.level }} · 槽位 {{ (menuSlot ?? 0) + 1 }}
         </div>
         <div class="row" style="gap: 6px; flex-wrap: wrap">
-          <button class="btn btn-sm" style="flex: 1" @click="upgradeRelic(menuRelic.uid)">强化</button>
+          <button
+            class="btn btn-sm"
+            style="flex: 1"
+            data-testid="relic-upgrade"
+            :disabled="!menuUpgrade.ok"
+            @click="upgradeRelic(menuRelic.uid)"
+          >
+            强化 +{{ menuRelic.level + 1 }}
+          </button>
           <button class="btn btn-sm" style="flex: 1" @click="unequip(menuSlot ?? 0)">卸下</button>
           <button
             class="btn btn-sm btn-danger"
@@ -744,6 +772,13 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
           >
             分解
           </button>
+        </div>
+        <div v-if="menuUpgrade.cost" class="tiny muted" style="margin-top: 4px">
+          强化消耗：银两 {{ formatNumber(menuUpgrade.cost.silver) }} · 强化石
+          {{ menuUpgrade.cost.stones }}
+        </div>
+        <div v-if="menuUpgrade.cost && !menuUpgrade.ok" class="tiny warn-text" style="margin-top: 2px">
+          {{ menuUpgrade.text }}
         </div>
       </div>
     </div>

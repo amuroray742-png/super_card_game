@@ -6,7 +6,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
-import { RELIC_DEFS, RELIC_SETS, getRelicMods, getSetModsBySetIds } from '../../core/systems/relic.ts'
+import { RELIC_DEFS, RELIC_SETS, getRelicMods, getSetModsBySetIds, relicUpgradeCost } from '../../core/systems/relic.ts'
 import { relicIconPath } from '../../core/config/art.ts'
 import { formatNumber } from '../utils/format'
 import type { Rarity, RelicInstance, StatMod } from '../../core/model/types.ts'
@@ -128,6 +128,62 @@ function statName(key: string): string {
 function statText(mod: StatMod): string {
   return mod.kind === 'pct' ? `${(mod.value * 100).toFixed(1)}%` : formatNumber(mod.value)
 }
+
+// ─────────────────────────── 强化 ───────────────────────────
+
+/**
+ * 选中遗物的强化花费（等级上限时为 null）。
+ *
+ * ⚠ 花费与上限一律取自 core 的 `relicUpgradeCost`，表现层不自己写数字（铁律 #5）。
+ */
+const upgradeCost = computed(() =>
+  selected.value ? relicUpgradeCost(selected.value.level) : null,
+)
+
+/** 强化按钮的可用性与提示（银两 / 强化石不够就把差额写出来） */
+const upgradeHint = computed(() => {
+  const cost = upgradeCost.value
+  if (!cost) return { ok: false, text: '已达最高强化等级' }
+  const p = store.save.player
+  if (p.silver < cost.silver) {
+    return { ok: false, text: `银两不足（${formatNumber(p.silver)} / ${formatNumber(cost.silver)}）` }
+  }
+  if (p.relicStones < cost.stones) {
+    return {
+      ok: false,
+      text: `强化石不足（${formatNumber(p.relicStones)} / ${formatNumber(cost.stones)}）`,
+    }
+  }
+  return { ok: true, text: '' }
+})
+
+/**
+ * 强化到下一级的主词条提升预览。
+ *
+ * 主词条随强化等级缩放（`getRelicMods`），副词条固定不变——
+ * 预览只列**会变**的那些，让玩家点之前就知道收益。
+ */
+const upgradePreview = computed(() => {
+  const s = selected.value
+  if (!s || !upgradeCost.value) return []
+  const cur = getRelicMods(s)
+  const next = getRelicMods({ ...s, level: s.level + 1 })
+  const rows: { label: string; from: string; to: string }[] = []
+  for (let i = 0; i < next.length; i++) {
+    const c = cur[i]
+    const n = next[i]
+    if (!c || !n || c.value === n.value) continue
+    rows.push({ label: statName(n.stat), from: statText(c), to: statText(n) })
+  }
+  return rows
+})
+
+/** 强化选中遗物 */
+function upgradeSelected() {
+  const uid = selectedUid.value
+  if (!uid) return
+  store.upgradeRelic(uid)
+}
 </script>
 
 <template>
@@ -234,9 +290,34 @@ function statText(mod: StatMod): string {
         <span class="muted">{{ statName(mod.stat) }}</span>
         <b>{{ statText(mod) }}</b>
       </div>
-      <button class="btn btn-primary btn-block" style="margin-top: 10px" @click="heroPickerOpen = true">
-        装备到英灵
-      </button>
+
+      <!-- 强化 -->
+      <div class="row" style="gap: 6px; margin-top: 10px">
+        <button
+          class="btn btn-sm"
+          style="flex: 1"
+          data-testid="relic-upgrade"
+          :disabled="!upgradeHint.ok"
+          @click="upgradeSelected"
+        >
+          强化 +{{ (selected?.level ?? 0) + 1 }}
+        </button>
+        <button class="btn btn-primary btn-sm" style="flex: 1" @click="heroPickerOpen = true">
+          装备到英灵
+        </button>
+      </div>
+      <div v-if="upgradeCost" class="tiny muted" style="margin-top: 4px">
+        强化消耗：银两 {{ formatNumber(upgradeCost.silver) }} · 强化石 {{ upgradeCost.stones }}
+      </div>
+      <div v-if="upgradeCost && !upgradeHint.ok" class="tiny warn-text" style="margin-top: 2px">
+        {{ upgradeHint.text }}
+      </div>
+      <div v-if="upgradePreview.length > 0" class="tiny muted" style="margin-top: 3px">
+        强化到 +{{ (selected?.level ?? 0) + 1 }}：
+        <span v-for="(row, i) in upgradePreview" :key="row.label">
+          <template v-if="i > 0"> · </template>{{ row.label }} {{ row.from }} → {{ row.to }}
+        </span>
+      </div>
     </section>
 
     <!-- 套装效果 -->

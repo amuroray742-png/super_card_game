@@ -38,11 +38,13 @@ vi.mock('../../src/platform/storage.ts', () => ({
 
 const { useGameStore } = await import('../../src/presentation/stores/game.ts')
 const { createHeroState } = await import('../../src/core/systems/growth.ts')
-const { generateRelic } = await import('../../src/core/systems/relic.ts')
+const { generateRelic, getRelicMods, relicUpgradeCost } = await import('../../src/core/systems/relic.ts')
 const { getEquippedRelics } = await import('../../src/core/systems/loadout.ts')
 const { Rng } = await import('../../src/core/rng.ts')
 
 const SLOT = 'main'
+/** 强化一级的花费（与 core 的 relicUpgradeCost 同一口径，不在测试里写死数字） */
+const RELIC_UPGRADE = relicUpgradeCost(1)!
 
 describe('遗物获取链路', () => {
   beforeEach(async () => {
@@ -112,6 +114,76 @@ describe('遗物获取链路', () => {
     expect(result).not.toBeNull()
     expect(result!.rewards.relics?.length ?? 0).toBeGreaterThan(0)
     expect(store.save.relics.length).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * 遗物强化（真实 store 链路）。
+ *
+ * ⚠ 玩家反馈「遗物现在好像不能强化升级」。根因**不在** core 的强化逻辑
+ *   （`applyRelicUpgrade` / `relicUpgradeCost` 一直是对的），
+ *   而在**界面**：铸造页（遗物仓库）**根本没有强化按钮**，
+ *   唯一入口藏在英灵页、且要求遗物**已经装备**——
+ *   仓库里躺着的一堆遗物一件都强化不了。
+ *
+ * 这里守的是「点了强化，资源真的扣了、等级真的涨了、落盘没丢」。
+ */
+describe('遗物强化', () => {
+  beforeEach(async () => {
+    mem.clear()
+    setActivePinia(createPinia())
+    const store = useGameStore()
+    await store.load()
+    store.save.player.silver = 100_000
+    store.save.player.relicStones = 500
+  })
+
+  it('强化真的 +1：等级涨、银两与强化石被扣、落盘保存', async () => {
+    const store = useGameStore()
+    const rng = new Rng(2024)
+    store.save.relics = [generateRelic('set_zhanshen_1', rng, 1)]
+    const uid = store.save.relics[0].uid
+    const silver0 = store.save.player.silver
+    const stones0 = store.save.player.relicStones
+
+    await store.upgradeRelic(uid)
+
+    expect(store.save.relics[0].level).toBe(2)
+    expect(store.save.player.silver).toBe(silver0 - RELIC_UPGRADE.silver)
+    expect(store.save.player.relicStones).toBe(stones0 - RELIC_UPGRADE.stones)
+
+    // 落盘没丢
+    const stored = JSON.parse(mem.get(SLOT) ?? '{}') as { relics?: Array<{ level: number }> }
+    expect(stored.relics?.[0]?.level).toBe(2)
+  })
+
+  it('资源不足时拒绝强化：不扣资源、等级不变', async () => {
+    const store = useGameStore()
+    const rng = new Rng(2024)
+    store.save.relics = [generateRelic('set_zhanshen_1', rng, 1)]
+    const uid = store.save.relics[0].uid
+    store.save.player.silver = 0
+    store.save.player.relicStones = 0
+
+    await store.upgradeRelic(uid)
+
+    expect(store.save.relics[0].level).toBe(1)
+    expect(store.save.player.silver).toBe(0)
+    expect(store.save.player.relicStones).toBe(0)
+  })
+
+  it('强化会真的提升属性（主词条随等级缩放）', async () => {
+    const store = useGameStore()
+    const rng = new Rng(2024)
+    store.save.relics = [generateRelic('set_zhanshen_1', rng, 1)]
+    const uid = store.save.relics[0].uid
+    const before = getRelicMods(store.save.relics[0]).map((m) => m.value)
+
+    await store.upgradeRelic(uid)
+    const after = getRelicMods(store.save.relics[0]).map((m) => m.value)
+
+    // 主词条变大，副词条不变 → 至少有一条变大
+    expect(after.some((v, i) => v > before[i])).toBe(true)
   })
 })
 

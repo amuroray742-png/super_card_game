@@ -409,6 +409,14 @@ async function runRelicScenario(
   await page.waitForTimeout(500)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-forge.png'), fullPage: opts.fullPage })
 
+  // 铸造页：选中一件 → 详情面板（强化按钮 + 花费 + 下一级预览）
+  await page.locator('.relic-cell').first().click()
+  await page.getByTestId('relic-upgrade').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(400)
+  await page.getByTestId('relic-upgrade').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-upgrade.png') })
+
   // 英灵页：一键推荐装备 + 套装效果
   // ⚠ 页面是**内部滚动容器**（.body），不是整页滚动 → fullPage 拍不到下半部分，
   //   必须先把「遗物槽」滚进视口再拍。

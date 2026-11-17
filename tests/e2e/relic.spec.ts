@@ -88,6 +88,18 @@ function heroIdFromUrl(page: Page): string {
   return page.url().split('/hero/')[1]?.split('?')[0]?.split('#')[0] ?? ''
 }
 
+/** 读取玩家当前的银两与强化石 */
+async function resourcesOf(page: Page): Promise<{ silver: number; stones: number }> {
+  return page.evaluate(() => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))
+    if (!key) return { silver: 0, stones: 0 }
+    const save = JSON.parse(localStorage.getItem(key)!) as {
+      player?: { silver?: number; relicStones?: number }
+    }
+    return { silver: save.player?.silver ?? 0, stones: save.player?.relicStones ?? 0 }
+  })
+}
+
 test.describe('遗物获取途径（挂机掉落入库）', () => {
   test('推征产出的遗物真的进了仓库，刷新后也不丢', async ({ page }) => {
     await bootLoggedIn(page)
@@ -200,6 +212,61 @@ test.describe('遗物图标', () => {
       els.every((el) => (el as HTMLImageElement).naturalWidth > 0),
     )
     expect(loaded).toBe(true)
+  })
+})
+
+/**
+ * 遗物强化。
+ *
+ * ⚠ 玩家反馈「遗物现在好像不能强化升级」。根因是**界面**：
+ *   铸造页（遗物仓库）原本**根本没有强化按钮**，
+ *   唯一入口藏在英灵页、且要求遗物**已经装备**——
+ *   仓库里躺着的一堆遗物一件都强化不了。
+ */
+test.describe('遗物强化', () => {
+  test('铸造页就能强化：等级 +1、银两与强化石被扣、落盘没丢', async ({ page }) => {
+    await bootLoggedIn(page)
+    await pullHeroes(page)
+    await setupTeam(page)
+
+    // 推征产遗物
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+    await page.getByRole('button', { name: '推征 10 场' }).click()
+    await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
+
+    // 铸造页 → 点第一件遗物 → 详情面板里必须有强化按钮
+    await page.goto('/#/forge')
+    await page.waitForLoadState('networkidle')
+    await page.locator('.relic-cell').first().click()
+    const upgrade = page.getByTestId('relic-upgrade')
+    await expect(upgrade).toBeVisible()
+    await expect(upgrade).toBeEnabled()
+    // 强化 +1 的遗物 → 按钮指向 +2
+    await expect(upgrade).toContainText('强化 +2')
+    // 花费写出来（玩家点之前就知道要多少银两与强化石）
+    await expect(page.getByText('强化消耗：银两')).toBeVisible()
+
+    const before = await resourcesOf(page)
+
+    await upgrade.click()
+
+    // 等级 +1 → 按钮指向 +3
+    await expect(upgrade).toContainText('强化 +3')
+
+    // 银两与强化石真的被扣
+    await expect.poll(async () => (await resourcesOf(page)).silver, { timeout: 8000 }).toBeLessThan(
+      before.silver,
+    )
+    await expect.poll(async () => (await resourcesOf(page)).stones, { timeout: 8000 }).toBeLessThan(
+      before.stones,
+    )
+
+    // 落盘没丢：刷新后等级仍是 +2
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+    await page.locator('.relic-cell').first().click()
+    await expect(page.getByTestId('relic-upgrade')).toContainText('强化 +3')
   })
 })
 
