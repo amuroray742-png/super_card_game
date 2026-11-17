@@ -48,6 +48,10 @@ export const GAME_ERROR_CODES = {
   UNKNOWN_ACTION: 'UNKNOWN_ACTION',
   /** 服务端暂时不可用 */
   SERVER_UNAVAILABLE: 'SERVER_UNAVAILABLE',
+  /** 账号还没有存档（需要先建档） */
+  SAVE_MISSING: 'SAVE_MISSING',
+  /** 账号已经有存档了（不能重复建档） */
+  SAVE_EXISTS: 'SAVE_EXISTS',
 } as const
 
 export type GameErrorCode = (typeof GAME_ERROR_CODES)[keyof typeof GAME_ERROR_CODES]
@@ -76,6 +80,8 @@ export const GAME_ERROR_MESSAGES: Record<GameErrorCode, string> = {
   IMPORT_INVALID: '存档数据无效',
   UNKNOWN_ACTION: '未知的操作',
   SERVER_UNAVAILABLE: '服务器暂时不可用，请稍后再试',
+  SAVE_MISSING: '账号还没有存档',
+  SAVE_EXISTS: '账号已经有存档了',
 }
 
 /** 是否属于「已知的动作错误码」 */

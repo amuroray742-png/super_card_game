@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS saves (
   updated_at INTEGER NOT NULL);
 `
 
+/** 当前表结构版本 */
+const SCHEMA_VERSION = 2
+
 export function openDb(path: string): Db {
   if (path !== ':memory:') {
     mkdirSync(dirname(path), { recursive: true })
@@ -56,6 +59,24 @@ function migrate(db: Db): void {
   if (row.user_version < 1) {
     db.exec(SCHEMA)
     db.exec('PRAGMA user_version = 1')
+  }
+  if (row.user_version < 2) {
+    // v2：动作幂等日志 + 账号标记（服务端权威化）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS action_log (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        action_id  TEXT NOT NULL,
+        result     TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(user_id, action_id));
+      CREATE TABLE IF NOT EXISTS user_flags (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        key     TEXT NOT NULL,
+        value   INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, key));
+    `)
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
   }
 }
 

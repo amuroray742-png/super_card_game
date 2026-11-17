@@ -54,3 +54,50 @@ export class RateLimiter {
     return Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))
   }
 }
+
+/**
+ * 固定窗口计数器（进程内）。
+ *
+ * 与 `RateLimiter` 的区别：那个数的是**失败次数**（登录撞库），
+ * 这个数的是**总次数**（动作接口防刷）。
+ *
+ * 已知限制：计数随进程重启清零，防不住分布式刷；首发单机部署可接受。
+ */
+export class WindowLimiter {
+  private readonly limit: number
+  private readonly windowMs: number
+  private buckets = new Map<string, { count: number; resetAt: number }>()
+
+  constructor(limit: number, windowMs: number) {
+    this.limit = limit
+    this.windowMs = windowMs
+  }
+
+  /** 记一次调用 */
+  hit(key: string, now = Date.now()): void {
+    const bucket = this.buckets.get(key)
+    if (!bucket || now >= bucket.resetAt) {
+      this.buckets.set(key, { count: 1, resetAt: now + this.windowMs })
+      return
+    }
+    bucket.count += 1
+  }
+
+  /** 是否已超出配额 */
+  isBlocked(key: string, now = Date.now()): boolean {
+    const bucket = this.buckets.get(key)
+    if (!bucket) return false
+    if (now >= bucket.resetAt) {
+      this.buckets.delete(key)
+      return false
+    }
+    return bucket.count > this.limit
+  }
+
+  /** 剩余等待秒数（用于 429 响应） */
+  retryAfterSec(key: string, now = Date.now()): number {
+    const bucket = this.buckets.get(key)
+    if (!bucket) return 0
+    return Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))
+  }
+}

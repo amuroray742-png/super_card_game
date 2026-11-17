@@ -11,11 +11,14 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify'
 import { getRow, type Db, type SaveRow } from '../db.ts'
 import { ApiError, ERROR_CODES } from '../errors.ts'
+import type { GameService } from '../game/service.ts'
 
 export interface SaveContext {
   db: Db
   /** 鉴权 preHandler */
   authGuard: preHandlerHookHandler
+  /** 服务端权威存档服务（载入时会补算离线收益） */
+  service: GameService
 }
 
 /** 单份存档的体积上限（字符数），防止异常大包撑爆数据库 */
@@ -25,9 +28,14 @@ export function registerSaveRoutes(app: FastifyInstance, ctx: SaveContext): void
   app.get('/api/save', { preHandler: ctx.authGuard }, async (req, reply) => {
     const auth = req.auth
     if (!auth) throw new ApiError(401, ERROR_CODES.UNAUTHORIZED, '请先登录')
-    const row = getRow<SaveRow>(ctx.db, 'SELECT * FROM saves WHERE user_id = ?', auth.sub)
-    if (!row) throw new ApiError(404, ERROR_CODES.NO_SAVE, '该账号还没有存档')
-    return reply.code(200).send({ payload: row.payload, savedAt: row.saved_at })
+    // 载入时顺带补算离线收益（服务端时间说了算，断网不损失挂机收益）
+    const loaded = await ctx.service.load(auth.sub)
+    if (!loaded) throw new ApiError(404, ERROR_CODES.NO_SAVE, '该账号还没有存档')
+    return reply.code(200).send({
+      payload: loaded.save.payload,
+      savedAt: loaded.save.savedAt,
+      offline: loaded.offline,
+    })
   })
 
   app.put('/api/save', { preHandler: ctx.authGuard }, async (req, reply) => {

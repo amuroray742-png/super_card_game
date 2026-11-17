@@ -116,6 +116,7 @@ export type GameAction =
   | { type: 'arena.settle' }
   | { type: 'daily.signIn' }
   | { type: 'code.redeem'; code: string }
+  | { type: 'save.create' }
   | { type: 'save.reset' }
   | { type: 'save.import'; payload: string }
 
@@ -195,6 +196,7 @@ export interface ActionResultMap {
   'arena.settle': ArenaSettleResult
   'daily.signIn': RewardBundle
   'code.redeem': RewardBundle
+  'save.create': null
   'save.reset': null
   'save.import': null
 }
@@ -854,7 +856,23 @@ function actionRedeemCode(
   return ok<RewardBundle>({ ...def }, '兑换成功')
 }
 
-/** 重置进度（玩家主动覆盖） */
+/**
+ * 建立新存档（**服务端权威**）。
+ *
+ * 种子由 `ctx.randomSeed()` 提供——服务端用密码学随机源给，
+ * 客户端**不得**构造固定序列（铁律 #24：常量种子会让所有玩家抽到同一串）。
+ */
+function actionCreate(
+  save: SaveData,
+  _payload: Extract<GameAction, { type: 'save.create' }>,
+  ctx: ActionContext,
+): ActionOutcome<null> {
+  const fresh = createNewSave(ctx.now, ctx.randomSeed())
+  Object.assign(save, fresh)
+  return ok<null>(null, '已创建新存档')
+}
+
+/** 重置进度：玩家主动覆盖，允许强行写入 */
 function actionReset(
   save: SaveData,
   _payload: Extract<GameAction, { type: 'save.reset' }>,
@@ -917,6 +935,7 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
   'arena.settle': actionArenaSettle,
   'daily.signIn': actionSignIn,
   'code.redeem': actionRedeemCode,
+  'save.create': actionCreate,
   'save.reset': actionReset,
   'save.import': actionImport,
 }

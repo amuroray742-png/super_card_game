@@ -43,7 +43,7 @@ describe('云存档', () => {
     expect(res.json().error).toBe('NO_SAVE')
   })
 
-  it('推送后拉取得到同一份内容', async () => {
+  it('推送后拉取得到规范化后的存档（服务端权威：版本与字段由服务端统一维护）', async () => {
     const acc = await signUp('alice')
     const put = await bundle.app.inject({
       method: 'PUT',
@@ -54,8 +54,11 @@ describe('云存档', () => {
     expect(put.statusCode).toBe(200)
     const get = await bundle.app.inject({ method: 'GET', url: '/api/save', headers: auth(acc.accessToken) })
     expect(get.statusCode).toBe(200)
-    expect(get.json().payload).toBe('{"version":4}')
-    expect(get.json().savedAt).toBe(1000)
+    // 服务端存的是**规范化后**的存档：版本统一到当前版本、缺字段补齐
+    const save = JSON.parse(get.json().payload)
+    expect(save.version).toBe(5)
+    expect(save.player.crystals).toBe(3000)
+    expect(get.json().savedAt).toBeGreaterThan(0)
   })
 
   it('推送较旧的 savedAt → 409 STALE_SAVE 并回传服务端版本', async () => {

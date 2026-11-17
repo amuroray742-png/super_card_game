@@ -13,7 +13,12 @@ import { createLimiter, registerAuthRoutes } from './routes/auth.ts'
 import { registerSaveRoutes } from './routes/save.ts'
 import { registerAccountRoutes } from './routes/account.ts'
 import { registerHealthRoutes } from './routes/health.ts'
+import { registerActionRoutes } from './routes/action.ts'
+import { GameService } from './game/service.ts'
+import { UserLock } from './game/lock.ts'
+import { WindowLimiter } from './rateLimit.ts'
 import { ApiError, ERROR_CODES } from './errors.ts'
+import { ACCOUNT } from '../../src/core/config/account.ts'
 
 export interface AppOptions {
   dbPath: string
@@ -70,7 +75,15 @@ export function buildApp(options: AppOptions): AppBundle {
     limiter,
     authGuard,
   })
-  registerSaveRoutes(app, { db, authGuard })
+
+  // 服务端权威：唯一能改存档的是 GameService（客户端只发意图）
+  const service = new GameService(db, new UserLock())
+  const actionLimiter = new WindowLimiter(
+    ACCOUNT.ACTION_MAX_PER_WINDOW,
+    ACCOUNT.ACTION_WINDOW_MS,
+  )
+  registerActionRoutes(app, { service, limiter: actionLimiter, authGuard })
+  registerSaveRoutes(app, { db, authGuard, service })
   registerAccountRoutes(app, { db, authGuard })
 
   return {

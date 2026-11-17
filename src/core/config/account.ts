@@ -31,6 +31,22 @@ export const ACCOUNT = {
   LOGIN_FAIL_WINDOW_MS: 10 * 60 * 1000,
   /** 云端推送防抖（毫秒）：非关键写入合并上传 */
   PUSH_DEBOUNCE_MS: 1500,
+  /**
+   * 同一账号在限流窗口内允许的动作次数。
+   *
+   * 服务端权威化后，客户端**每个养成动作**都会打一次 `POST /api/action`，
+   * 不限流会被脚本刷爆（也容易被拿来反复试探扣费接口）。
+   */
+  ACTION_MAX_PER_WINDOW: 120,
+  /** 动作限流窗口（毫秒） */
+  ACTION_WINDOW_MS: 60 * 1000,
+  /**
+   * 每个账号保留的幂等 `actionId` 条数。
+   *
+   * 只保留最近若干条：客户端重试窗口是秒级，不需要永久留档；
+   * 同时避免日志表无限增长。
+   */
+  ACTION_LOG_LIMIT: 64,
   /** 默认后端地址（前端在未配置时使用） */
   DEFAULT_API_BASE: 'http://127.0.0.1:8787',
 } as const
