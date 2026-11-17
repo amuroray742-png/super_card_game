@@ -217,28 +217,25 @@ describe('后端客户端', () => {
     expect(cloud?.savedAt).toBe(1234)
   })
 
-  it('推送云存档：服务端版本更新时返回冲突', async () => {
+  it('发送动作：业务失败也返回 200（ok:false + 错误码）', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(async () =>
-        jsonResponse(409, {
-          error: 'STALE_SAVE',
-          server: { payload: '{"v":"new"}', savedAt: 2000 },
-        }),
+        jsonResponse(200, { ok: false, actionId: 'a1', code: 'INSUFFICIENT_FUNDS', message: '余额不足' }),
       ),
     )
-    const result = await client.pushSave('at', '{"v":"old"}', 1000)
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.conflict).toBe(true)
-      expect(result.server.savedAt).toBe(2000)
-      expect(result.server.payload).toBe('{"v":"new"}')
-    }
+    const res = await client.sendAction('at', 'a1', { type: 'daily.signIn' })
+    expect(res.ok).toBe(false)
+    expect(res.code).toBe('INSUFFICIENT_FUNDS')
   })
 
-  it('推送云存档：正常写入', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => jsonResponse(200, { savedAt: 1000 })))
-    const result = await client.pushSave('at', '{"v":1}', 1000)
-    expect(result.ok).toBe(true)
+  it('发送动作：协议级失败（限流）按错误码抛出', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => jsonResponse(429, { error: 'RATE_LIMITED' })),
+    )
+    await expect(
+      client.sendAction('at', 'a1', { type: 'daily.signIn' }),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED', statusCode: 429 })
   })
 })

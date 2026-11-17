@@ -43,3 +43,23 @@ export const randomSource: RandomSource = createSource()
 export function randomSeed(): number {
   return randomSource.nextSeed() >>> 0
 }
+
+/**
+ * 生成动作幂等键（`POST /api/action` 的 `actionId`）。
+ *
+ * 客户端本地生成，服务端只当**去重键**用：同一个 actionId 重放时
+ * 服务端直接回放上次结果，不会重复扣费（断网重试的安全网）。
+ *
+ * ⚠ 不用 `Math.random()` 直接拼——走平台的加密随机源，
+ *   避免不同会话生成同一串 id（那样会被误判成重放）。
+ */
+export function newActionId(): string {
+  const c = globalThis.crypto
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID()
+  // 降级：随机数 + 时间戳 + 计数器
+  actionCounter += 1
+  return `a${Date.now().toString(36)}-${actionCounter.toString(36)}-${randomSeed().toString(36)}`
+}
+
+/** 降级路径的计数器（保证同一毫秒内也不撞 id） */
+let actionCounter = 0

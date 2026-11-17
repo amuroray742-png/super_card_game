@@ -71,13 +71,13 @@ onUnmounted(() => {
 })
 
 /**
- * 页面隐藏 / 关闭前把还没推上云端的存档刷掉。
+ * 页面隐藏 / 关闭前把本地缓存刷一下。
  *
- * 挂机游戏的进度主要靠「定时保存 + 关页时兜底」保证不丢，
- * 少了这一步，玩家关掉页面可能丢掉最后几分钟的进度。
+ * 服务端权威后，进度在**每次动作**时就已落库（服务端），
+ * 这里只是把最新镜像写进本地缓存，断网时也能看到最近进度。
  */
 function flushOnHide() {
-  if (document.visibilityState === 'hidden') void store.flushPush()
+  if (document.visibilityState === 'hidden') void store.persist()
 }
 
 /** 返回：引导页是首启落地页，没有可靠的前进历史，直接回推征页 */
@@ -131,6 +131,10 @@ function goBackBare() {
 
       <!-- 内容 -->
       <main class="body" v-if="booted">
+        <!-- 离线模式：服务端不可达，只能看不能改 -->
+        <div v-if="store.offline" class="offline-bar">
+          离线模式 · 连不上服务器，现在只能查看进度，操作需恢复连接
+        </div>
         <router-view v-slot="{ Component }">
           <component :is="Component" />
         </router-view>
@@ -213,6 +217,19 @@ function goBackBare() {
   flex: 1 1 auto;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* 离线模式提示条（服务端不可达 → 只能看，不能操作） */
+.offline-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #ffd9a0;
+  background: rgba(120, 72, 20, 0.92);
+  border-bottom: 1px solid rgba(255, 200, 120, 0.35);
+  text-align: center;
 }
 
 /* 未登录时的裸布局（登录页 / 公开合规页） */

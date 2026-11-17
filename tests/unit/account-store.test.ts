@@ -90,7 +90,7 @@ describe('会话恢复', () => {
     expect(localStorage.getItem(ACCOUNT_STORAGE_KEYS.SESSION)).toBeNull()
   })
 
-  it('网络不通时保留本地会话（不把玩家踢下线）', async () => {
+  it('网络不通时保留本地会话（不把玩家踢下线，进离线只读模式）', async () => {
     localStorage.setItem(
       ACCOUNT_STORAGE_KEYS.SESSION,
       JSON.stringify({ refreshToken: 'rt-old', user: { id: 3, username: 'tester' } }),
@@ -102,9 +102,32 @@ describe('会话恢复', () => {
     const store = useAccountStore()
     await store.ensureRestored()
 
-    expect(store.status).toBe('guest')
+    // 断网不该把玩家挡在门外：身份保留，进入离线模式（能看进度，不能操作）
+    expect(store.status).toBe('authenticated')
+    expect(store.offline).toBe(true)
+    expect(store.user?.id).toBe(3)
     expect(localStorage.getItem(ACCOUNT_STORAGE_KEYS.SESSION)).not.toBeNull()
     expect(store.error).toBeTruthy()
+  })
+
+  it('网络恢复后自动续上（离线模式在导航时重试恢复）', async () => {
+    localStorage.setItem(
+      ACCOUNT_STORAGE_KEYS.SESSION,
+      JSON.stringify({ refreshToken: 'rt-old', user: { id: 3, username: 'tester' } }),
+    )
+    const refresh = vi
+      .spyOn(accountClient, 'refresh')
+      .mockRejectedValueOnce(new AccountError('NETWORK', 0))
+
+    const store = useAccountStore()
+    await store.ensureRestored()
+    expect(store.offline).toBe(true)
+
+    // 网络恢复
+    refresh.mockResolvedValue(AUTH)
+    await store.ensureRestored()
+    expect(store.offline).toBe(false)
+    expect(store.accessToken).toBe('at-1')
   })
 
   it('多次调用只真正恢复一次', async () => {

@@ -76,9 +76,7 @@ function onFinished() {
 
 /** 回放倍速：写回存档设置（与设置页同一口径） */
 function onSpeedChange(v: number) {
-  store.save.settings.speed = v
-  store.battleSpeed = v
-  store.persist()
+  void store.updateSettings({ speed: v })
 }
 
 /** 挂机推进 N 场 */

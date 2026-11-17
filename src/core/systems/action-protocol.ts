@@ -118,6 +118,30 @@ export function parseGameAction(raw: unknown): GameAction | null {
     }
     case 'idle.claimOffline':
       return { type: 'idle.claimOffline' }
+    case 'idle.setTarget': {
+      const stageId = int(raw.stageId)
+      if (stageId === null || stageId < 1) return null
+      return { type: 'idle.setTarget', stageId }
+    }
+    case 'settings.update': {
+      const out: Extract<GameAction, { type: 'settings.update' }> = { type: 'settings.update' }
+      if (raw.speed !== undefined) {
+        const speed = int(raw.speed)
+        if (speed === null) return null
+        out.speed = speed
+      }
+      if (raw.sfx !== undefined) {
+        if (typeof raw.sfx !== 'boolean') return null
+        out.sfx = raw.sfx
+      }
+      if (raw.skipAnim !== undefined) {
+        if (typeof raw.skipAnim !== 'boolean') return null
+        out.skipAnim = raw.skipAnim
+      }
+      // 一个字段都没给 = 空操作，直接判非法
+      if (out.speed === undefined && out.sfx === undefined && out.skipAnim === undefined) return null
+      return out
+    }
     case 'hero.feedExp': {
       const heroId = str(raw.heroId)
       const amount = int(raw.amount)
@@ -201,7 +225,8 @@ export function parseGameAction(raw: unknown): GameAction | null {
     case 'save.import': {
       const payload = str(raw.payload)
       if (!payload) return null
-      return { type: 'save.import', payload }
+      // legacy = 存量旧档迁移（服务端据此记账号标记，防止旧档被迁给第二个账号）
+      return { type: 'save.import', payload, legacy: raw.legacy === true }
     }
     default:
       return null

@@ -27,19 +27,15 @@ const settings = computed(() => store.save.settings)
 
 /** 战斗速度：写入存档并同步回放倍速 */
 function setSpeed(v: number) {
-  store.save.settings.speed = v
-  store.battleSpeed = v
-  store.persist()
+  void store.updateSettings({ speed: v })
 }
 
 function toggleSfx() {
-  store.save.settings.sfx = !store.save.settings.sfx
-  store.persist()
+  void store.updateSettings({ sfx: !store.save.settings.sfx })
 }
 
 function toggleSkipAnim() {
-  store.save.settings.skipAnim = !store.save.settings.skipAnim
-  store.persist()
+  void store.updateSettings({ skipAnim: !store.save.settings.skipAnim })
 }
 
 // ─────────────────────────── 账号 ───────────────────────────
@@ -54,9 +50,8 @@ function saveApiBase() {
   store.notify('服务地址已保存', 'ok')
 }
 
-/** 退出登录：先把还没推上云端的存档刷掉，再吊销会话 */
+/** 退出登录：吊销服务端会话（进度已在服务端落库） */
 async function doLogout() {
-  await store.flushPush()
   await account.logout()
   await router.replace('/login')
 }

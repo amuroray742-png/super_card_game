@@ -41,14 +41,19 @@
     禁止只写路由而只留一句「可前往 XX」的纯文案（历史教训：召唤页曾完全无法从游戏内进入）。
     同时，任何**扣费动作必须先做余额校验**：余额不足直接拒绝并提示，不得出现负数资源
     （历史教训：抽卡可把圣杯结晶扣成负数，抽卡总闸门失效）。
-11. **存档写入单一入口 + 并发保护**：改存档一律经 `presentation/stores/game.ts` 的 `persist()`，
-    禁止绕过它直接写存储。`persist()` 是**先读后写 + 外部优先**：写入前比对存储里的 `savedAt`，
-    若存储版本比本进程已知的更新（说明另一个标签页 / 上下文在我们之后改过存档），
-    **不得覆盖**，改为采纳外部版本并提示玩家，本次改动整体作废
-    （存档是原子的，不会出现「扣了费却没出货」的中间态）。
-    「重置进度」与「导入存档」是玩家主动覆盖，允许强行写入。
-    由 `tests/unit/save-conflict.test.ts` + `tests/unit/store-save.test.ts` 守护。
-    > 历史教训：原 `persist()` 无脑覆写，握着过期存档的一方一写就把另一方进度整份抹掉且无提示。
+11. **存档的唯一写入口在服务端**：服务端权威化后，**只有服务端能改存档**。
+    - 客户端任何「会改存档」的操作都必须经 `POST /api/action`
+      （负载定义见 `core/systems/action-protocol.ts`），由服务端用
+      `core/systems/actions.ts` 的纯函数执行后落库；客户端**不得**本地算完再整份上传。
+    - `PUT /api/save`（整份覆盖）**已下线**：它是一条绕过服务端校验与扣费逻辑的旁路，
+      留着它权威模型当场失效（谁都能整份覆盖别人的存档）。
+    - 客户端 localStorage 里的存档降级为**只读缓存**（首屏加速 / 断网查看），不是权威。
+    - 服务端侧：同一账号的动作进 Promise 串行队列（`server/src/game/lock.ts`），
+      存档与幂等日志**同一事务**落库；并发提交不会互相覆盖、不会「扣了两次费」。
+    由 `tests/unit/server/action.test.ts` + `tests/unit/store-save.test.ts`
+    + E2E「多设备一致 / 不重复扣费」守护。
+    > 历史教训：客户端各自算、各自存 → 两台设备进度不一致、重复扣费；
+    > 而保留 PUT 旁路，等于任何客户端都能整份覆盖权威存档。
 12. **注入时钟必须会走动**：表现层 store 注入 `systemClock`，**禁止**用 `ManualClock`
     （它只属于测试代码）。历史教训：store 曾注入 `ManualClock` 且只在 `load()` 时 `set` 一次，
     导致整局游戏的 `history.at` / `obtainedAt` / `lastTickAt` 全等于「页面加载那一刻」，
@@ -204,13 +209,17 @@
 
 24. **随机数必须可预测地「不可预测」**：抽卡 / 战斗 / 挂机掉落共用 `core/rng.ts`，
     但**种子与计数器必须随存档持久化**，且**不得用常量种子**：
+    - **种子归服务端**：服务端用 `node:crypto` 的 `randomInt` 生成
+      （`server/src/game/service.ts` 的 `serverSeed()`），随存档落库；
+      客户端**不再持有**抽卡序列（铁律 #28 / #29）。
+      观战预览的种子用 `hashSeed(seed, 'preview', n)` **域分离**派生，
+      既不污染服务端序列，也不用 `Math.random()`（表现层禁用，铁律 #6）。
     - **种子不得写死**：`new Rng(0x5eed)` 之类的常量会让**所有玩家**抽到完全相同的序列，
       概率公示宣称的「SSR 0.60%」在实际游戏里会退化成固定脚本（合规硬伤）。
-      新存档的种子来自平台随机源 `src/platform/random.ts`（表现层不得直接用
-      `Math.random()`，同铁律 #6）。
+      旧档缺种子时由**服务端**补一条（客户端不补，否则两台设备会各生成一条序列）。
     - **计数器必须落盘**：只存在内存里时，刷新页面就回到序列开头 →
       玩家可以无限「刷新重抽」。存档新增 `rng: { seed, counter }` 字段（存档版本 4→5），
-      载入时用 `Rng.fromSnapshot()` 复原，`persist()` 时同步计数器。
+      服务端载入时用 `Rng.fromSnapshot()` 复原，动作成功后同步计数器。
     - **种子必须是整数**：`Rng` 构造函数对 `[0,1)` 的浮点种子按 2^32 放大，
       历史上曾直接 `seed >>> 0` 把浮点截断成 0 → 全部落到同一个兜底种子
       → 抽卡 / 战斗 / 挂机掉落的结果**永远固定**。派生新序列请用 `rng.nextSeed()`。
@@ -265,6 +274,38 @@
     > 由 `tests/unit/relic-advice.test.ts`（2/4/6 档真的进属性）+
     > `tests/e2e/relic.spec.ts`（页面上看得见 2/4/6 档与「还差 N 件」、
     > 仓库里就能直接强化）守护。
+
+28. **客户端不得把本地存储当权威**：localStorage 里的存档只是**只读缓存**。
+    - 服务端是唯一权威真源（铁律 #11）：客户端读到的是服务端回传的**镜像**。
+    - 客户端**禁止**直接改 `store.save.<字段>` 来「实现」某个功能——
+      那会在下一次服务端响应时被覆盖，表现为「点了没反应 / 设置不生效」。
+      要改存档，一律**加一个动作**（`core/systems/actions.ts`，铁律 #29）。
+    - 服务端不可达 → 进入**离线只读模式**：能看缓存里的进度，操作一律拒绝并提示
+      （界面顶部挂离线提示条）。断网不该把玩家挡在门外，也不该让他改得动存档。
+    - localStorage 按 origin 隔离：本地缓存**不是**跨设备的，进度一致只由服务端保证。
+    > 教训：客户端直接写 `save.settings.speed` / `save.idle.currentStage` 这类字段，
+    > 在服务端权威下会**静默丢失**（下一次响应就覆盖掉），
+    > 而界面上看起来「点了没反应」——排查时容易误判成「服务端没存」。
+
+29. **改变存档的编排必须写成 core 纯函数，服务端与客户端共用同一份**：
+    - 所有动作都是 `core/systems/actions.ts` 里的纯函数
+      `(save, payload, ctx) → ActionOutcome`，契约固定：
+      **先校验后修改**（失败即原子，存档一字节未变）、
+      **失败不消耗随机序列**、收益只经 `rewards` 入库、
+      时间与随机源由 `ctx` 注入（core 不读 `Date.now()`、不用 `Math.random()`）。
+    - 服务端 import 的是**同一份** `src/core`，因此两端算出的结果天然一致；
+      服务端**禁止**另写一份规则（会与 core 分叉，铁律 #4）。
+    - 动作负载 / 结果 / 错误码表**各只有一份**：
+      `core/systems/action-protocol.ts`（负载与响应）、
+      `core/systems/actions.ts`（判别联合与结果）、
+      `core/config/game-errors.ts`（错误码）。
+    - 新增动作必须同时补齐三处：`GameAction` 判别联合 / `ActionResultMap` / `HANDLERS`，
+      少一处**编译不过**（这是刻意的：漏接线的东西不许上线）。
+    - 「无数据」的动作（装备 / 编队 / 预设 / 重置 / 导入等）结果返回 `true` 而不是 `null`——
+      否则调用方分不清「成功了但没数据」与「失败了」。
+    > 教训：把编排留在表现层，就只能「客户端算 + 客户端存」，
+    > 权威化时整条链路都要重写；下沉到 core 后，服务端只是「换个执行者」，
+    > 两端算出来的战斗 / 战力 / 掉落 / 概率天然同源。
 
 ## 数值调参的既定流程
 
@@ -328,15 +369,24 @@ src/core/       纯逻辑，可在 Node 下运行，被单元测试全覆盖
 src/platform/   平台适配（storage / account / payment / share / ads），首发为 mock
 src/presentation/ Vue 视图层
 src/content/    传记文本、合规文案、美术资源
-server/         真实后端（Fastify + node:sqlite）：认证 + 云存档
+server/         真实后端（Fastify + node:sqlite）：认证 + **权威存档服务**
+server/src/game/ 服务端游戏服务：串行化锁 / 数据访问 / 动作执行 / 协议分发
 tools/          数值模拟、配置校验、禁用词扫描、占位图生成
 tools/capture/  界面截图（内置 origin 守卫，禁止对玩家正在使用的 origin 动手）
 tests/unit/     Vitest 单测（core/systems 目标 100% 覆盖）
 tests/e2e/      Playwright 端到端（起真实后端 + 静态预览）
 ```
 
-`server/` 与 `src/core/` 的边界：服务端**只做**认证与云存档，不参与任何战斗与数值计算；
+`server/` 与 `src/core/` 的边界：服务端**不实现**任何玩法规则——
+它只做「鉴权 → 调 `core/systems/actions.ts` 的纯函数 → 落库 → 回结果」，
+所有判定与数值仍只有 core 一份（铁律 #4 / #29）。
+服务端另外负责：令牌与会话、账号标记（`user_flags`）、幂等日志（`action_log`）、
+按账号串行化与限流、离线收益补算（用**服务端**的时钟）。
 账号阈值与错误码表从 `src/core/config/account.ts` 引入，不在服务端另立一份。
+
+⚠ 服务端直接 `import` `src/core/` 的 TS 源码（`node server/src/index.ts`），
+因此 **core 里禁止使用 TypeScript 参数属性**（`constructor(private x: number)`）——
+Node 的原生类型擦除不支持它（铁律 #1 的延伸）。
 
 ## 常用命令
 

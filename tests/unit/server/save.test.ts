@@ -1,5 +1,8 @@
 /**
- * 服务端云存档单测（拉取 / 推送 / 冲突 / 越权 / 注销级联）。
+ * 服务端云存档路由单测（拉取 / 下线 PUT / 越权 / 注销级联）。
+ *
+ * ⚠ 服务端权威后**没有 PUT 了**：存档的唯一写入入口是 `POST /api/action`。
+ *   留一条「客户端整份覆盖」的旁路 = 权威模型失效，所以这里专门守着它没了。
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp, type AppBundle } from '../../../server/src/app.ts'
@@ -35,6 +38,16 @@ function auth(token: string) {
   return { authorization: `Bearer ${token}` }
 }
 
+/** 建档（走动作接口，服务端唯一写入入口） */
+async function createSave(token: string) {
+  return bundle.app.inject({
+    method: 'POST',
+    url: '/api/action',
+    headers: auth(token),
+    payload: { actionId: `create-${Math.random().toString(36).slice(2)}`, action: { type: 'save.create' } },
+  })
+}
+
 describe('云存档', () => {
   it('尚无存档时 GET → 404 NO_SAVE', async () => {
     const acc = await signUp('alice')
@@ -43,103 +56,50 @@ describe('云存档', () => {
     expect(res.json().error).toBe('NO_SAVE')
   })
 
-  it('推送后拉取得到规范化后的存档（服务端权威：版本与字段由服务端统一维护）', async () => {
+  it('建档后 GET 返回服务端权威存档', async () => {
     const acc = await signUp('alice')
-    const put = await bundle.app.inject({
+    await createSave(acc.accessToken)
+    const get = await bundle.app.inject({ method: 'GET', url: '/api/save', headers: auth(acc.accessToken) })
+    expect(get.statusCode).toBe(200)
+    const body = get.json()
+    const save = JSON.parse(body.payload)
+    expect(save.version).toBe(5)
+    expect(save.player.crystals).toBe(3000)
+    expect(body.savedAt).toBeGreaterThan(0)
+  })
+
+  it('PUT /api/save 已下线（不存在「客户端整份覆盖」的旁路）', async () => {
+    const acc = await signUp('alice')
+    const res = await bundle.app.inject({
       method: 'PUT',
       url: '/api/save',
       headers: auth(acc.accessToken),
       payload: { payload: '{"version":4}', savedAt: 1000 },
     })
-    expect(put.statusCode).toBe(200)
+    expect(res.statusCode).toBe(404)
+    // 服务端存档没被写进来
     const get = await bundle.app.inject({ method: 'GET', url: '/api/save', headers: auth(acc.accessToken) })
-    expect(get.statusCode).toBe(200)
-    // 服务端存的是**规范化后**的存档：版本统一到当前版本、缺字段补齐
-    const save = JSON.parse(get.json().payload)
-    expect(save.version).toBe(5)
-    expect(save.player.crystals).toBe(3000)
-    expect(get.json().savedAt).toBeGreaterThan(0)
-  })
-
-  it('推送较旧的 savedAt → 409 STALE_SAVE 并回传服务端版本', async () => {
-    const acc = await signUp('alice')
-    await bundle.app.inject({
-      method: 'PUT',
-      url: '/api/save',
-      headers: auth(acc.accessToken),
-      payload: { payload: '{"v":"new"}', savedAt: 2000 },
-    })
-    const res = await bundle.app.inject({
-      method: 'PUT',
-      url: '/api/save',
-      headers: auth(acc.accessToken),
-      payload: { payload: '{"v":"old"}', savedAt: 1000 },
-    })
-    expect(res.statusCode).toBe(409)
-    const body = res.json()
-    expect(body.error).toBe('STALE_SAVE')
-    expect(body.server.payload).toBe('{"v":"new"}')
-    expect(body.server.savedAt).toBe(2000)
-  })
-
-  it('推送相同 savedAt 视为接受', async () => {
-    const acc = await signUp('alice')
-    await bundle.app.inject({
-      method: 'PUT',
-      url: '/api/save',
-      headers: auth(acc.accessToken),
-      payload: { payload: '{"v":"a"}', savedAt: 1000 },
-    })
-    const res = await bundle.app.inject({
-      method: 'PUT',
-      url: '/api/save',
-      headers: auth(acc.accessToken),
-      payload: { payload: '{"v":"b"}', savedAt: 1000 },
-    })
-    expect(res.statusCode).toBe(200)
-  })
-
-  it('空存档内容 → 400', async () => {
-    const acc = await signUp('alice')
-    const res = await bundle.app.inject({
-      method: 'PUT',
-      url: '/api/save',
-      headers: auth(acc.accessToken),
-      payload: { payload: '', savedAt: 1000 },
-    })
-    expect(res.statusCode).toBe(400)
+    expect(get.statusCode).toBe(404)
   })
 
   it('越权：A 的令牌读不到 B 的存档', async () => {
     const a = await signUp('alice')
     const b = await signUp('bob')
-    await bundle.app.inject({
-      method: 'PUT',
-      url: '/api/save',
-      headers: auth(b.accessToken),
-      payload: { payload: '{"v":"bob"}', savedAt: 1000 },
-    })
+    await createSave(b.accessToken)
     const res = await bundle.app.inject({ method: 'GET', url: '/api/save', headers: auth(a.accessToken) })
     expect(res.statusCode).toBe(404)
   })
 
   it('无令牌访问存档 → 401', async () => {
     const get = await bundle.app.inject({ method: 'GET', url: '/api/save' })
-    const put = await bundle.app.inject({ method: 'PUT', url: '/api/save', payload: { payload: 'x', savedAt: 1 } })
     expect(get.statusCode).toBe(401)
-    expect(put.statusCode).toBe(401)
   })
 })
 
 describe('注销账号', () => {
   it('删除后账号、存档、会话全部消失', async () => {
     const acc = await signUp('alice')
-    await bundle.app.inject({
-      method: 'PUT',
-      url: '/api/save',
-      headers: auth(acc.accessToken),
-      payload: { payload: '{"v":1}', savedAt: 1000 },
-    })
+    await createSave(acc.accessToken)
 
     const del = await bundle.app.inject({ method: 'DELETE', url: '/api/account', headers: auth(acc.accessToken) })
     expect(del.statusCode).toBe(204)
@@ -172,17 +132,17 @@ describe('健康检查', () => {
 })
 
 describe('跨域预检', () => {
-  it('允许 PUT（云存档推送），否则浏览器会拦掉预检', async () => {
+  it('允许 POST（动作接口），否则浏览器会拦掉预检', async () => {
     const res = await bundle.app.inject({
       method: 'OPTIONS',
-      url: '/api/save',
+      url: '/api/action',
       headers: {
         origin: 'http://127.0.0.1:4173',
-        'access-control-request-method': 'PUT',
+        'access-control-request-method': 'POST',
         'access-control-request-headers': 'authorization,content-type',
       },
     })
-    expect(res.headers['access-control-allow-methods']).toContain('PUT')
+    expect(res.headers['access-control-allow-methods']).toContain('POST')
     expect(res.headers['access-control-allow-origin']).toBe('http://127.0.0.1:4173')
   })
 })

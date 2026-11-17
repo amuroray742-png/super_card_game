@@ -36,7 +36,8 @@ import type {
   TeamPreset,
 } from '../model/types.ts'
 import { GAME_ERROR_CODES, type GameErrorCode } from '../config/game-errors.ts'
-import { DAILY, LEVEL, REDEEM_CODES } from '../config/economy.ts'
+import { DAILY, LEVEL, REDEEM_CODES, BATTLE } from '../config/economy.ts'
+import { STAGE_INDEX } from '../config/stages.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { getPool } from '../config/pools.ts'
 import { dayIndex } from '../time.ts'
@@ -100,6 +101,8 @@ export type GameAction =
   | { type: 'gacha.pull'; poolId: string; count: 1 | 10 }
   | { type: 'idle.tick'; battles: number }
   | { type: 'idle.claimOffline' }
+  | { type: 'idle.setTarget'; stageId: number }
+  | { type: 'settings.update'; speed?: number; sfx?: boolean; skipAnim?: boolean }
   | { type: 'hero.feedExp'; heroId: string; amount: number }
   | { type: 'hero.breakRealm'; heroId: string }
   | { type: 'hero.upgradeSkill'; heroId: string; index: number }
@@ -118,7 +121,7 @@ export type GameAction =
   | { type: 'code.redeem'; code: string }
   | { type: 'save.create' }
   | { type: 'save.reset' }
-  | { type: 'save.import'; payload: string }
+  | { type: 'save.import'; payload: string; legacy?: boolean }
 
 export type GameActionType = GameAction['type']
 
@@ -180,25 +183,27 @@ export interface ActionResultMap {
   'gacha.pull': PullActionResult
   'idle.tick': IdleActionResult
   'idle.claimOffline': OfflineSettlementResult | null
+  'idle.setTarget': { stageId: number }
+  'settings.update': true
   'hero.feedExp': FeedExpResult
   'hero.breakRealm': { levelsGained: number }
   'hero.upgradeSkill': { level: number }
   'hero.upgradeStar': { star: number }
   'relic.upgrade': RelicUpgradeResult
   'relic.decompose': DecomposeResult
-  'relic.equip': null
+  'relic.equip': true
   'relic.autoEquip': RelicAdvice
-  'team.setSlot': null
+  'team.setSlot': true
   'team.savePreset': TeamPreset
-  'team.applyPreset': null
-  'team.removePreset': null
+  'team.applyPreset': true
+  'team.removePreset': true
   'rebirth.do': RebirthPreview
   'arena.settle': ArenaSettleResult
   'daily.signIn': RewardBundle
   'code.redeem': RewardBundle
-  'save.create': null
-  'save.reset': null
-  'save.import': null
+  'save.create': true
+  'save.reset': true
+  'save.import': true
 }
 
 // ─────────────────────────── 调用上下文 ───────────────────────────
@@ -222,6 +227,14 @@ export type ActionOutcome<T = unknown> =
       silent?: boolean
       detail?: Record<string, unknown>
     }
+
+/**
+ * ⚠ **成功的结果永不为 `null`**。
+ *
+ * 「无数据」的动作（装备 / 编队 / 预设 / 重置 / 导入等）一律返回 `true`，
+ * 而不是 `null`——否则调用方无法区分「成功了但没数据」与「失败了」：
+ * 服务端权威后，客户端靠返回值判断成败（失败时存档没变、界面要提示）。
+ */
 
 // ─────────────────────────── 内部工具 ───────────────────────────
 
@@ -448,6 +461,7 @@ function actionIdleClaimOffline(
   }
   const elapsed = Math.max(0, Math.floor((ctx.now - save.lastTickAt) / 1000))
   if (elapsed < 60) {
+    // 没有可领取的离线收益（服务端入口已经补算过了）
     return ok<null>(null)
   }
   const seed = ctx.rng.nextSeed()
@@ -455,6 +469,49 @@ function actionIdleClaimOffline(
   applyRewardBundle(save, result.rewards, ctx.rng, ctx.now)
   save.lastTickAt = ctx.now
   return ok<OfflineSettlementResult>(result)
+}
+
+/**
+ * 设定挂机目标关卡。
+ *
+ * 挂机推进到哪一关属于**存档状态**，服务端权威后必须由服务端改——
+ * 客户端直接写 `save.idle.currentStage` 会在下一次响应时被服务端版本覆盖。
+ */
+function actionIdleSetTarget(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'idle.setTarget' }>,
+  _ctx: ActionContext,
+): ActionOutcome<{ stageId: number }> {
+  const stageId = Math.floor(payload.stageId)
+  if (!Number.isFinite(stageId) || !STAGE_INDEX.has(stageId)) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '关卡不存在')
+  }
+  save.idle.currentStage = stageId
+  return ok<{ stageId: number }>({ stageId }, '挂机目标已更新')
+}
+
+/**
+ * 更新播放设置（倍速 / 音效 / 跳过演出）。
+ *
+ * 这些设置存在存档里，服务端权威后同样要经服务端落库，
+ * 否则下一次响应会把本地改动覆盖掉。
+ */
+function actionSettingsUpdate(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'settings.update' }>,
+  _ctx: ActionContext,
+): ActionOutcome<true> {
+  const s = save.settings
+  if (payload.speed !== undefined) {
+    const speeds: readonly number[] = BATTLE.SPEED_OPTIONS
+    if (!speeds.includes(payload.speed)) {
+      return fail(GAME_ERROR_CODES.NOT_FOUND, '倍速档位不合法')
+    }
+    s.speed = payload.speed
+  }
+  if (payload.sfx !== undefined) s.sfx = payload.sfx
+  if (payload.skipAnim !== undefined) s.skipAnim = payload.skipAnim
+  return ok<true>(true)
 }
 
 /** 喂经验 */
@@ -640,7 +697,7 @@ function actionRelicEquip(
   save: SaveData,
   payload: Extract<GameAction, { type: 'relic.equip' }>,
   _ctx: ActionContext,
-): ActionOutcome<null> {
+): ActionOutcome<true> {
   if (!save.heroes[payload.heroId]) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
   if (payload.slot < 0 || payload.slot >= RELIC_SLOT_COUNT) {
     return silentFail(GAME_ERROR_CODES.NOT_FOUND)
@@ -653,7 +710,7 @@ function actionRelicEquip(
     }
     equipRelic(save, payload.heroId, payload.slot, payload.relicId)
   }
-  return ok<null>(null)
+  return ok<true>(true)
 }
 
 /** 一键按推荐装备遗物 */
@@ -683,7 +740,7 @@ function actionSetSlot(
   save: SaveData,
   payload: Extract<GameAction, { type: 'team.setSlot' }>,
   _ctx: ActionContext,
-): ActionOutcome<null> {
+): ActionOutcome<true> {
   if (payload.index < 0 || payload.index >= save.team.slots.length) {
     return silentFail(GAME_ERROR_CODES.NOT_FOUND)
   }
@@ -696,7 +753,7 @@ function actionSetSlot(
     if (existing >= 0) slots[existing] = null
   }
   slots[payload.index] = payload.heroId
-  return ok<null>(null)
+  return ok<true>(true)
 }
 
 /** 保存编队预设 */
@@ -722,11 +779,11 @@ function actionApplyPreset(
   save: SaveData,
   payload: Extract<GameAction, { type: 'team.applyPreset' }>,
   _ctx: ActionContext,
-): ActionOutcome<null> {
+): ActionOutcome<true> {
   const preset = save.team.presets.find((p) => p.id === payload.presetId)
   if (!preset) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
   save.team.slots = [...preset.slots]
-  return ok<null>(null)
+  return ok<true>(true)
 }
 
 /** 删除编队预设 */
@@ -734,9 +791,9 @@ function actionRemovePreset(
   save: SaveData,
   payload: Extract<GameAction, { type: 'team.removePreset' }>,
   _ctx: ActionContext,
-): ActionOutcome<null> {
+): ActionOutcome<true> {
   save.team.presets = save.team.presets.filter((p) => p.id !== payload.presetId)
-  return ok<null>(null)
+  return ok<true>(true)
 }
 
 /** 圣杯重启 */
@@ -866,10 +923,10 @@ function actionCreate(
   save: SaveData,
   _payload: Extract<GameAction, { type: 'save.create' }>,
   ctx: ActionContext,
-): ActionOutcome<null> {
+): ActionOutcome<true> {
   const fresh = createNewSave(ctx.now, ctx.randomSeed())
   Object.assign(save, fresh)
-  return ok<null>(null, '已创建新存档')
+  return ok<true>(true, '已创建新存档')
 }
 
 /** 重置进度：玩家主动覆盖，允许强行写入 */
@@ -877,11 +934,11 @@ function actionReset(
   save: SaveData,
   _payload: Extract<GameAction, { type: 'save.reset' }>,
   ctx: ActionContext,
-): ActionOutcome<null> {
+): ActionOutcome<true> {
   // 重置 → 换一条全新的随机序列（否则旧档的抽卡位置会被继承）
   const fresh = createNewSave(ctx.now, ctx.randomSeed())
   Object.assign(save, fresh)
-  return ok<null>(null, '进度已重置', 'warn')
+  return ok<true>(true, '进度已重置', 'warn')
 }
 
 /** 导入存档（玩家主动覆盖） */
@@ -889,7 +946,7 @@ function actionImport(
   save: SaveData,
   payload: Extract<GameAction, { type: 'save.import' }>,
   _ctx: ActionContext,
-): ActionOutcome<null> {
+): ActionOutcome<true> {
   let imported
   try {
     imported = normalizeSave(importSave(payload.payload))
@@ -897,7 +954,7 @@ function actionImport(
     return fail(GAME_ERROR_CODES.IMPORT_INVALID, '存档数据无效')
   }
   Object.assign(save, imported)
-  return ok<null>(null, '存档已导入')
+  return ok<true>(true, '存档已导入')
 }
 
 // ─────────────────────────── 分发 ───────────────────────────
@@ -919,6 +976,8 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
   'gacha.pull': actionPull,
   'idle.tick': actionIdleTick,
   'idle.claimOffline': actionIdleClaimOffline,
+  'idle.setTarget': actionIdleSetTarget,
+  'settings.update': actionSettingsUpdate,
   'hero.feedExp': actionFeedExp,
   'hero.breakRealm': actionBreakRealm,
   'hero.upgradeSkill': actionUpgradeSkill,

@@ -83,7 +83,7 @@ export function buildApp(options: AppOptions): AppBundle {
     ACCOUNT.ACTION_WINDOW_MS,
   )
   registerActionRoutes(app, { service, limiter: actionLimiter, authGuard })
-  registerSaveRoutes(app, { db, authGuard, service })
+  registerSaveRoutes(app, { authGuard, service })
   registerAccountRoutes(app, { db, authGuard })
 
   return {

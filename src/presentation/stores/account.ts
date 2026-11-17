@@ -23,8 +23,9 @@ import {
   type AccountUser,
   type AuthResult,
   type CloudSave,
-  type PushSaveResult,
 } from '../../platform/account.ts'
+import type { GameAction } from '../../core/systems/actions.ts'
+import type { ActionResponse } from '../../core/systems/action-protocol.ts'
 
 export type AccountStatus = 'unknown' | 'guest' | 'authenticated'
 
@@ -39,6 +40,13 @@ export const useAccountStore = defineStore('account', () => {
   const user = ref<AccountUser | null>(null)
   /** 会话状态：unknown = 尚未恢复，guest = 未登录，authenticated = 已登录 */
   const status = ref<AccountStatus>('unknown')
+  /**
+   * 离线：连不上服务器，但本地还有会话。
+   *
+   * 此时**不踢回登录页**——移动端断网时不该把玩家挡在门外，
+   * 而是让他进游戏看进度（只读），等网络恢复再自动续上（铁律 #28）。
+   */
+  const offline = ref(false)
   /** 面向玩家的错误提示 */
   const error = ref<string | null>(null)
   /** 正在提交（登录 / 注册 / 登出） */
@@ -53,12 +61,14 @@ export const useAccountStore = defineStore('account', () => {
   function applyAuth(auth: AuthResult): void {
     user.value = auth.user
     accessToken.value = auth.accessToken
+    offline.value = false
     writeStoredSession({ refreshToken: auth.refreshToken, user: auth.user })
   }
 
   function clearSession(): void {
     user.value = null
     accessToken.value = null
+    offline.value = false
     clearStoredSession()
     status.value = 'guest'
   }
@@ -67,7 +77,8 @@ export const useAccountStore = defineStore('account', () => {
    * 恢复会话：拿本地存的 refresh token 换一对新令牌。
    *
    * 只有服务端明确回了 UNAUTHORIZED 才清掉本地会话——网络不通时**保留**
-   * refresh token，避免一次断网就把玩家的登录状态抹掉。
+   * refresh token，避免一次断网就把玩家的登录状态抹掉；
+   * 此时进入**离线模式**（能看进度，不能操作）。
    */
   async function restore(): Promise<void> {
     const stored = readStoredSession()
@@ -85,21 +96,33 @@ export const useAccountStore = defineStore('account', () => {
         clearStoredSession()
         user.value = null
         accessToken.value = null
+        status.value = 'guest'
+      } else if (err instanceof AccountError && err.code === ACCOUNT_ERROR_CODES.NETWORK) {
+        // 连不上服务器 → 离线模式：保留身份，进游戏看进度（只读）
+        user.value = stored.user
+        accessToken.value = null
+        offline.value = true
+        status.value = 'authenticated'
+      } else {
+        status.value = 'guest'
       }
-      status.value = 'guest'
       error.value = describeAccountError(err)
     }
   }
 
-  /** 幂等：多处调用只会真正恢复一次 */
+  /** 幂等：多处调用只会真正恢复一次（离线时允许重试——网络可能已恢复） */
   async function ensureRestored(): Promise<void> {
-    if (status.value !== 'unknown') return
-    if (!restoreTask) {
-      restoreTask = restore().finally(() => {
-        restoreTask = null
-      })
+    if (status.value === 'unknown') {
+      if (!restoreTask) {
+        restoreTask = restore().finally(() => {
+          restoreTask = null
+        })
+      }
+      await restoreTask
+      return
     }
-    await restoreTask
+    // 离线中：每次导航都试一次恢复（网络回来了就自动续上）
+    if (offline.value) await restore()
   }
 
   /** 登录 */
@@ -185,7 +208,13 @@ export const useAccountStore = defineStore('account', () => {
     } catch (err) {
       const unauthorized =
         err instanceof AccountError && err.code === ACCOUNT_ERROR_CODES.UNAUTHORIZED
-      if (!unauthorized) throw err
+      if (!unauthorized) {
+        // 连不上服务器 → 记为离线（游戏层据此切成只读）
+        if (err instanceof AccountError && err.code === ACCOUNT_ERROR_CODES.NETWORK) {
+          offline.value = true
+        }
+        throw err
+      }
       await refreshSession()
       const fresh = accessToken.value
       if (!fresh) throw err
@@ -202,19 +231,25 @@ export const useAccountStore = defineStore('account', () => {
     status.value = 'authenticated'
   }
 
-  /** 拉取云存档；服务端还没有存档时返回 null */
+  /** 拉取云存档（服务端权威版本）；服务端还没有存档时返回 null */
   async function pullCloudSave(): Promise<CloudSave | null> {
     return authorized((token) => accountClient.pullSave(token))
   }
 
-  /** 推送云存档；服务端版本更新时返回冲突结果 */
-  async function pushCloudSave(payload: string, savedAt: number): Promise<PushSaveResult> {
-    return authorized((token) => accountClient.pushSave(token, payload, savedAt))
+  /**
+   * 发送动作意图（服务端权威）。
+   *
+   * 客户端**不再自己算结果**，只发「我要做什么」；
+   * 服务端按同一份 core 规则算完落库，再把结果与新存档回传。
+   */
+  async function sendAction(actionId: string, action: GameAction): Promise<ActionResponse> {
+    return authorized((token) => accountClient.sendAction(token, actionId, action))
   }
 
   return {
     user,
     status,
+    offline,
     error,
     busy,
     accessToken,
@@ -227,7 +262,7 @@ export const useAccountStore = defineStore('account', () => {
     deleteAccount,
     refreshSession,
     pullCloudSave,
-    pushCloudSave,
+    sendAction,
   }
 })
 

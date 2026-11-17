@@ -1,9 +1,18 @@
 /**
- * 主 Pinia Store（表现层唯一数据源）。
+ * 主 Pinia Store（**服务端存档镜像** + 意图发送器）。
+ *
+ * ── 服务端权威（铁律 #28 / #29）────────────────────────────────────────
+ * 客户端**不再自己算结果**，只做两件事：
+ *   ① 发意图：把界面操作翻译成动作（`GameAction`）发给服务端；
+ *   ② 渲染：把服务端回传的存档当成**只读镜像**展示。
+ *
+ * 存档的唯一权威在服务端（`POST /api/action` 落库）。
+ * localStorage 里的存档降级为**只读缓存**：首屏加速 + 断网时能看进度，
+ * 但它**不是**权威，也不再被本进程当作写入目标。
  *
  * 铁律：
  *   - 表现层**不得**直接访问 localStorage，一律经 src/platform/storage.ts
- *   - 所有规则计算走 core/ 的纯逻辑层，本 store 只做「存档 ↔ 运行时对象」的装配
+ *   - 所有规则计算走 core/ 的纯逻辑层（core 在**服务端**执行，与客户端同一份）
  *   - 时间经 core/time.ts 的 Clock 注入，不直接读 Date.now()
  *   - 后端接口一律经 src/platform/account.ts（表现层不直连 API）
  */
@@ -20,12 +29,11 @@ import type {
   ArenaMatch,
 } from '../../core/model/types.ts'
 import { createNewSave, normalizeSave } from '../../core/save/schema.ts'
-import { hasExternalUpdate, nextStamp, pickNewer } from '../../core/save/conflict.ts'
 import { deserialize, serialize } from '../../core/save/serialize.ts'
 import { storage } from '../../platform/storage.ts'
-import { randomSeed } from '../../platform/random.ts'
+import { newActionId } from '../../platform/random.ts'
 import { systemClock } from '../../core/time.ts'
-import { Rng } from '../../core/rng.ts'
+import { hashSeed } from '../../core/rng.ts'
 import { HEROES, HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { STAGES } from '../../core/config/stages.ts'
 import { getTeamPower, computeBondState, isTeamEmpty } from '../../core/systems/team.ts'
@@ -49,22 +57,22 @@ import { computeEffectiveRates } from '../../core/systems/gachaRates.ts'
 import { previewRebirth, performRebirth } from '../../core/systems/rebirth.ts'
 import { arenaSnapshotHash, resolveArenaMatch, arenaContext, resolveArenaRewards, type ArenaReward } from '../../core/systems/arena.ts'
 import { DAILY, LEVEL, REDEEM_CODES } from '../../core/config/economy.ts'
-import { ACCOUNT, ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../core/config/account.ts'
+import { ACCOUNT, ACCOUNT_STORAGE_KEYS, ACCOUNT_ERROR_CODES, accountSlotKey } from '../../core/config/account.ts'
+import { GAME_ERROR_MESSAGES } from '../../core/config/game-errors.ts'
 import { dayIndex } from '../../core/time.ts'
 import { useAccountStore } from './account.ts'
+import { describeAccountError } from './account.ts'
+import { AccountError } from '../../platform/account.ts'
 import { formatNumber } from '../utils/format.ts'
 import '../../core/config/relics.ts'
 import '../../core/config/enemies.ts'
 import {
-  applyAction,
   computeRelicAdvice,
-  syncRngState,
-  type ActionContext,
-  type ActionOutcome,
   type ActionResultMap,
   type GameAction,
   type GameActionType,
 } from '../../core/systems/actions.ts'
+import type { ActionResponse, SaveSnapshot } from '../../core/systems/action-protocol.ts'
 import {
   buildArenaSnapshot,
   buildEquippedMap,
@@ -83,55 +91,26 @@ export const useGameStore = defineStore('game', () => {
    * 不是为了冻结时间；需要伪造时间的测试用 core 层的 `ManualClock`。
    */
   const clock = systemClock
-  const save = ref<SaveData>(createNewSave(clock.now(), randomSeed()))
 
   /**
-   * 全局随机数发生器。
+   * 服务端存档的**本地镜像**。
    *
-   * ⚠ **种子不得写死常量**（历史教训，铁律 #24）：
-   * 曾经写成 `new Rng(0x5eed)`，且计数器只在内存里 →
-   * ① 所有玩家抽到的英灵序列**完全相同**；
-   * ② 刷新页面后计数器归零，序列从头复现 → 玩家可以无限「刷新重抽」。
-   *
-   * 现在种子与计数器都随存档持久化（`save.rng`），载入时据此复原，
-   * 序列只前进不复现；新存档的种子来自平台随机源（`platform/random.ts`）。
+   * ⚠ 它由服务端的响应覆盖，客户端**不得**直接改它——
+   *   改了也会在下一次响应时丢失（那正是「服务端权威」的意义）。
+   *   要改存档，一律走 `runAction`。
    */
-  let rng = new Rng(0)
+  const save = ref<SaveData>(createNewSave(clock.now()))
 
   /**
-   * Action context.
+   * 离线模式：服务端不可达。
    *
-   * Time and random source are both injected; core does not read the clock,
-   * nor does it use Math.random().
+   * 此时只能**看**（展示本地缓存里的存档），不能操作——
+   * 操作必须由服务端执行，客户端自己算就是「客户端权威」了。
    */
-  function actionCtx(): ActionContext {
-    return { now: clock.now(), rng, randomSeed }
-  }
+  const offline = ref(false)
 
-  /**
-   * Run one action and surface the outcome.
-   *
-   * The action layer lives in core (iron rule #29): validation and mutation
-   * both happen there; the presentation layer only echoes the result.
-   *
-   * @param critical critical = a charge / irreversible action. This kind of
-   *                 action pushes to the cloud immediately; the rest go through
-   *                 debounce, so idle settlement and similar high-frequency
-   *                 writes do not flood the endpoint.
-   */
-  async function runAction<T extends GameActionType>(
-    action: Extract<GameAction, { type: T }>,
-    critical = false,
-  ): Promise<ActionResultMap[T] | null> {
-    const outcome: ActionOutcome<ActionResultMap[T]> = applyAction(save.value, action, actionCtx())
-    if (!outcome.ok) {
-      if (!outcome.silent) notify(outcome.message, 'warn')
-      return null
-    }
-    if (!(await persist(critical))) return null
-    if (outcome.message) notify(outcome.message, outcome.messageKind ?? 'ok')
-    return outcome.result
-  }
+  /** 正在发动作（UI 可据此禁用按钮） */
+  const busy = ref(false)
 
   /** 最近一次战斗的完整回放（供 Canvas 渲染器播放） */
   const lastBattle = shallowRef<BattleResult | null>(null)
@@ -165,44 +144,49 @@ export const useGameStore = defineStore('game', () => {
     toastTimer = setTimeout(() => (toast.value = null), 2200)
   }
 
-  // ─────────────────────────── 持久化 ───────────────────────────
+  // ─────────────────────────── 动作队列 ───────────────────────────
 
   /**
-   * 从存档恢复随机数状态。
+   * 动作请求队列（串行）。
    *
-   * 旧档（无 `rng` 字段）种子为 0 → 这里补一个**平台随机**种子，
-   * 避免所有旧档玩家共用同一条抽卡序列（铁律 #24）。
-   * 随后按计数器重放，复原到上次退出时的位置——刷新页面不会复现抽卡结果。
-   *
-   * @returns 是否补了种子（旧档首次载入 = true，需要把新种子推上云端，
-   *          否则另一台设备会另生成一条序列）
+   * 服务端本来就按账号串行执行，但**响应**回到客户端的顺序未必与请求顺序
+   * 一致。若乱序应用响应，本地镜像会「回退」到旧版本（用户会看到
+   * 「刚抽到的英灵又没了」）。这里在客户端也串一次，保证镜像单调前进。
    */
-  function restoreRng(): boolean {
-    const state = save.value.rng
-    const assigned = !state.seed
-    if (assigned) {
-      state.seed = randomSeed()
-      state.counter = 0
+  let actionQueue: Promise<unknown> = Promise.resolve()
+
+  function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const result = actionQueue.then(fn, fn)
+    actionQueue = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
+  // ─────────────────────────── 持久化（只读缓存） ───────────────────────────
+
+  /**
+   * 写本地缓存。
+   *
+   * ⚠ 服务端权威后，这里**不再**是「存档写入入口」，只是把服务端返回的
+   *   存档顺手落到 localStorage：首屏能秒开、断网时还能看进度。
+   *   它**不是**权威，也不会被当成写入目标（铁律 #28）。
+   */
+  async function persist(_critical = false): Promise<boolean> {
+    try {
+      await storage.save(slot.value, save.value)
+      return true
+    } catch {
+      notify('本地缓存保存失败，请检查浏览器存储空间', 'warn')
+      return false
     }
-    rng = Rng.fromSnapshot(state.seed, state.counter)
-    return assigned
-  }
-
-  /** 把随机数计数器写回存档（持久化时调用，保证序列只前进不复现） */
-  function persistRngState(): void {
-    save.value.rng.counter = rng.snapshot().counter
   }
 
   /**
-   * 本进程最后一次「读到 / 写入」存档时看到的时间戳。
-   * 用于识别「另一个标签页 / 上下文在我们之后改过存档」。
-   */
-  let knownStamp = 0
-
-  /**
-   * 当前使用的本地存档槽位。
+   * 当前使用的本地缓存槽位。
    *
-   * 存档归属由**账号**决定：每账号一个槽位（`sgw.save.<账号 id>`），
+   * 缓存归属由**账号**决定：每账号一个槽位（`sgw.save.<账号 id>`），
    * 换账号即换槽位，不会串号。未登录时用存量单槽位 `main`。
    */
   const slot = ref<string>(ACCOUNT_STORAGE_KEYS.LEGACY_SAVE_SLOT)
@@ -214,119 +198,108 @@ export const useGameStore = defineStore('game', () => {
       : accountSlotKey(accountId)
   }
 
-  /**
-   * 写入存档。
-   *
-   * 并发保护（先读后写 + 外部优先）：
-   * 存档只有一个槽位，可能同时存在多个写入方（玩家开了两个标签页、自动化脚本
-   * 访问了同一 origin）。后写入的一方手里可能握着一份**过期**的存档，直接覆盖
-   * 会把另一方的进度整份抹掉且毫无提示（历史教训）。
-   *
-   * 因此写入前先看存储里的版本：若存储里的版本比本进程已知的更新，说明别人在
-   * 我们之后改过存档——此时**不覆盖**，而是采纳对方版本并提示玩家。
-   * 本次改动随之作废（整份存档是原子的，不会出现「扣了费却没出货」的中间态）。
-   *
-   * @param critical 是否为「扣费 / 不可逆」动作。这类动作立即推云端，
-   *                 其余走防抖，避免挂机结算这类高频写入打爆接口。
-   * @returns true = 已写入；false = 发生冲突，本次改动被撤销并已同步外部版本
-   */
-  async function persist(critical = false): Promise<boolean> {
-    try {
-      const stamp = nextStamp(clock.now(), knownStamp)
-      const stored = await storage.load(slot.value)
-      if (hasExternalUpdate(stored, knownStamp)) {
-        // 外部更新 → 采纳外部版本，放弃本次写入
-        save.value = normalizeSave(stored)
-        knownStamp = stored?.savedAt ?? 0
-        notify('进度已在其他页面更新，已同步为最新版本', 'warn')
-        return false
-      }
-      save.value.savedAt = stamp
-      // 随机数计数器随存档一起落盘：抽卡序列因此不会在刷新后从头复现
-      persistRngState()
-      await storage.save(slot.value, save.value)
-      knownStamp = Math.max(knownStamp, stamp)
-      pushDirty = true
-      if (critical) await pushNow()
-      else schedulePush()
-      return true
-    } catch {
-      notify('存档保存失败，请检查浏览器存储空间', 'warn')
-      return false
-    }
+  /** 把服务端返回的存档覆盖到本地镜像，并顺手写缓存 */
+  async function applyServerSave(snapshot: SaveSnapshot | undefined): Promise<void> {
+    if (!snapshot) return
+    const next = normalizeSave(deserialize(snapshot.payload))
+    next.savedAt = snapshot.savedAt
+    save.value = next
+    // 回放倍速跟随服务端设置（设置本身也是服务端权威的）
+    battleSpeed.value = next.settings.speed ?? 1
+    // 缓存同步写完再返回：界面与自动化脚本读缓存时拿到的就是最新版本
+    await persist()
   }
 
-  // ─────────────────────────── 云存档同步 ───────────────────────────
-
-  /** 云端推送防抖定时器 */
-  let pushTimer: ReturnType<typeof setTimeout> | null = null
-  /** 本地存档是否有还没推上云端的改动 */
-  let pushDirty = false
-
-  /** 非关键写入合并上传 */
-  function schedulePush(): void {
-    if (pushTimer) clearTimeout(pushTimer)
-    pushTimer = setTimeout(() => {
-      pushTimer = null
-      void pushNow()
-    }, ACCOUNT.PUSH_DEBOUNCE_MS)
-  }
+  // ─────────────────────────── 动作 ───────────────────────────
 
   /**
-   * 立即把当前存档推上云端。
+   * 发一个动作给服务端，并同步本地镜像。
    *
-   * 冲突口径与服务端一致：服务端版本更新时返回 409，
-   * 此时**采纳服务端版本**并提示玩家（不做字段级合并）。
+   * 契约（铁律 #29）：
+   * - 动作的**校验与执行**都在服务端（core 纯函数，同一份）；
+   * - 客户端只负责发意图、翻译错误码、渲染结果；
+   * - 业务失败 → 返回 null 并提示（服务端没改存档，镜像不变）；
+   * - 网络不可达 → 进入离线模式（只能看，不能操作）。
    */
-  async function pushNow(): Promise<boolean> {
+  async function runAction<T extends GameActionType>(
+    action: Extract<GameAction, { type: T }>,
+    critical = false,
+  ): Promise<ActionResultMap[T] | null> {
     const account = useAccountStore()
-    if (!account.isAuthenticated) return false
+    if (!account.isAuthenticated) {
+      notify('请先登录', 'warn')
+      return null
+    }
+    if (offline.value || account.offline) {
+      offline.value = true
+      notify('当前处于离线模式，只能查看进度', 'warn')
+      return null
+    }
+
+    const actionId = newActionId()
+    busy.value = true
     try {
-      const result = await account.pushCloudSave(serialize(save.value), save.value.savedAt ?? 0)
-      if (result.ok) {
-        pushDirty = false
-        return true
-      }
-      // 服务端版本更新 → 采纳服务端版本，本地也跟着换成同一份
-      const serverSave = normalizeSave(deserialize(result.server.payload))
-      serverSave.savedAt = result.server.savedAt
-      save.value = serverSave
-      knownStamp = result.server.savedAt
-      await storage.save(slot.value, save.value)
-      notify('进度已在其他设备更新，已同步为最新版本', 'warn')
-      return false
-    } catch {
-      notify('云端同步失败，进度已保存在本机', 'warn')
-      return false
+      return await enqueue(async () => {
+        let response: ActionResponse
+        try {
+          response = await account.sendAction(actionId, action)
+        } catch (err) {
+          if (isNetworkFailure(err)) {
+            offline.value = true
+            notify('无法连接服务器，已切换到离线模式', 'warn')
+          } else {
+            notify(describeAccountError(err), 'warn')
+          }
+          return null
+        }
+
+        // 服务端回传的存档 = 权威版本（覆盖本地镜像）
+        await applyServerSave(response.save)
+        if (response.offline) offlineReport.value = response.offline
+
+        if (!response.ok) {
+          if (!response.silent) {
+            notify(response.message || messageOf(response.code), 'warn')
+          }
+          return null
+        }
+        if (response.message) notify(response.message, response.messageKind ?? 'ok')
+        return response.result as ActionResultMap[T]
+      })
+    } finally {
+      busy.value = false
     }
   }
 
-  /** 把待推送的存档立刻推上云端（登出 / 切号 / 页面隐藏时调用） */
-  async function flushPush(): Promise<void> {
-    if (pushTimer) {
-      clearTimeout(pushTimer)
-      pushTimer = null
-    }
-    if (!pushDirty) return
-    await pushNow()
+  /** 错误码 → 兜底文案 */
+  function messageOf(code: string | undefined): string {
+    if (!code) return '操作失败'
+    return GAME_ERROR_MESSAGES[code as keyof typeof GAME_ERROR_MESSAGES] ?? '操作失败'
   }
+
+  /** 是不是「连不上服务器」 */
+  function isNetworkFailure(err: unknown): boolean {
+    return err instanceof AccountError && err.code === ACCOUNT_ERROR_CODES.NETWORK
+  }
+
+  // ─────────────────────────── 载入 ───────────────────────────
 
   /**
-   * 载入存档：本地 + 云端合并。
+   * 载入存档。
    *
-   * 合并口径（同 core/save/conflict.ts 的 `pickNewer`）：**时间戳大者胜**。
-   * - 云端更新 → 采纳云端（跨设备继续玩）
-   * - 本地更新 → 保留本地，随后推上云端
-   * - 两边都没有 → 新建存档
-   *
-   * 存量单槽位（`sgw.save.main`，首发无账号时的旧档）只在**第一个**账号登录时
-   * 迁入该账号的槽位，用 `sgw.legacyMigrated` 标记防止迁给第二个账号。
+   * 口径（服务端权威）：
+   * - 服务端**有**存档 → 采纳服务端版本（本地缓存只用于首屏加速）；
+   * - 服务端**没有**存档 → 先把存量旧档（`sgw.save.main`）导入过去，
+   *   没有旧档就让服务端建一份新档；
+   * - 服务端**连不上** → 离线模式：展示本地缓存，不能操作。
    */
   async function load() {
     const account = useAccountStore()
     const accountId = account.user?.id ?? null
     slot.value = slotForAccount(accountId)
+    offline.value = false
 
+    // 本地缓存（首屏加速 / 离线兜底）
     let local: SaveData | null = null
     try {
       local = await storage.load(slot.value)
@@ -334,72 +307,72 @@ export const useGameStore = defineStore('game', () => {
       local = null
     }
 
-    let cloud: SaveData | null = null
+    // 会话层已经判定离线（连不上服务器）→ 只读模式，直接用本地缓存
+    if (account.offline) {
+      offline.value = true
+      save.value = normalizeSave(local)
+      battleSpeed.value = save.value.settings.speed ?? 1
+      loaded.value = true
+      notify('当前处于离线模式，只能查看进度', 'warn')
+      return
+    }
+
+    // 服务端权威存档
+    let cloud = null as Awaited<ReturnType<typeof account.pullCloudSave>>
     if (accountId != null) {
       try {
-        const raw = await account.pullCloudSave()
-        cloud = raw ? normalizeSave(deserialize(raw.payload)) : null
-      } catch {
-        // 云端不可用（离线 / 后端没起）→ 退回纯本地存档，不阻断游戏
+        cloud = await account.pullCloudSave()
+      } catch (err) {
+        if (isNetworkFailure(err)) {
+          offline.value = true
+        } else {
+          notify(describeAccountError(err), 'warn')
+        }
         cloud = null
       }
     }
 
-    const winner = pickNewer(local, cloud)
-    let base: SaveData
-    let stamp: number
-
-    if (winner === 'cloud') {
-      base = cloud as SaveData
-      stamp = base.savedAt ?? 0
-    } else if (winner === 'local') {
-      base = local as SaveData
-      stamp = base.savedAt ?? 0
-    } else {
-      // 两边都没有存档 → 尝试把存量单槽位的旧档迁进来
-      const migrated = await migrateLegacySave(accountId)
-      if (migrated) {
-        base = migrated
-        stamp = migrated.savedAt ?? 0
-      } else {
-        base = createNewSave(clock.now())
-        // 全新存档：盖一个真实的时间戳（后续所有版本比较都以它为基准）
-        stamp = nextStamp(clock.now(), knownStamp)
-      }
+    if (cloud) {
+      // 服务端有存档 → 以服务端为准
+      const server = normalizeSave(deserialize(cloud.payload))
+      server.savedAt = cloud.savedAt
+      save.value = server
+      battleSpeed.value = server.settings.speed ?? 1
+      if (cloud.offline) offlineReport.value = cloud.offline
+      await persist()
+      loaded.value = true
+      return
     }
 
-    save.value = normalizeSave(base)
-    save.value.savedAt = stamp
-    knownStamp = stamp
+    if (offline.value) {
+      // 离线且服务端还没有存档 → 用本地缓存兜底（只读）
+      save.value = normalizeSave(local)
+      loaded.value = true
+      notify('当前处于离线模式，只能查看进度', 'warn')
+      return
+    }
 
-    // 随机数状态随存档恢复：刷新页面后抽卡序列继续前进，不复现上次的结果
-    const assignedSeed = restoreRng()
-
-    // 落盘本地槽位（与云端保持同一份内容）
-    try {
-      await storage.save(slot.value, save.value)
-    } catch {
-      notify('存档保存失败，请检查浏览器存储空间', 'warn')
+    // 服务端还没有存档：先把存量旧档迁过去，没有就让服务端建一份
+    const legacy = await takeLegacySave(accountId)
+    if (legacy) {
+      const imported = await runAction({ type: 'save.import', payload: legacy, legacy: true })
+      if (!imported) {
+        // 导入失败（存档损坏等）→ 退回建新档
+        await runAction({ type: 'save.create' })
+      }
+    } else {
+      await runAction({ type: 'save.create' })
     }
     loaded.value = true
-
-    // 离线结算：离开超过 1 分钟才结算
-    // （放在 load 里而不是 App 的 onMounted —— 登录后进入游戏同样要结算）
-    const elapsed = (clock.now() - save.value.lastTickAt) / 1000
-    if (elapsed > 60) void claimOffline()
-
-    // 本地比云端新（或云端还没有存档）→ 推上去
-    // 旧档首次补了随机种子 → 也要推上去（否则另一台设备会另生成一条序列）
-    if (winner !== 'cloud' || assignedSeed) void pushNow()
   }
 
   /**
-   * 存量单槽位迁移：把旧档 `sgw.save.main` 迁入当前账号的槽位。
+   * 取走存量单槽位旧档（`sgw.save.main`）。
    *
-   * 只迁一次——`sgw.legacyMigrated` 标记防止把旧档迁给第二个账号。
-   * 返回 null 表示没有可迁移的旧档。
+   * 只迁一次——`sgw.legacyMigrated` 标记防止把旧档迁给第二个账号；
+   * 服务端也会记一份账号标记（`user_flags`），两边都拦一道。
    */
-  async function migrateLegacySave(accountId: number | null): Promise<SaveData | null> {
+  async function takeLegacySave(accountId: number | null): Promise<string | null> {
     if (accountId == null) return null
     const legacyKey = ACCOUNT_STORAGE_KEYS.LEGACY_MIGRATED
     try {
@@ -407,7 +380,7 @@ export const useGameStore = defineStore('game', () => {
       const legacy = await storage.load(ACCOUNT_STORAGE_KEYS.LEGACY_SAVE_SLOT)
       if (!legacy) return null
       await storage.setFlag(legacyKey, true)
-      return legacy
+      return await storage.export(legacy)
     } catch {
       return null
     }
@@ -422,33 +395,18 @@ export const useGameStore = defineStore('game', () => {
   function invalidate() {
     loaded.value = false
     guideSeen.value = false
-    knownStamp = 0
+    offline.value = false
     // 换号 → 换一条随机序列：上一个账号的抽卡位置不能带到新账号
-    save.value = createNewSave(clock.now(), randomSeed())
-    restoreRng()
+    save.value = createNewSave(clock.now())
     // 上一个账号的离线结算报告不能带到新账号上
     offlineReport.value = null
   }
 
   /**
-   * 重置进度：玩家主动操作，**允许强行写入**（与导入存档同理），
-   * 不受「其它页面改过存档」的冲突保护限制——玩家就是要清空。
+   * 重置进度：玩家主动操作，服务端直接换一份新存档。
    */
   async function reset() {
-    // 重置是「玩家主动覆盖」，允许强行写入（绕过冲突保护）
-    const outcome = applyAction(save.value, { type: 'save.reset' }, actionCtx())
-    if (!outcome.ok) {
-      if (!outcome.silent) notify(outcome.message, 'warn')
-      return
-    }
-    // 重置 → 换一条全新的随机序列（否则旧档的抽卡位置会被继承）
-    restoreRng()
-    knownStamp = nextStamp(clock.now(), knownStamp)
-    save.value.savedAt = knownStamp
-    await storage.save(slot.value, save.value)
-    // 重置是不可逆动作：立刻推上云端，避免云端还留着旧进度
-    await pushNow()
-    notify('进度已重置', 'warn')
+    await runAction({ type: 'save.reset' }, true)
   }
 
   // ─────────────────────────── 运行时装配 ───────────────────────────
@@ -485,13 +443,13 @@ export const useGameStore = defineStore('game', () => {
 
   // ─────────────────────────── 挂机 ───────────────────────────
 
-  /** 推进挂机：跑 battles 场，结算掉落 */
+  /** 推进挂机：跑 battles 场，结算掉落（服务端执行） */
   async function tickIdle(battles = 1) {
     if (teamEmpty.value) return null
     return runAction({ type: 'idle.tick', battles })
   }
 
-  /** 离线结算 */
+  /** 离线结算（服务端在入口自动补算，这里取回明细） */
   async function claimOffline() {
     if (teamEmpty.value) return null
     const res = await runAction({ type: 'idle.claimOffline' })
@@ -499,11 +457,15 @@ export const useGameStore = defineStore('game', () => {
     return res
   }
 
+  /** 设定挂机目标关卡 */
+  async function setIdleTarget(stageId: number) {
+    return runAction({ type: 'idle.setTarget', stageId })
+  }
+
   // ─────────────────────────── 英灵 ───────────────────────────
 
   /** 抽卡 */
   async function pull(poolId: string, count: 1 | 10) {
-    // 扣费动作 → critical（立即推云端）；冲突时整份存档回滚，不会「扣了费却没出货」
     return runAction({ type: 'gacha.pull', poolId, count }, true)
   }
 
@@ -622,6 +584,23 @@ export const useGameStore = defineStore('game', () => {
     return runAction({ type: 'relic.autoEquip', heroId })
   }
 
+  // ─────────────────────────── 播放设置 ───────────────────────────
+
+  /**
+   * 更新播放设置（倍速 / 音效 / 跳过演出）。
+   *
+   * 设置存在存档里 → 服务端权威后必须由服务端落库，
+   * 否则下一次响应会把本地改动覆盖掉。
+   */
+  async function updateSettings(patch: {
+    speed?: number
+    sfx?: boolean
+    skipAnim?: boolean
+  }): Promise<void> {
+    await runAction({ type: 'settings.update', ...patch })
+    if (patch.speed !== undefined) battleSpeed.value = patch.speed
+  }
+
   // ─────────────────────────── 圣杯重启 ───────────────────────────
 
   const rebirthPreview = computed(() => previewRebirth(save.value))
@@ -657,14 +636,16 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
-   * 战斗种子：取自**持久化**的随机数序列。
+   * 战斗种子：**观战预览**用的派生种子。
    *
-   * 表现层不得直接用 `Math.random()`（铁律 #6 / #24）：
-   * ① 平台随机要走 `platform/random.ts`；
-   * ② 战斗种子走同一条持久化序列，刷新页面不会重复同一场战斗。
+   * ⚠ 服务端权威后客户端不再持有随机序列（铁律 #24 / #28），
+   *   这里用 `hashSeed(seed, 'preview', n)` 做**域分离**派生：
+   *   与服务端的抽卡序列互不干扰，也不会让预览消耗服务端的随机数。
    */
+  let previewCounter = 0
   function nextBattleSeed(): number {
-    return rng.nextSeed()
+    previewCounter += 1
+    return hashSeed(`${save.value.rng.seed}:preview:${previewCounter}`)
   }
 
   /**
@@ -696,33 +677,21 @@ export const useGameStore = defineStore('game', () => {
 
   /** 导入存档（校验失败时不覆盖当前进度） */
   async function importSaveText(text: string): Promise<boolean> {
-    // 导入是「玩家主动覆盖」，允许强行写入：先把已知戳提到最高，绕过冲突保护
-    const outcome = applyAction(save.value, { type: 'save.import', payload: text }, actionCtx())
-    if (!outcome.ok) {
-      if (!outcome.silent) notify(outcome.message, 'warn')
-      return false
-    }
-    // 导入的存档自带随机数状态 → 沿用，保持「备份恢复后序列连续」
-    restoreRng()
-    knownStamp = nextStamp(clock.now(), knownStamp)
-    save.value.savedAt = knownStamp
-    await storage.save(slot.value, save.value)
-    // 导入覆盖是不可逆动作：立刻推上云端
-    await pushNow()
-    notify('存档已导入', 'ok')
-    return true
+    const res = await runAction({ type: 'save.import', payload: text }, true)
+    return res !== null
   }
 
   /** 标记新手引导已完成 */
   function markGuideDone() {
     guideStep.value = -1
-    save.value.stats.firstStartAt = save.value.stats.firstStartAt || clock.now()
     void persist()
   }
 
   return {
     // state
     save,
+    offline,
+    busy,
     lastBattle,
     offlineReport,
     toast,
@@ -752,12 +721,11 @@ export const useGameStore = defineStore('game', () => {
     load,
     invalidate,
     persist,
-    pushNow,
-    flushPush,
     reset,
     notify,
     tickIdle,
     claimOffline,
+    setIdleTarget,
     pull,
     nextBattleSeed,
     feedExp,
@@ -774,6 +742,7 @@ export const useGameStore = defineStore('game', () => {
     unequip,
     relicAdvice,
     autoEquipRelics,
+    updateSettings,
     doRebirth,
     runArenaMatch,
     settleArena,

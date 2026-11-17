@@ -1,15 +1,19 @@
 /**
- * 英灵养成的两处回归（表现层 store + core 属性）。
+ * 英灵养成的两处回归（真实链路 store → 服务端 → core + core 属性）。
  *
  * 1. **技能升级扣的是术式结晶**（skillStones），不是圣杯结晶（crystals）。
  *    历史 bug：实现扣了 `player.crystals` → 玩家术式结晶堆到 2 万
  *    也升不动技能，还白扣抽卡资源。
  * 2. **升级 / 升星确实带来属性提升**（详情页的属性面板要展示这个）。
+ *
+ * ⚠ 服务端权威后，养成动作由**服务端**执行，这里跑的是真实链路。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { startServerHarness, type ServerHarness } from './helpers/server-harness.ts'
+import { registerAndLoad, seedSave } from './helpers/store-harness.ts'
 
-/** 模拟存储：key = slot，value = 序列化后的存档 */
+/** 模拟存储：key = slot，value = 序列化后的存档（只读缓存） */
 const mem = vi.hoisted(() => new Map<string, string>())
 
 vi.mock('../../src/platform/storage.ts', () => ({
@@ -30,6 +34,12 @@ vi.mock('../../src/platform/storage.ts', () => ({
     async clear(slot: string) {
       mem.delete(slot)
     },
+    async getFlag() {
+      return false
+    },
+    async setFlag() {
+      /* noop */
+    },
   },
 }))
 
@@ -41,24 +51,44 @@ const { getHeroPassiveMods } = await import('../../src/core/systems/growth.ts')
 const { HERO_INDEX } = await import('../../src/core/config/heroes/index.ts')
 const { SKILL } = await import('../../src/core/config/economy.ts')
 
-const SLOT = 'main'
 const HERO_ID = 'xiangyu'
 
-describe('技能升级的资源口径', () => {
-  beforeEach(() => {
-    mem.clear()
-    setActivePinia(createPinia())
+let harness: ServerHarness
+
+beforeEach(async () => {
+  mem.clear()
+  setActivePinia(createPinia())
+  harness = startServerHarness()
+})
+
+afterEach(async () => {
+  await harness.close()
+})
+
+/** 备好一个英灵（默认 1 级）+ 指定资源 */
+async function seedHero(opts: {
+  level?: number
+  exp?: number
+  emblems?: number
+  skillStones?: number
+  silver?: number
+  crystals?: number
+} = {}) {
+  await registerAndLoad('growth_user')
+  await seedSave((save) => {
+    save.heroes[HERO_ID] = { ...createHeroState(HERO_ID, 1_000), level: opts.level ?? 1 }
+    if (opts.exp !== undefined) save.player.exp = opts.exp
+    if (opts.emblems !== undefined) save.player.emblems = opts.emblems
+    if (opts.skillStones !== undefined) save.player.skillStones = opts.skillStones
+    if (opts.silver !== undefined) save.player.silver = opts.silver
+    if (opts.crystals !== undefined) save.player.crystals = opts.crystals
   })
+}
 
+describe('技能升级的资源口径', () => {
   it('扣术式结晶，不扣圣杯结晶', async () => {
+    await seedHero({ crystals: 0, skillStones: 21_000, silver: 1_000_000 })
     const store = useGameStore()
-    await store.load()
-
-    // 给一个英灵，并把「圣杯结晶清零、术式结晶充足」——正是玩家报的场景
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.player.crystals = 0
-    store.save.player.skillStones = 21_000
-    store.save.player.silver = 1_000_000
 
     const before = store.save.heroes[HERO_ID].skillLevels[0]
     await store.upgradeSkill(HERO_ID, 0)
@@ -72,12 +102,8 @@ describe('技能升级的资源口径', () => {
   })
 
   it('术式结晶不足时拒绝，且不扣任何资源', async () => {
+    await seedHero({ crystals: 999, skillStones: 0, silver: 1_000_000 })
     const store = useGameStore()
-    await store.load()
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.player.crystals = 999
-    store.save.player.skillStones = 0
-    store.save.player.silver = 1_000_000
 
     const before = store.save.heroes[HERO_ID].skillLevels[0]
     await store.upgradeSkill(HERO_ID, 0)
@@ -88,11 +114,8 @@ describe('技能升级的资源口径', () => {
   })
 
   it('银两不足时拒绝', async () => {
+    await seedHero({ skillStones: 21_000, silver: 0 })
     const store = useGameStore()
-    await store.load()
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.player.skillStones = 21_000
-    store.save.player.silver = 0
 
     const before = store.save.heroes[HERO_ID].skillLevels[0]
     await store.upgradeSkill(HERO_ID, 0)
@@ -117,16 +140,9 @@ describe('技能升级的资源口径', () => {
 })
 
 describe('喂经验扣经验池 + 境界突破', () => {
-  beforeEach(() => {
-    mem.clear()
-    setActivePinia(createPinia())
-  })
-
   it('喂经验从经验池扣款，并真的提升等级', async () => {
+    await seedHero({ exp: 10_000 })
     const store = useGameStore()
-    await store.load()
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.player.exp = 10_000
 
     const before = store.save.heroes[HERO_ID].level
     await store.feedExp(HERO_ID, 1_000)
@@ -137,10 +153,8 @@ describe('喂经验扣经验池 + 境界突破', () => {
   })
 
   it('经验池不足时拒绝，且不扣任何资源、不升级', async () => {
+    await seedHero({ exp: 500 })
     const store = useGameStore()
-    await store.load()
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.player.exp = 500
 
     const before = store.save.heroes[HERO_ID].level
     await store.feedExp(HERO_ID, 1_000)
@@ -150,11 +164,8 @@ describe('喂经验扣经验池 + 境界突破', () => {
   })
 
   it('卡在境界门槛时经验不丢（存在英灵身上，等突破后兑现）', async () => {
+    await seedHero({ level: 60, exp: 10_000 })
     const store = useGameStore()
-    await store.load()
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.heroes[HERO_ID].level = 60
-    store.save.player.exp = 10_000
 
     await store.feedExp(HERO_ID, 1_000)
 
@@ -164,11 +175,8 @@ describe('喂经验扣经验池 + 境界突破', () => {
   })
 
   it('境界突破消耗英灵印记，并跨入新境界', async () => {
+    await seedHero({ level: 60, emblems: 100 })
     const store = useGameStore()
-    await store.load()
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.heroes[HERO_ID].level = 60
-    store.save.player.emblems = 100
 
     const cost = realmBreakCost(60)!
     await store.breakRealm(HERO_ID)
@@ -178,11 +186,8 @@ describe('喂经验扣经验池 + 境界突破', () => {
   })
 
   it('印记不足时拒绝突破，且不扣印记', async () => {
+    await seedHero({ level: 60, emblems: 0 })
     const store = useGameStore()
-    await store.load()
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.heroes[HERO_ID].level = 60
-    store.save.player.emblems = 0
 
     await store.breakRealm(HERO_ID)
 
@@ -191,11 +196,8 @@ describe('喂经验扣经验池 + 境界突破', () => {
   })
 
   it('未到境界门槛时不能突破', async () => {
+    await seedHero({ level: 30, emblems: 999 })
     const store = useGameStore()
-    await store.load()
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.heroes[HERO_ID].level = 30
-    store.save.player.emblems = 999
 
     await store.breakRealm(HERO_ID)
 
@@ -204,13 +206,8 @@ describe('喂经验扣经验池 + 境界突破', () => {
   })
 
   it('突破后存着的经验立刻兑现成等级', async () => {
+    await seedHero({ level: 60, exp: 10_000, emblems: 100 })
     const store = useGameStore()
-    await store.load()
-    store.save.heroes[HERO_ID] = createHeroState(HERO_ID, 1_000)
-    store.save.heroes[HERO_ID].level = 60
-    store.save.player.exp = 10_000
-    store.save.player.emblems = 100
-
     await store.feedExp(HERO_ID, 1_000)
     expect(store.save.heroes[HERO_ID].level).toBe(60)
 

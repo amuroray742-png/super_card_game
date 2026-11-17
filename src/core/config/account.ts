@@ -117,6 +117,15 @@ export function accountSlotKey(accountId: number | string): string {
   return String(accountId)
 }
 
+/**
+ * 存量旧档已迁走的标记（**服务端**账号标记的键名）。
+ *
+ * 服务端权威后，`sgw.save.main` 这类存量单槽位旧档要迁到账号名下，
+ * 只迁一次——本地标记（`ACCOUNT_STORAGE_KEYS.LEGACY_MIGRATED`）与服务端
+ * 标记各拦一道，防止同一份旧档被迁给第二个账号。
+ */
+export const LEGACY_MIGRATED_FLAG = 'legacyMigrated'
+
 /** 用户名校验；返回中文错误文案，null 表示通过 */
 export function validateUsername(username: string): string | null {
   if (username.length < ACCOUNT.USERNAME_MIN) return `用户名至少 ${ACCOUNT.USERNAME_MIN} 位`

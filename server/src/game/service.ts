@@ -24,7 +24,7 @@ import { deserialize, serialize } from '../../../src/core/save/serialize.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
 import { Rng } from '../../../src/core/rng.ts'
 import { IDLE } from '../../../src/core/config/economy.ts'
-import { ACCOUNT } from '../../../src/core/config/account.ts'
+import { ACCOUNT, LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
 import { GAME_ERROR_CODES, GAME_ERROR_MESSAGES } from '../../../src/core/config/game-errors.ts'
 import {
   applyAction,
@@ -39,7 +39,7 @@ import { settleOffline, type OfflineSettlementResult } from '../../../src/core/s
 import type { ActionRequest, ActionResponse, SaveSnapshot } from '../../../src/core/systems/action-protocol.ts'
 import type { Db } from '../db.ts'
 import { UserLock } from './lock.ts'
-import { readActionLog, readSave, trimActionLogs, writeActionLog, writeSave } from './repo.ts'
+import { readActionLog, readSave, trimActionLogs, writeActionLog, writeFlag, writeSave } from './repo.ts'
 
 /** 服务端随机种子（密码学随机源；**不得**用常量种子——所有玩家会抽到同一串） */
 export function serverSeed(): number {
@@ -135,7 +135,9 @@ export class GameService {
     // ② 取存档
     const row = readSave(this.db, userId)
     const isCreate = request.action.type === 'save.create'
-    if (!row && !isCreate) {
+    const isImport = request.action.type === 'save.import'
+    // 建档 / 导入存档都允许「服务端还没有存档」；其余动作必须已有存档
+    if (!row && !isCreate && !isImport) {
       return {
         ok: false,
         actionId: request.actionId,
@@ -210,6 +212,10 @@ export class GameService {
       writeSave(this.db, userId, payload, save.savedAt, now)
       writeActionLog(this.db, userId, request.actionId, JSON.stringify(stored), now)
       trimActionLogs(this.db, userId, ACCOUNT.ACTION_LOG_LIMIT)
+      // 存量旧档迁移：记一笔账号标记（同一份旧档不会被迁给第二个账号）
+      if (isImport && request.action.type === 'save.import' && request.action.legacy) {
+        writeFlag(this.db, userId, LEGACY_MIGRATED_FLAG, 1)
+      }
       this.db.exec('COMMIT')
     } catch (err) {
       this.db.exec('ROLLBACK')

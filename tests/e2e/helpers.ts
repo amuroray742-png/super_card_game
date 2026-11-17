@@ -88,6 +88,29 @@ export async function seedApiBase(page: Page): Promise<void> {
   }, E2E_API_BASE)
 }
 
+/**
+ * 直接调后端登录一个账号，拿回会话。
+ *
+ * 与 `registerAccount` 的区别：登录会签发**新的** refresh token。
+ * 多设备用例需要两个独立会话（refresh token 是一次性轮换的，
+ * 两个设备共用一个会被第二个设备轮换掉，第一个随即失效）。
+ */
+export async function loginAccount(
+  username: string,
+  password: string = E2E_PASSWORD,
+): Promise<E2eSession> {
+  const res = await fetch(`${E2E_API_BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  if (res.status !== 200) {
+    throw new Error(`登录失败：${res.status} ${await res.text()}`)
+  }
+  const body = (await res.json()) as E2eSession
+  return { refreshToken: body.refreshToken, user: body.user }
+}
+
 /** 走界面注册 */
 export async function registerViaUi(
   page: Page,

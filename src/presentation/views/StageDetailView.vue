@@ -76,16 +76,13 @@ function onPreviewFinished() {
 
 /** 回放倍速：写回存档设置（与设置页同一口径） */
 function onSpeedChange(v: number) {
-  store.save.settings.speed = v
-  store.battleSpeed = v
-  store.persist()
+  void store.updateSettings({ speed: v })
 }
 
-function setIdleTarget() {
+async function setIdleTarget() {
   if (!stage.value) return
-  store.save.idle.currentStage = stage.value.id
-  store.persist()
-  store.notify(`挂机目标已设为 ${stage.value.name}`, 'ok')
+  const ok = await store.setIdleTarget(stage.value.id)
+  if (ok) store.notify(`挂机目标已设为 ${stage.value.name}`, 'ok')
 }
 
 function goStage(offset: number) {

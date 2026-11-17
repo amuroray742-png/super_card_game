@@ -161,12 +161,15 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
     await page.waitForLoadState('networkidle')
 
     await page.getByRole('button', { name: '推征 1 场' }).click()
-    await expect(page.locator('.toast')).toBeVisible({ timeout: 6000 })
+    // ⚠ 服务端权威后，推征要走一次服务端往返：
+    //   不能只看「提示出现了」（上一次的提示可能还没消失），
+    //   得等仓库里的遗物真的多出来。
+    await expect
+      .poll(async () => (await relicsOf(page)).length, { timeout: 10_000 })
+      .toBeGreaterThan(0)
     const afterFirst = (await relicsOf(page)).length
-    expect(afterFirst).toBeGreaterThan(0)
 
     await page.getByRole('button', { name: '推征 1 场' }).click()
-    await expect(page.locator('.toast')).toBeVisible({ timeout: 6000 })
     await expect
       .poll(async () => (await relicsOf(page)).length, { timeout: 10_000 })
       .toBeGreaterThan(afterFirst)

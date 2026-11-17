@@ -14,6 +14,9 @@ import {
   ACCOUNT_STORAGE_KEYS,
   type AccountErrorCode,
 } from '../core/config/account.ts'
+import type { GameAction } from '../core/systems/actions.ts'
+import type { ActionResponse } from '../core/systems/action-protocol.ts'
+import type { OfflineSettlementResult } from '../core/systems/idle.ts'
 
 /** 账号信息 */
 export interface AccountUser {
@@ -36,12 +39,9 @@ export interface CloudSave {
   payload: string
   /** 存档版本时间戳（越大越新） */
   savedAt: number
+  /** 本次载入触发的离线结算明细（没有则为 null） */
+  offline?: OfflineSettlementResult | null
 }
-
-/** 推送结果：写入成功，或服务端版本更新（冲突） */
-export type PushSaveResult =
-  | { ok: true; savedAt: number }
-  | { ok: false; conflict: true; server: CloudSave }
 
 /** 本地保存的会话（只有 refresh token 落盘，access token 只在内存里） */
 export interface StoredSession {
@@ -238,22 +238,27 @@ export class AccountClient {
     const { status, body } = await this.request<CloudSave>('GET', '/api/save', { token: accessToken })
     if (status === 404) return null
     if (status !== 200 || !body) this.fail(status, body)
-    return { payload: body.payload, savedAt: body.savedAt }
+    return { payload: body.payload, savedAt: body.savedAt, offline: body.offline ?? null }
   }
 
-  /** 推送云存档；服务端版本更新时返回冲突结果 */
-  async pushSave(accessToken: string, payload: string, savedAt: number): Promise<PushSaveResult> {
-    const { status, body } = await this.request<{
-      savedAt?: number
-      server?: CloudSave
-    }>('PUT', '/api/save', { token: accessToken, body: { payload, savedAt } })
-    if (status === 409) {
-      const server = (body as { server?: CloudSave } | null)?.server
-      if (!server) this.fail(status, body)
-      return { ok: false, conflict: true, server: { payload: server.payload, savedAt: server.savedAt } }
-    }
-    if (status !== 200) this.fail(status, body)
-    return { ok: true, savedAt: body?.savedAt ?? savedAt }
+  /**
+   * 发送动作意图（服务端权威：结果由服务端算）。
+   *
+   * ⚠ 业务失败（余额不足 / 目标不存在）也返回 **HTTP 200**，
+   *   响应体里 `ok: false` + `code`；协议级失败（未登录 / 限流 / 负载不合法）
+   *   才是 4xx，按 `AccountError` 抛出。
+   */
+  async sendAction(
+    accessToken: string,
+    actionId: string,
+    action: GameAction,
+  ): Promise<ActionResponse> {
+    const { status, body } = await this.request<ActionResponse>('POST', '/api/action', {
+      token: accessToken,
+      body: { actionId, action },
+    })
+    if (status !== 200 || !body) this.fail(status, body)
+    return body
   }
 
   /** 注销账号（服务端级联删除账号 / 会话 / 存档） */

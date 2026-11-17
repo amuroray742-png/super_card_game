@@ -7,10 +7,12 @@
  *
  * 现在种子与计数器随存档持久化，载入时据此复原，序列只前进不复现。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { Rng } from '../../src/core/rng.ts'
 import { createNewSave, normalizeSave, SAVE_VERSION } from '../../src/core/save/schema.ts'
+import { startServerHarness, type ServerHarness } from './helpers/server-harness.ts'
+import { registerAndLoad } from './helpers/store-harness.ts'
 
 /** 模拟存储：key = slot，value = 序列化后的存档 */
 const mem = vi.hoisted(() => new Map<string, string>())
@@ -44,21 +46,8 @@ vi.mock('../../src/platform/storage.ts', () => ({
 
 const { useGameStore } = await import('../../src/presentation/stores/game.ts')
 
-const SLOT = 'main'
-
-interface StoredSave {
-  rng?: { seed: number; counter: number }
-  gacha: { history: { heroId: string; rarity: string; isNew: boolean }[] }
-}
-
-function stored(): StoredSave {
-  return JSON.parse(mem.get(SLOT) ?? '{}') as StoredSave
-}
-
-/** 抽卡序列（英雄 id 顺序） */
-function heroes(save: StoredSave): string[] {
-  return save.gacha.history.map((h) => h.heroId)
-}
+/** 后端夹具（服务端持有随机序列） */
+let harness: ServerHarness
 
 describe('core：RNG 快照忠实复原', () => {
   it('snapshot 记的是初始种子 + 已消耗个数', () => {
@@ -135,26 +124,29 @@ describe('存档：随机数状态字段', () => {
   })
 })
 
-describe('抽卡随机序列（铁律 #24）', () => {
-  beforeEach(() => {
+describe('抽卡随机序列（铁律 #24 · 服务端持有）', () => {
+  beforeEach(async () => {
     mem.clear()
     setActivePinia(createPinia())
+    harness = startServerHarness()
+    await registerAndLoad('rng_user')
   })
 
-  it('载入后会补一个非零随机种子（不得写死常量）', async () => {
+  afterEach(async () => {
+    await harness.close()
+  })
+
+  it('服务端建档时给一个非零随机种子（不得写死常量）', () => {
     const store = useGameStore()
-    await store.load()
     expect(store.save.rng.seed).not.toBe(0)
-    expect(stored().rng?.seed).not.toBe(0)
   })
 
   it('两次十连抽到的序列不同（不再是固定脚本）', async () => {
     const store = useGameStore()
-    await store.load()
     await store.pull('standard', 10)
-    const first = heroes(stored()).slice(0, 9)
+    const first = store.save.gacha.history.slice(0, 9).map((h) => h.heroId)
     await store.pull('standard', 10)
-    const second = heroes(stored()).slice(10, 19)
+    const second = store.save.gacha.history.slice(10, 19).map((h) => h.heroId)
 
     expect(first).toHaveLength(9)
     expect(second).toHaveLength(9)
@@ -164,20 +156,18 @@ describe('抽卡随机序列（铁律 #24）', () => {
 
   it('刷新页面（重新载入同一份存档）后序列继续前进，不复现上一批', async () => {
     const store = useGameStore()
-    await store.load()
     await store.pull('standard', 10)
-    const first = heroes(stored()).slice(0, 9)
-    const counter = stored().rng?.counter ?? 0
+    const first = store.save.gacha.history.slice(0, 9).map((h) => h.heroId)
+    const counter = store.save.rng.counter
     expect(counter).toBeGreaterThan(0)
 
-    // 模拟刷新页面：新 store 实例 + 同一份存档
-    setActivePinia(createPinia())
-    const reloaded = useGameStore()
-    await reloaded.load()
-    expect(reloaded.save.rng.counter).toBe(counter)
+    // 模拟刷新页面：重新载入（服务端存档里的计数器继续往前）
+    store.invalidate()
+    await store.load()
+    expect(store.save.rng.counter).toBe(counter)
 
-    await reloaded.pull('standard', 10)
-    const second = heroes(stored()).slice(10, 19)
+    await store.pull('standard', 10)
+    const second = store.save.gacha.history.slice(10, 19).map((h) => h.heroId)
     expect(second).not.toEqual(first)
   })
 })
