@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../src/core/config/account.ts'
 
 /**
  * E2E 公共helper。
@@ -135,6 +136,46 @@ export async function loginViaUi(
   await page.getByPlaceholder('至少 8 位').fill(password)
   // 页面里有两个「登录」按钮（模式切换 + 提交），提交按钮在后面
   await page.getByRole('button', { name: '登录', exact: true }).last().click()
+}
+
+/**
+ * 读某个账号槽位里的本地缓存（服务端存档的**镜像**，只读缓存）。
+ *
+ * ⚠ **不能**用「`Object.keys(localStorage).find(k => k.startsWith('sgw.save.'))`」：
+ *   浏览器里还可能存在存量单槽位 `sgw.save.main`（旧档迁移通道），
+ *   而 localStorage 的键序**不保证是写入顺序**——读到哪个槽位是随机的，
+ *   断言会时对时错（实测约 1/3 概率读错）。
+ *
+ *   缓存归属由**账号**决定（AGENTS.md 铁律 #15），所以这里按账号 id 取槽位，
+ *   槽位名与拼装口径一律取 core 的唯一来源（`ACCOUNT_STORAGE_KEYS`）。
+ */
+export async function cachedSaveOf(page: Page, accountId: number | string): Promise<CachedSave | null> {
+  // 键名在 Node 侧算好传进去：evaluate 的回调跑在浏览器里，
+  // 拿不到模块作用域（ACCOUNT_STORAGE_KEYS 等）。
+  const key = `${ACCOUNT_STORAGE_KEYS.SAVE_SLOT_PREFIX}${accountSlotKey(accountId)}`
+  return page.evaluate((k) => {
+    const raw = localStorage.getItem(k)
+    if (!raw) return null
+    return JSON.parse(raw) as CachedSave
+  }, key)
+}
+
+/** 本地缓存里常用的一小片字段 */
+export interface CachedSave {
+  stats?: { totalPulls: number }
+  player?: {
+    crystals: number
+    tickets?: number
+    exp?: number
+    emblems?: number
+    silver?: number
+    skillStones?: number
+    relicStones?: number
+  }
+  heroes?: Record<string, { level: number; exp: number }>
+  relics?: Array<{ defId: string; uid: string; level: number }>
+  equipped?: Record<string, { heroId: string }>
+  settings?: { speed?: number }
 }
 
 /**

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { registerAccount, seedSession, skipGachaReveal, uniqueUsername } from './helpers'
+import { cachedSaveOf, registerAccount, seedSession, skipGachaReveal, uniqueUsername } from './helpers'
 
 /**
  * 遗物获取途径端到端用例。
@@ -17,12 +17,19 @@ import { registerAccount, seedSession, skipGachaReveal, uniqueUsername } from '.
  * 不直接改存档（那既不真实，也会绕过 refresh token 轮换）。
  */
 
-/** 注册账号并注入会话，落到抽卡页（深链不会被新手引导劫持） */
-async function bootLoggedIn(page: Page): Promise<void> {
+/**
+ * 注册账号并注入会话，落到抽卡页（深链不会被新手引导劫持）。
+ *
+ * 返回账号 id：本地缓存**按账号分槽位**（AGENTS.md 铁律 #15），
+ * 读缓存必须按账号取槽位，不能取「第一个 `sgw.save.*` 键」
+ * （浏览器里还可能有存量单槽位 `sgw.save.main`，键序不保证）。
+ */
+async function bootLoggedIn(page: Page): Promise<number> {
   const session = await registerAccount(uniqueUsername('relic'))
   await seedSession(page, session)
   await page.goto('/#/gacha')
   await page.waitForLoadState('networkidle')
+  return session.user.id
 }
 
 /** 新手十连，拿到一批英灵 */
@@ -62,25 +69,17 @@ async function setupTeam(page: Page): Promise<void> {
 }
 
 /** 读取存档里的遗物实例列表 */
-async function relicsOf(page: Page): Promise<Array<{ defId: string; uid: string; level: number }>> {
-  return page.evaluate(() => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))
-    if (!key) return []
-    const save = JSON.parse(localStorage.getItem(key)!) as { relics?: Array<{ defId: string; uid: string; level: number }> }
-    return save.relics ?? []
-  })
+async function relicsOf(
+  page: Page,
+  accountId: number,
+): Promise<Array<{ defId: string; uid: string; level: number }>> {
+  return (await cachedSaveOf(page, accountId))?.relics ?? []
 }
 
 /** 读取某英灵当前已装备的遗物数量 */
-async function equippedCountOf(page: Page, heroId: string): Promise<number> {
-  return page.evaluate((id) => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))
-    if (!key) return 0
-    const save = JSON.parse(localStorage.getItem(key)!) as {
-      equipped?: Record<string, { heroId: string }>
-    }
-    return Object.values(save.equipped ?? {}).filter((e) => e.heroId === id).length
-  }, heroId)
+async function equippedCountOf(page: Page, accountId: number, heroId: string): Promise<number> {
+  const equipped = (await cachedSaveOf(page, accountId))?.equipped ?? {}
+  return Object.values(equipped).filter((e) => e.heroId === heroId).length
 }
 
 /** 从详情页 URL 里取英灵 id */
@@ -89,20 +88,17 @@ function heroIdFromUrl(page: Page): string {
 }
 
 /** 读取玩家当前的银两与强化石 */
-async function resourcesOf(page: Page): Promise<{ silver: number; stones: number }> {
-  return page.evaluate(() => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))
-    if (!key) return { silver: 0, stones: 0 }
-    const save = JSON.parse(localStorage.getItem(key)!) as {
-      player?: { silver?: number; relicStones?: number }
-    }
-    return { silver: save.player?.silver ?? 0, stones: save.player?.relicStones ?? 0 }
-  })
+async function resourcesOf(
+  page: Page,
+  accountId: number,
+): Promise<{ silver: number; stones: number }> {
+  const save = await cachedSaveOf(page, accountId)
+  return { silver: save?.player?.silver ?? 0, stones: save?.player?.relicStones ?? 0 }
 }
 
 test.describe('遗物获取途径（挂机掉落入库）', () => {
   test('推征产出的遗物真的进了仓库，刷新后也不丢', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
 
     // 起点：新档仓库是空的
@@ -134,7 +130,7 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
     await expect(page.getByText(`共 ${dropped} 件`)).toBeVisible()
 
     // 存档里的实例结构完整（id 合法、能被强化与装备）
-    const saved = await relicsOf(page)
+    const saved = await relicsOf(page, accountId)
     expect(saved).toHaveLength(dropped)
     for (const r of saved) {
       expect(r.defId).toBeTruthy()
@@ -153,7 +149,7 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
   })
 
   test('连推两轮，遗物逐轮累加（不是只剩最后一场的）', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await setupTeam(page)
 
@@ -165,13 +161,13 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
     //   不能只看「提示出现了」（上一次的提示可能还没消失），
     //   得等仓库里的遗物真的多出来。
     await expect
-      .poll(async () => (await relicsOf(page)).length, { timeout: 10_000 })
+      .poll(async () => (await relicsOf(page, accountId)).length, { timeout: 10_000 })
       .toBeGreaterThan(0)
-    const afterFirst = (await relicsOf(page)).length
+    const afterFirst = (await relicsOf(page, accountId)).length
 
     await page.getByRole('button', { name: '推征 1 场' }).click()
     await expect
-      .poll(async () => (await relicsOf(page)).length, { timeout: 10_000 })
+      .poll(async () => (await relicsOf(page, accountId)).length, { timeout: 10_000 })
       .toBeGreaterThan(afterFirst)
   })
 })
@@ -184,7 +180,7 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
  */
 test.describe('遗物图标', () => {
   test('仓库里每件遗物都有自己的图标，路径由 core 给出', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await setupTeam(page)
 
@@ -228,7 +224,7 @@ test.describe('遗物图标', () => {
  */
 test.describe('遗物强化', () => {
   test('铸造页就能强化：等级 +1、银两与强化石被扣、落盘没丢', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await setupTeam(page)
 
@@ -250,7 +246,7 @@ test.describe('遗物强化', () => {
     // 花费写出来（玩家点之前就知道要多少银两与强化石）
     await expect(page.getByText('强化消耗：银两')).toBeVisible()
 
-    const before = await resourcesOf(page)
+    const before = await resourcesOf(page, accountId)
 
     await upgrade.click()
 
@@ -258,10 +254,10 @@ test.describe('遗物强化', () => {
     await expect(upgrade).toContainText('强化 +3')
 
     // 银两与强化石真的被扣
-    await expect.poll(async () => (await resourcesOf(page)).silver, { timeout: 8000 }).toBeLessThan(
+    await expect.poll(async () => (await resourcesOf(page, accountId)).silver, { timeout: 8000 }).toBeLessThan(
       before.silver,
     )
-    await expect.poll(async () => (await resourcesOf(page)).stones, { timeout: 8000 }).toBeLessThan(
+    await expect.poll(async () => (await resourcesOf(page, accountId)).stones, { timeout: 8000 }).toBeLessThan(
       before.stones,
     )
 
@@ -281,7 +277,7 @@ test.describe('遗物强化', () => {
  */
 test.describe('一键推荐装备与套装效果', () => {
   test('英灵页一键推荐：6 槽填满、战力提升、套装档位可见', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await setupTeam(page)
 
@@ -324,11 +320,11 @@ test.describe('一键推荐装备与套装效果', () => {
     // 存档里确实给这名英灵穿上了 6 件
     const heroId = heroIdFromUrl(page)
     expect(heroId).not.toBe('')
-    await expect.poll(() => equippedCountOf(page, heroId), { timeout: 10_000 }).toBe(6)
+    await expect.poll(() => equippedCountOf(page, accountId, heroId), { timeout: 10_000 }).toBe(6)
   })
 
   test('套装效果区会指出「还差几件」并提示仓库里可换的件', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await setupTeam(page)
 

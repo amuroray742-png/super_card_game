@@ -18,33 +18,41 @@ import { registerAndLoad } from './helpers/store-harness.ts'
 
 /** 模拟存储：key = slot，value = 序列化后的存档（只读缓存） */
 const mem = vi.hoisted(() => new Map<string, string>())
+/** 模拟存储的标记位（如 `legacyMigrated`） */
+const flags = vi.hoisted(() => new Map<string, string>())
 
-vi.mock('../../src/platform/storage.ts', () => ({
-  storage: {
-    async load(slot: string) {
-      const text = mem.get(slot)
-      return text ? JSON.parse(text) : null
+vi.mock('../../src/platform/storage.ts', async () => {
+  // 用真实的导出/导入实现（base64 存档串）——
+  // 服务端解的是同一个格式，mock 自己另编一套会解不开。
+  const { exportSave, importSave } = await import('../../src/core/save/serialize.ts')
+  return {
+    storage: {
+      async load(slot: string) {
+        const text = mem.get(slot)
+        return text ? JSON.parse(text) : null
+      },
+      async save(slot: string, data: unknown) {
+        mem.set(slot, JSON.stringify(data))
+      },
+      async export(data: unknown) {
+        return exportSave(data as never)
+      },
+      async import(text: string) {
+        return importSave(text)
+      },
+      async clear(slot: string) {
+        mem.delete(slot)
+      },
+      async getFlag(key: string) {
+        return flags.get(key) === '1'
+      },
+      async setFlag(key: string, value: boolean) {
+        if (value) flags.set(key, '1')
+        else flags.delete(key)
+      },
     },
-    async save(slot: string, data: unknown) {
-      mem.set(slot, JSON.stringify(data))
-    },
-    async export(data: unknown) {
-      return JSON.stringify(data)
-    },
-    async import(text: string) {
-      return JSON.parse(text)
-    },
-    async clear(slot: string) {
-      mem.delete(slot)
-    },
-    async getFlag() {
-      return false
-    },
-    async setFlag() {
-      /* noop */
-    },
-  },
-}))
+  }
+})
 
 const { useGameStore } = await import('../../src/presentation/stores/game.ts')
 
@@ -52,6 +60,7 @@ let harness: ServerHarness
 
 beforeEach(async () => {
   mem.clear()
+  flags.clear()
   setActivePinia(createPinia())
   harness = startServerHarness()
 })
@@ -168,5 +177,37 @@ describe('服务端权威：重置与离线', () => {
     // 本地缓存里的进度还在（断网也能看到）
     expect(store.save.player.crystals).toBe(0)
     expect(cachedPayload).toBeTruthy()
+  })
+})
+
+/**
+ * 旧档迁移通道（存量单槽位 `sgw.save.main`）。
+ *
+ * ⚠ 这条通道历史上被**新版客户端自己写脏**过：未登录时（槽位还是
+ *   存量单槽位）把一份刚建好的新档写进去 → 第一个账号登录时，
+ *   这份新档被当成「旧档」导入服务端，还顺手占掉一次性迁移标记
+ *   （`sgw.legacyMigrated`）→ 玩家**真正的旧档**从此再也迁不过来。
+ *
+ * 迁移契约本身（存量槽位里的内容迁给第一个账号、不迁给第二个）由
+ * `cloud-sync.test.ts` 守。
+ */
+describe('旧档迁移通道', () => {
+  it('未登录（登出）时 persist 不写任何存档槽位', async () => {
+    const store = await registerAndLoad('saver')
+    expect(cachedSlot()).not.toBe('')
+
+    // 登出 → 回到存量单槽位
+    store.invalidate()
+    await store.persist()
+
+    // 存量单槽位保持干净（迁移通道不能被新档污染）
+    expect(mem.has('main')).toBe(false)
+  })
+
+  it('正常游玩也不会往存量单槽位写新档', async () => {
+    const store = await registerAndLoad('saver')
+    await store.pull('standard', 10)
+    await store.signInDaily()
+    expect(mem.has('main')).toBe(false)
   })
 })

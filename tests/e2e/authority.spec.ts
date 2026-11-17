@@ -2,12 +2,14 @@ import { test, expect, type Page } from '@playwright/test'
 import {
   E2E_API_BASE,
   E2E_PASSWORD,
+  cachedSaveOf,
   loginAccount,
   registerAccount,
   seedSession,
   skipGachaReveal,
   uniqueUsername,
 } from './helpers'
+import { ACCOUNT_STORAGE_KEYS } from '../../src/core/config/account.ts'
 
 /**
  * 服务端权威端到端用例（AGENTS.md 铁律 #28 / #29）。
@@ -55,21 +57,27 @@ async function accessTokenOf(session: { refreshToken: string }): Promise<string>
   return body.accessToken
 }
 
-/** 本地缓存里的存档（客户端镜像，只读缓存） */
-async function cachedSave(page: Page): Promise<{ stats?: { totalPulls: number }; player?: { crystals: number } }> {
-  return page.evaluate(() => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))
-    if (!key) return {}
-    return JSON.parse(localStorage.getItem(key) ?? '{}')
-  })
+/** 某个账号的本地缓存槽位键（口径取 core 的唯一来源） */
+function slotKey(accountId: number | string): string {
+  return `${ACCOUNT_STORAGE_KEYS.SAVE_SLOT_PREFIX}${accountId}`
 }
 
-/** 抽一次十连（跳过演出） */
+/** 存量单槽位（旧档迁移通道）的键 */
+const LEGACY_SLOT_KEY = `${ACCOUNT_STORAGE_KEYS.SAVE_SLOT_PREFIX}${ACCOUNT_STORAGE_KEYS.LEGACY_SAVE_SLOT}`
+
+/**
+ * 抽一次十连（跳过演出）。
+ *
+ * ⚠ 必须等**结算弹窗**真的出来才算完：十连走服务端动作，
+ *   请求还没回来时本地缓存里的 `totalPulls` 还是 0——
+ *   直接读缓存会读到「动作还没落地」的中间态（实测约 1/3 概率）。
+ */
 async function pullTen(page: Page): Promise<void> {
   await page.locator('button', { hasText: '十连' }).first().click()
   await skipGachaReveal(page)
   const collect = page.getByRole('button', { name: '收下' })
-  if (await collect.isVisible().catch(() => false)) await collect.click()
+  await collect.waitFor({ state: 'visible', timeout: 15_000 })
+  await collect.click()
 }
 
 test.describe('服务端权威', () => {
@@ -79,22 +87,21 @@ test.describe('服务端权威', () => {
     await page.goto('/#/gacha')
     await page.waitForLoadState('networkidle')
 
-    const before = await cachedSave(page)
-    expect(before.player?.crystals).toBe(3000)
+    const before = await cachedSaveOf(page, session.user.id)
+    expect(before?.player?.crystals).toBe(3000)
 
     // 篡改本地缓存（模拟玩家手动改 / 另一个标签页写坏）
-    await page.evaluate(() => {
-      const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))!
+    await page.evaluate((key) => {
       const save = JSON.parse(localStorage.getItem(key)!)
       save.player.crystals = 999999
       localStorage.setItem(key, JSON.stringify(save))
-    })
+    }, slotKey(session.user.id))
 
     // 重新载入 → 服务端版本覆盖本地缓存
     await page.reload()
     await page.waitForLoadState('networkidle')
-    const after = await cachedSave(page)
-    expect(after.player?.crystals).toBe(3000)
+    const after = await cachedSaveOf(page, session.user.id)
+    expect(after?.player?.crystals).toBe(3000)
   })
 
   test('同一个 actionId 重放只扣一次费（断网重试的安全网）', async () => {
@@ -151,7 +158,7 @@ test.describe('多设备一致', () => {
 
       // A 抽一次十连
       await pullTen(pageA)
-      const pullsA = (await cachedSave(pageA)).stats?.totalPulls
+      const pullsA = (await cachedSaveOf(pageA, sessionA.user.id))?.stats?.totalPulls
       expect(pullsA).toBe(10)
 
       // B 重新载入 → 看到 A 的进度
@@ -159,7 +166,7 @@ test.describe('多设备一致', () => {
       await pageB.waitForLoadState('networkidle')
       await pageB.reload()
       await pageB.waitForLoadState('networkidle')
-      const pullsB = (await cachedSave(pageB)).stats?.totalPulls
+      const pullsB = (await cachedSaveOf(pageB, sessionA.user.id))?.stats?.totalPulls
       expect(pullsB).toBe(10)
     } finally {
       await ctxA.close()
@@ -173,7 +180,7 @@ test.describe('离线只读', () => {
     // ⚠ 不用 seedSession：它的 init script 每次导航都会把后端地址改回去，
     //   离线用例需要自己控制后端地址。
     const username = uniqueUsername('offline')
-    await registerAccount(username)
+    const session = await registerAccount(username)
 
     await page.goto('/#/login')
     await page.evaluate((base) => localStorage.setItem('sgw.apiBase', base), E2E_API_BASE)
@@ -186,11 +193,21 @@ test.describe('离线只读', () => {
     // 新号没有英灵 → 会被引导页劫持（这是预期行为），等落地即可
     await page.waitForURL(/\/#\/(guide|expedition)/, { timeout: 15_000 })
 
+    // 存量旧档槽位（迁移通道）不该被新版客户端写入新档：
+    // 一旦写进去，第一个账号登录时会把这份新档当成「旧档」导入服务端，
+    // 还顺手占掉一次性迁移标记 → 玩家真正的旧档再也迁不过来。
+    const legacyBefore = await page.evaluate((key) => localStorage.getItem(key), LEGACY_SLOT_KEY)
+    expect(legacyBefore).toBeNull()
+
     // 玩一下：抽一次十连（让本地缓存里有进度）
     await page.goto('/#/gacha')
     await page.waitForLoadState('networkidle')
     await pullTen(page)
-    expect((await cachedSave(page)).stats?.totalPulls).toBe(10)
+    expect((await cachedSaveOf(page, session.user.id))?.stats?.totalPulls).toBe(10)
+
+    // 抽完之后迁移通道仍然干净
+    const legacyAfter = await page.evaluate((key) => localStorage.getItem(key), LEGACY_SLOT_KEY)
+    expect(legacyAfter).toBeNull()
 
     // 后端「挂掉」：指向一个没人监听的端口
     await page.evaluate(() => localStorage.setItem('sgw.apiBase', 'http://127.0.0.1:9'))
@@ -202,13 +219,13 @@ test.describe('离线只读', () => {
     await expect(page).not.toHaveURL(/\/#\/login/)
 
     // 进度还在（来自本地缓存）
-    expect((await cachedSave(page)).stats?.totalPulls).toBe(10)
+    expect((await cachedSaveOf(page, session.user.id))?.stats?.totalPulls).toBe(10)
 
     // 操作被拒绝：不能改存档
     await page.goto('/#/gacha')
     await page.waitForLoadState('networkidle')
     await page.locator('button', { hasText: '十连' }).first().click()
     await expect(page.getByText('离线模式，只能查看进度')).toBeVisible({ timeout: 10_000 })
-    expect((await cachedSave(page)).stats?.totalPulls).toBe(10)
+    expect((await cachedSaveOf(page, session.user.id))?.stats?.totalPulls).toBe(10)
   })
 })

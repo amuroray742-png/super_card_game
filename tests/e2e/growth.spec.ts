@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { registerAccount, seedSession, skipGachaReveal, uniqueUsername } from './helpers'
+import { cachedSaveOf, registerAccount, seedSession, skipGachaReveal, uniqueUsername } from './helpers'
 
 /**
  * 英灵养成端到端用例（属性面板 + 技能升级 + 喂经验扣经验池）。
@@ -14,12 +14,19 @@ import { registerAccount, seedSession, skipGachaReveal, uniqueUsername } from '.
  *   不直接改存档——那既不真实，也会绕过 refresh token 轮换。
  */
 
-/** 注册账号并注入会话，落到抽卡页（深链不会被新手引导劫持） */
-async function bootLoggedIn(page: Page): Promise<void> {
+/**
+ * 注册账号并注入会话，落到抽卡页（深链不会被新手引导劫持）。
+ *
+ * 返回账号 id：本地缓存**按账号分槽位**（AGENTS.md 铁律 #15），
+ * 读缓存必须按账号取槽位，不能取「第一个 `sgw.save.*` 键」
+ * （浏览器里还可能有存量单槽位 `sgw.save.main`，键序不保证）。
+ */
+async function bootLoggedIn(page: Page): Promise<number> {
   const session = await registerAccount(uniqueUsername('growth'))
   await seedSession(page, session)
   await page.goto('/#/gacha')
   await page.waitForLoadState('networkidle')
+  return session.user.id
 }
 
 /** 新手十连，拿到一批英灵 */
@@ -60,39 +67,23 @@ async function setupTeam(page: Page, count = 4): Promise<void> {
 }
 
 /** 读取玩家经验池 */
-async function expPoolOf(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))!
-    const save = JSON.parse(localStorage.getItem(key)!)
-    return save.player.exp ?? 0
-  })
+async function expPoolOf(page: Page, accountId: number): Promise<number> {
+  return (await cachedSaveOf(page, accountId))?.player?.exp ?? 0
 }
 
 /** 读取玩家英灵印记 */
-async function emblemsOf(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))!
-    const save = JSON.parse(localStorage.getItem(key)!)
-    return save.player.emblems ?? 0
-  })
+async function emblemsOf(page: Page, accountId: number): Promise<number> {
+  return (await cachedSaveOf(page, accountId))?.player?.emblems ?? 0
 }
 
 /** 读取某个英灵在存档里的等级 */
-async function heroLevelOf(page: Page, heroId: string): Promise<number> {
-  return page.evaluate((id) => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))!
-    const save = JSON.parse(localStorage.getItem(key)!)
-    return save.heroes[id]?.level ?? 0
-  }, heroId)
+async function heroLevelOf(page: Page, accountId: number, heroId: string): Promise<number> {
+  return (await cachedSaveOf(page, accountId))?.heroes?.[heroId]?.level ?? 0
 }
 
 /** 读取某个英灵在存档里已投入但未升级的经验 */
-async function heroExpOf(page: Page, heroId: string): Promise<number> {
-  return page.evaluate((id) => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))!
-    const save = JSON.parse(localStorage.getItem(key)!)
-    return save.heroes[id]?.exp ?? 0
-  }, heroId)
+async function heroExpOf(page: Page, accountId: number, heroId: string): Promise<number> {
+  return (await cachedSaveOf(page, accountId))?.heroes?.[heroId]?.exp ?? 0
 }
 
 /** 从详情页 URL 里取英灵 id */
@@ -106,16 +97,16 @@ function heroIdFromUrl(page: Page): string {
  * ⚠ 经验是**推征掉落**进池子的，玩家必须先打过一场才有经验可喂。
  *   推征遇到战败会中断（runIdle 遇败即停），所以这里允许「这一轮没涨」再重试。
  */
-async function farmExp(page: Page, target: number): Promise<number> {
+async function farmExp(page: Page, accountId: number, target: number): Promise<number> {
   await page.goto('/#/expedition')
   await page.waitForLoadState('networkidle')
   const btn = page.locator('button', { hasText: '推征 10 场' })
-  let pool = await expPoolOf(page)
+  let pool = await expPoolOf(page, accountId)
   for (let i = 0; i < 8 && pool < target; i++) {
     await btn.click()
     // 推征结算落盘后经验池才会涨
     await page.waitForTimeout(800)
-    pool = await expPoolOf(page)
+    pool = await expPoolOf(page, accountId)
   }
   return pool
 }
@@ -173,17 +164,20 @@ async function skillLevelOf(page: Page): Promise<number> {
 }
 
 /** 读取玩家资源 */
-async function resourcesOf(page: Page): Promise<{ skillStones: number; crystals: number }> {
-  return page.evaluate(() => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith('sgw.save.'))!
-    const save = JSON.parse(localStorage.getItem(key)!)
-    return { skillStones: save.player.skillStones, crystals: save.player.crystals }
-  })
+async function resourcesOf(
+  page: Page,
+  accountId: number,
+): Promise<{ skillStones: number; crystals: number }> {
+  const save = await cachedSaveOf(page, accountId)
+  return {
+    skillStones: save?.player?.skillStones ?? 0,
+    crystals: save?.player?.crystals ?? 0,
+  }
 }
 
 test.describe('英灵养成（属性面板 + 技能升级）', () => {
   test('详情页展示攻击/防御/生命/速度与战力', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await openFirstHeroDetail(page)
 
@@ -196,10 +190,10 @@ test.describe('英灵养成（属性面板 + 技能升级）', () => {
   })
 
   test('喂经验后等级与属性都提升（并能看到提升预览）', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await setupTeam(page)
-    await farmExp(page, 1_200)
+    await farmExp(page, accountId, 1_200)
     await openFirstHeroDetail(page)
 
     const levelBefore = await levelOf(page)
@@ -219,12 +213,12 @@ test.describe('英灵养成（属性面板 + 技能升级）', () => {
   })
 
   test('技能升级消耗术式结晶，圣杯结晶不动', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await openFirstHeroDetail(page)
 
     const before = await skillLevelOf(page)
-    const resBefore = await resourcesOf(page)
+    const resBefore = await resourcesOf(page, accountId)
 
     const btn = page.locator('button', { hasText: '提升等级' }).first()
     await expect(btn).toBeEnabled()
@@ -233,7 +227,7 @@ test.describe('英灵养成（属性面板 + 技能升级）', () => {
     // 技能等级 +1
     await expect.poll(() => skillLevelOf(page), { timeout: 8_000 }).toBe(before + 1)
 
-    const resAfter = await resourcesOf(page)
+    const resAfter = await resourcesOf(page, accountId)
     // 术式结晶被扣
     expect(resAfter.skillStones).toBeLessThan(resBefore.skillStones)
     // 圣杯结晶**一分没动**（原实现扣的是它）
@@ -241,7 +235,7 @@ test.describe('英灵养成（属性面板 + 技能升级）', () => {
   })
 
   test('术式结晶不足时按钮禁用并给出差额提示', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await openFirstHeroDetail(page)
 
@@ -262,11 +256,11 @@ test.describe('英灵养成（属性面板 + 技能升级）', () => {
 
 test.describe('喂经验扣玩家经验池', () => {
   test('喂经验会从经验池扣款，经验池是唯一来源', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await setupTeam(page)
 
-    const pool = await farmExp(page, 1_200)
+    const pool = await farmExp(page, accountId, 1_200)
     expect(pool).toBeGreaterThan(0)
 
     await openFirstHeroDetail(page)
@@ -274,22 +268,22 @@ test.describe('喂经验扣玩家经验池', () => {
     await expect(page.locator('[data-testid="exp-pool"]')).toBeVisible()
 
     const levelBefore = await levelOf(page)
-    const poolBefore = await expPoolOf(page)
+    const poolBefore = await expPoolOf(page, accountId)
 
     // 喂 1000 经验这一档
     await page.locator('[data-feed="1000"]').click()
 
     // ⚠ 原实现只加不减：经验池纹丝不动，等于白嫖等级
-    await expect.poll(() => expPoolOf(page), { timeout: 8_000 }).toBe(poolBefore - 1000)
+    await expect.poll(() => expPoolOf(page, accountId), { timeout: 8_000 }).toBe(poolBefore - 1000)
     await expect.poll(() => levelOf(page), { timeout: 8_000 }).toBeGreaterThan(levelBefore)
   })
 
   test('经验池不足时喂经验按钮禁用并给出差额提示', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await setupTeam(page)
 
-    const pool = await farmExp(page, 1_200)
+    const pool = await farmExp(page, accountId, 1_200)
     // 1.2 千的经验喂不起「1.0 万」那一档
     expect(pool).toBeLessThan(10_000)
 
@@ -300,14 +294,14 @@ test.describe('喂经验扣玩家经验池', () => {
   })
 
   test('喂完经验池后「全部喂入」不可用', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     await setupTeam(page)
-    await farmExp(page, 1_200)
+    await farmExp(page, accountId, 1_200)
     await openFirstHeroDetail(page)
 
     await page.locator('[data-testid="feed-all"]').click()
-    await expect.poll(() => expPoolOf(page), { timeout: 8_000 }).toBe(0)
+    await expect.poll(() => expPoolOf(page, accountId), { timeout: 8_000 }).toBe(0)
     await expect(page.locator('[data-testid="feed-all"]')).toBeDisabled()
   })
 })
@@ -329,7 +323,7 @@ test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 
   test.setTimeout(300_000)
 
   test('喂到境界门槛后，消耗英灵印记突破到新境界，存量经验立即兑现', async ({ page }) => {
-    await bootLoggedIn(page)
+    const accountId = await bootLoggedIn(page)
     await pullHeroes(page)
     // 满编 6 人：队越强推征打得越远、经验掉得越快
     await setupTeam(page, 6)
@@ -346,15 +340,15 @@ test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 
     // 升到 Lv60 单人要 7874 经验；这里攒到 1.5 万，
     // 好让突破后有**足够的存量经验**兑现成等级（否则只跨 1 级看不出兑现）。
     const TARGET_POOL = 15_000
-    let pool = await expPoolOf(page)
+    let pool = await expPoolOf(page, accountId)
     for (let round = 0; round < 45 && pool < TARGET_POOL; round++) {
       await page.goto('/#/expedition')
       await page.waitForLoadState('networkidle')
-      const before = await expPoolOf(page)
+      const before = await expPoolOf(page, accountId)
       await page.locator('button', { hasText: '推征 10 场' }).click()
       // 结算落盘后才涨；遇战败会中断（runIdle 遇败即停），这一轮可能白跑
       await page.waitForTimeout(900)
-      pool = await expPoolOf(page)
+      pool = await expPoolOf(page, accountId)
       if (pool <= before) continue
     }
     expect(pool, `经验池没攒到 ${TARGET_POOL}（实际 ${pool}）`).toBeGreaterThanOrEqual(TARGET_POOL)
@@ -364,11 +358,11 @@ test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 
     await page.waitForLoadState('networkidle')
     await page.locator('[data-testid="feed-all"]').click()
 
-    await expect.poll(() => heroLevelOf(page, heroId), { timeout: 15_000 }).toBe(60)
+    await expect.poll(() => heroLevelOf(page, accountId, heroId), { timeout: 15_000 }).toBe(60)
     // 经验池被扣干
-    await expect.poll(() => expPoolOf(page), { timeout: 8_000 }).toBe(0)
+    await expect.poll(() => expPoolOf(page, accountId), { timeout: 8_000 }).toBe(0)
     // 没升掉的经验存在英灵身上（卡在门槛上也不丢）
-    const banked = await heroExpOf(page, heroId)
+    const banked = await heroExpOf(page, accountId, heroId)
     expect(banked).toBeGreaterThan(0)
 
     // ── 3) 境界门槛出现突破入口 ──
@@ -377,17 +371,17 @@ test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 
     await expect(breakBtn).toBeVisible()
     await expect(breakBtn).toBeEnabled()
 
-    const emblemsBefore = await emblemsOf(page)
+    const emblemsBefore = await emblemsOf(page, accountId)
     expect(emblemsBefore).toBeGreaterThanOrEqual(10)
 
     // ── 4) 突破：扣印记 + 跨入 Lv61 + 存量经验兑现 ──
     await breakBtn.click()
 
-    await expect.poll(() => heroLevelOf(page, heroId), { timeout: 15_000 }).toBeGreaterThan(60)
+    await expect.poll(() => heroLevelOf(page, accountId, heroId), { timeout: 15_000 }).toBeGreaterThan(60)
     // 印记按配置扣（名阶 10 枚）
-    await expect.poll(() => emblemsOf(page), { timeout: 8_000 }).toBe(emblemsBefore - 10)
+    await expect.poll(() => emblemsOf(page, accountId), { timeout: 8_000 }).toBe(emblemsBefore - 10)
     // 存量经验被兑现 → 等级不止 61
-    expect(await heroLevelOf(page, heroId)).toBeGreaterThan(61)
+    expect(await heroLevelOf(page, accountId, heroId)).toBeGreaterThan(61)
     // 境界显示切到名阶
     await expect(page.locator('.stat-row').filter({ hasText: '境界' }).first()).toContainText('名阶')
   })

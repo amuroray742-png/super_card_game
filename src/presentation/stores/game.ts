@@ -174,6 +174,18 @@ export const useGameStore = defineStore('game', () => {
    *   它**不是**权威，也不会被当成写入目标（铁律 #28）。
    */
   async function persist(_critical = false): Promise<boolean> {
+    /**
+     * ⚠ 存量单槽位 `sgw.save.main` 是**旧档迁移通道**，不是缓存槽位。
+     *
+     * 新版客户端往那里写新档会污染迁移：
+     * ① 第一个账号登录时，`takeLegacySave` 会把这份新档当成「旧档」导入服务端
+     *    （`save.create` 被跳过），服务端存档的内容其实来自这份本地新档；
+     * ② 更糟的是它顺手置上了 `sgw.legacyMigrated` 标记 → 玩家**真正的旧档**
+     *    此后永远迁不过来（静默丢档）。
+     *
+     * 存档归属由账号决定（铁律 #15）：未登录 → 没有账号槽位 → 没有档可缓存。
+     */
+    if (slot.value === ACCOUNT_STORAGE_KEYS.LEGACY_SAVE_SLOT) return true
     try {
       await storage.save(slot.value, save.value)
       return true
@@ -371,6 +383,9 @@ export const useGameStore = defineStore('game', () => {
    *
    * 只迁一次——`sgw.legacyMigrated` 标记防止把旧档迁给第二个账号；
    * 服务端也会记一份账号标记（`user_flags`），两边都拦一道。
+   *
+   * ⚠ 这个槽位是**迁移通道**：新版客户端**不得**往里写（见 persist 注释），
+   *   里面躺着的就当旧档迁走。
    */
   async function takeLegacySave(accountId: number | null): Promise<string | null> {
     if (accountId == null) return null
@@ -396,6 +411,9 @@ export const useGameStore = defineStore('game', () => {
     loaded.value = false
     guideSeen.value = false
     offline.value = false
+    // 未登录 → 没有账号槽位：回到存量单槽位。
+    // persist() 会跳过它（迁移通道不能被新档污染，见 persist 注释）。
+    slot.value = ACCOUNT_STORAGE_KEYS.LEGACY_SAVE_SLOT
     // 换号 → 换一条随机序列：上一个账号的抽卡位置不能带到新账号
     save.value = createNewSave(clock.now())
     // 上一个账号的离线结算报告不能带到新账号上
