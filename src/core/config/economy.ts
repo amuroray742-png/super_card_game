@@ -300,8 +300,15 @@ export const GACHA = {
     R: 3,
     N: 1,
   } as Record<Rarity, number>,
-  /** 重复 SSR 额外返还同名碎片 */
-  DUPLICATE_SSR_SHARDS: 10,
+  /**
+   * 重复 SSR 额外返还同名碎片。
+   *
+   * ⚠ 原值 10：600 枚碎片（6 人满星）= 60 张重复 SSR ≈ 全收藏时 3,643 抽
+   *   （109 万圣杯结晶），实测「六人满星」是不可达目标。
+   *   提到 30 后：600 枚碎片 = 20 张重复 SSR ≈ 1,215 抽（36 万结晶），
+   *   单人满星从 10 张重复降到 3~4 张重复，收集党的养成目标变得可追。
+   */
+  DUPLICATE_SSR_SHARDS: 30,
   /** 重复 SSR 额外返还银两 */
   DUPLICATE_N_SILVER: 500,
 } as const
