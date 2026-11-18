@@ -26,6 +26,7 @@ import type {
   RewardBundle,
   BattleResult,
   ArenaMatch,
+  Rarity,
 } from '../../core/model/types.ts'
 import { createNewSave, normalizeSave } from '../../core/save/schema.ts'
 import { deserializePublicSave } from '../../core/save/serialize.ts'
@@ -54,7 +55,7 @@ import {
 import { ratesForPool as computePoolRates } from '../../core/systems/gacha.ts'
 import { previewRebirth, performRebirth } from '../../core/systems/rebirth.ts'
 import { arenaSnapshotHash, resolveArenaMatch, arenaContext, resolveArenaRewards, type ArenaReward } from '../../core/systems/arena.ts'
-import { DAILY, LEVEL, REDEEM_CODES } from '../../core/config/economy.ts'
+import { DAILY, IDLE, LEVEL, REDEEM_CODES, RELIC } from '../../core/config/economy.ts'
 import { ACCOUNT, ACCOUNT_STORAGE_KEYS, ACCOUNT_ERROR_CODES, accountSlotKey } from '../../core/config/account.ts'
 import { GAME_ERROR_MESSAGES } from '../../core/config/game-errors.ts'
 import { dayIndex } from '../../core/time.ts'
@@ -65,12 +66,12 @@ import { formatNumber } from '../utils/format.ts'
 import '../../core/config/relics.ts'
 import '../../core/config/enemies.ts'
 import {
-  computeRelicAdvice,
   type ActionResultMap,
   type GameAction,
   type GameActionType,
 } from '../../core/systems/actions.ts'
 import type { ActionResponse, SaveSnapshot } from '../../core/systems/action-protocol.ts'
+import type { RelicPage, RelicStats } from '../../platform/account.ts'
 import {
   buildArenaSnapshot,
   buildEquippedMap,
@@ -273,8 +274,15 @@ export const useGameStore = defineStore('game', () => {
         // 服务端回传的存档 = 权威版本（覆盖本地镜像）
         await applyServerSave(response.save)
         if (!current()) return null
-        if (response.offline) offlineReport.value = response.offline
-
+        // 离线结算明细：只有「离线时长达到阈值」才弹窗。
+        // ⚠ 服务端已经过滤过一次，这里再挡一道——在线期间累计的时间账本
+        //   被下一次动作结算掉时，那明明是在线收益，不该弹「离线结算」。
+        if (
+          response.offline &&
+          response.offline.elapsedSeconds >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC
+        ) {
+          offlineReport.value = response.offline
+        }
         if (!response.ok) {
           if (!response.silent) {
             notify(response.message || messageOf(response.code), 'warn')
@@ -332,7 +340,9 @@ export const useGameStore = defineStore('game', () => {
         if (!current() || !cloud) return false
         await applyServerSave(cloud)
         if (!current()) return false
-        if (cloud.offline) offlineReport.value = cloud.offline
+        if (cloud.offline && cloud.offline.elapsedSeconds >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC) {
+          offlineReport.value = cloud.offline
+        }
         account.offline = false
         offline.value = false
         loaded.value = true
@@ -399,7 +409,9 @@ export const useGameStore = defineStore('game', () => {
       server.savedAt = cloud.savedAt
       save.value = server
       battleSpeed.value = server.settings.speed ?? 1
-      if (cloud.offline) offlineReport.value = cloud.offline
+      if (cloud.offline && cloud.offline.elapsedSeconds >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC) {
+        offlineReport.value = cloud.offline
+      }
       await persist()
       if (!current()) return
       loaded.value = true
@@ -623,12 +635,210 @@ export const useGameStore = defineStore('game', () => {
     return runAction({ type: 'hero.upgradeStar', heroId }, true)
   }
 
+  /**
+   * 强化遗物。
+   *
+   * ⚠ 强化后要**重拉仓库页**：客户端镜像里只有已装备遗物，
+   *   仓库里那件的等级变了，界面得从服务端重新取（否则详情面板显示旧等级）。
+   */
   async function upgradeRelic(uid: string) {
-    return runAction({ type: 'relic.upgrade', uid }, true)
+    const res = await runAction({ type: 'relic.upgrade', uid }, true)
+    if (res) {
+      await loadRelicPage()
+      await loadRelicStats()
+    }
+    return res
   }
 
   async function decomposeRelic(uid: string) {
-    return runAction({ type: 'relic.decompose', uid }, true)
+    const res = await runAction({ type: 'relic.decompose', uid }, true)
+    if (res) {
+      await loadRelicPage()
+      await loadRelicStats()
+    }
+    return res
+  }
+
+  // ─────────────────────────── 遗物仓库（分页） ───────────────────────────
+
+  /**
+   * 仓库当前页（服务端权威）。
+   *
+   * ⚠ **分包后客户端镜像里只有已装备遗物**（≤36 件）：
+   *   仓库里可能有数千件，整包随存档回传会把每个动作的响应撑到 MB 级。
+   *   仓库改走 `GET /api/relics` 分页查询（只读，不改存档）。
+   */
+  const relicPage = ref<RelicPage>({ items: [], total: 0, page: 1, size: 60, pages: 1 })
+  /** 仓库是否正在加载 */
+  const relicPageLoading = ref(false)
+  /** 仓库加载失败的原因（离线 / 未登录 / 服务端错误） */
+  const relicPageError = ref<string | null>(null)
+  /** 遗物统计（仓库总数 + 按定义 id 分组）：顶栏件数与图鉴收藏数用它 */
+  const relicStats = ref<RelicStats>({ total: 0, byDefId: {} })
+  /**
+   * 最近一次仓库查询条件。
+   *
+   * 批量操作后要**按原条件重载**（还在第 3 页、还带着稀有度筛选），
+   * 所以要把查询条件记下来，不能每次都重置成第一页。
+   */
+  let lastRelicQuery: {
+    page?: number
+    size?: number
+    rarity?: string
+    setId?: string
+    defId?: string
+    sort?: string
+  } = {}
+
+  /** 加载仓库某页 */
+  async function loadRelicPage(query: {
+    page?: number
+    size?: number
+    rarity?: string
+    setId?: string
+    defId?: string
+    sort?: string
+  } = {}): Promise<RelicPage | null> {
+    const account = useAccountStore()
+    if (offline.value || account.offline || !account.isAuthenticated) {
+      relicPageError.value = '离线状态下无法加载仓库，恢复连接后再试'
+      return null
+    }
+    const effective = { ...lastRelicQuery, ...query }
+    lastRelicQuery = effective
+    relicPageLoading.value = true
+    try {
+      const page = await account.fetchRelicPage(effective)
+      relicPage.value = page
+      relicPageError.value = null
+      return page
+    } catch (err) {
+      if (isNetworkFailure(err)) offline.value = true
+      relicPageError.value = describeAccountError(err)
+      return null
+    } finally {
+      relicPageLoading.value = false
+    }
+  }
+
+  /** 加载遗物统计（仓库总数 / 按定义分组） */
+  async function loadRelicStats(): Promise<RelicStats | null> {
+    const account = useAccountStore()
+    if (offline.value || account.offline || !account.isAuthenticated) return null
+    try {
+      const stats = await account.fetchRelicStats()
+      relicStats.value = stats
+      return stats
+    } catch (err) {
+      if (isNetworkFailure(err)) offline.value = true
+      return null
+    }
+  }
+
+  /**
+   * 临时拉一页仓库（**不**写入仓库页状态）。
+   *
+   * 用于「遗物选择器」这类一次性场景：它要的是仓库里的一页，
+   * 不该把铸造页的页码 / 筛选状态冲掉。
+   */
+  async function queryRelics(query: {
+    page?: number
+    size?: number
+    rarity?: string
+    setId?: string
+    defId?: string
+    sort?: string
+  } = {}): Promise<RelicPage | null> {
+    const account = useAccountStore()
+    if (offline.value || account.offline || !account.isAuthenticated) return null
+    try {
+      return await account.fetchRelicPage(query)
+    } catch (err) {
+      if (isNetworkFailure(err)) offline.value = true
+      return null
+    }
+  }
+
+  /** 取单件遗物（详情页用；仓库列表里没有的那件也要能看） */
+  async function fetchRelic(uid: string): Promise<RelicInstance | null> {
+    const account = useAccountStore()
+    if (offline.value || account.offline || !account.isAuthenticated) return null
+    try {
+      return await account.fetchRelicByUid(uid)
+    } catch (err) {
+      if (isNetworkFailure(err)) offline.value = true
+      return null
+    }
+  }
+
+  /** 锁定 / 解锁遗物（锁定件永不被自动分解） */
+  async function lockRelic(uid: string, locked: boolean) {
+    const res = await runAction({ type: 'relic.lock', uid, locked }, true)
+    if (res) {
+      await loadRelicPage()
+      await loadRelicStats()
+    }
+    return res
+  }
+
+  /** 批量分解 */
+  async function decomposeRelics(uids: string[]) {
+    const res = await runAction({ type: 'relic.decomposeBatch', uids }, true)
+    if (res) {
+      await loadRelicPage()
+      await loadRelicStats()
+    }
+    return res
+  }
+
+  /** 批量强化 */
+  async function upgradeRelics(uids: string[], targetLevel?: number) {
+    const res = await runAction(
+      targetLevel === undefined
+        ? { type: 'relic.upgradeBatch', uids }
+        : { type: 'relic.upgradeBatch', uids, targetLevel },
+      true,
+    )
+    if (res) {
+      await loadRelicPage()
+      await loadRelicStats()
+    }
+    return res
+  }
+
+  /**
+   * 按筛选条件一键分解（默认清 1 级的未锁定未装备件）。
+   *
+   * ⚠ 单次动作上限 `RELIC.BATCH_MAX`（服务端同步执行，不能让事务长时间持锁），
+   *   所以「一键清理」要**循环到清完**——否则仓库里几千件低等级遗物
+   *   要点十几次才能清干净。
+   */
+  async function decomposeByFilter(filter: {
+    rarity?: Rarity
+    maxLevel?: number
+    setId?: string
+    includeEquipped?: boolean
+  }) {
+    let decomposed = 0
+    let silver = 0
+    let stones = 0
+    let rounds = 0
+    // 轮次上限只是防失控（64 × 200 = 12,800 件，远超库存上限）
+    for (let i = 0; i < 64; i++) {
+      const res = await runAction({ type: 'relic.decomposeByFilter', ...filter }, true)
+      if (!res) return null
+      rounds += 1
+      decomposed += res.decomposed
+      silver += res.silver
+      stones += res.stones
+      // 不足一批 = 已经清完
+      if (res.decomposed < RELIC.BATCH_MAX) break
+    }
+    if (decomposed > 0) {
+      await loadRelicPage()
+      await loadRelicStats()
+    }
+    return { decomposed, silver, stones, rounds }
   }
 
   // ─────────────────────────── 编队 ───────────────────────────
@@ -658,13 +868,21 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
-   * 遗物一键推荐的**预览**（纯计算，不改存档）。
+   * 遗物一键推荐的**预览**（服务端计算，不改存档）。
    *
-   * 规则一律由 core 的 `recommendRelicLoadout` 产出，表现层不自己算
-   * 「哪件更强」——那会与战斗里的属性口径分叉（铁律 #2）。
+   * ⚠ 分包后客户端镜像里只有**已装备**遗物，本地算不出「仓库里哪件更强」。
+   *   所以预览必须走服务端，且用的是与 `relic.autoEquip` **同一个函数**
+   *   → 预览 = 执行（铁律 #2 / #4）。
    */
-  function relicAdvice(heroId: string): RelicAdvice | null {
-    return computeRelicAdvice(save.value, heroId)
+  async function fetchRelicAdvice(heroId: string): Promise<RelicAdvice | null> {
+    const account = useAccountStore()
+    if (offline.value || account.offline || !account.isAuthenticated) return null
+    try {
+      return await account.fetchRelicAdvice(heroId)
+    } catch (err) {
+      if (isNetworkFailure(err)) offline.value = true
+      return null
+    }
   }
 
   /** 一键按推荐装备遗物 */
@@ -750,9 +968,24 @@ export const useGameStore = defineStore('game', () => {
     return res !== null
   }
 
-  /** 导出存档（base64 文本，供玩家备份） */
+  /**
+   * 导出存档（base64 文本，供玩家备份）。
+   *
+   * ⚠ **由服务端产出**：分包后客户端镜像里只有已装备遗物，
+   *   客户端自己拼出来的「备份」会丢掉整个仓库（假备份比没备份更糟）。
+   */
   async function exportSaveText(): Promise<string> {
-    return storage.export(save.value)
+    const account = useAccountStore()
+    if (offline.value || account.offline || !account.isAuthenticated) {
+      notify('离线状态下无法导出存档', 'warn')
+      return ''
+    }
+    try {
+      return await account.fetchSaveExport()
+    } catch (err) {
+      notify(describeAccountError(err), 'warn')
+      return ''
+    }
   }
 
   /** 导入存档（校验失败时不覆盖当前进度） */
@@ -798,6 +1031,11 @@ export const useGameStore = defineStore('game', () => {
     rebirthPreview,
     arenaLoadout,
     arenaHash,
+    // 仓库（分页，服务端权威）
+    relicPage,
+    relicPageLoading,
+    relicPageError,
+    relicStats,
     // actions
     load,
     reconnect,
@@ -818,13 +1056,21 @@ export const useGameStore = defineStore('game', () => {
     upgradeStar,
     upgradeRelic,
     decomposeRelic,
+    lockRelic,
+    decomposeRelics,
+    upgradeRelics,
+    decomposeByFilter,
+    loadRelicPage,
+    loadRelicStats,
+    queryRelics,
+    fetchRelic,
+    fetchRelicAdvice,
     setSlot,
     savePreset,
     applyPreset,
     removePreset,
     equip,
     unequip,
-    relicAdvice,
     autoEquipRelics,
     updateSettings,
     doRebirth,

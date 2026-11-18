@@ -22,7 +22,9 @@
  */
 import type { GameAction, GameActionType, ActionResultMap } from './actions.ts'
 import { SAVE_IMPORT } from '../config/save-import.ts'
+import { RELIC } from '../config/economy.ts'
 import type { GameErrorCode } from '../config/game-errors.ts'
+import type { Rarity } from '../model/types.ts'
 import type { OfflineSettlementResult } from './idle.ts'
 
 /** 动作请求体（客户端 → 服务端） */
@@ -90,6 +92,23 @@ function int(raw: unknown): number | null {
 function nullableStr(raw: unknown): string | null | undefined {
   if (raw === null) return null
   return typeof raw === 'string' ? raw : undefined
+}
+
+/**
+ * 批量负载的 uid 列表（协议层量纲校验）。
+ *
+ * 上限与 `RELIC.BATCH_MAX` 对齐：批量动作是**同步执行**的，
+ * 一次几千件会让服务端事务长时间持锁。
+ */
+function uidList(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > RELIC.BATCH_MAX) return null
+  const out: string[] = []
+  for (const item of raw) {
+    const uid = str(item)
+    if (!uid || uid.length > 64) return null
+    out.push(uid)
+  }
+  return out
 }
 
 /**
@@ -175,6 +194,50 @@ export function parseGameAction(raw: unknown): GameAction | null {
       const uid = str(raw.uid)
       if (!uid || uid.length > 64) return null
       return { type: 'relic.decompose', uid }
+    }
+    case 'relic.lock': {
+      const uid = str(raw.uid)
+      if (!uid || uid.length > 64 || typeof raw.locked !== 'boolean') return null
+      return { type: 'relic.lock', uid, locked: raw.locked }
+    }
+    case 'relic.decomposeBatch': {
+      const uids = uidList(raw.uids)
+      if (!uids) return null
+      return { type: 'relic.decomposeBatch', uids }
+    }
+    case 'relic.upgradeBatch': {
+      const uids = uidList(raw.uids)
+      if (!uids) return null
+      const out: Extract<GameAction, { type: 'relic.upgradeBatch' }> = { type: 'relic.upgradeBatch', uids }
+      if (raw.targetLevel !== undefined) {
+        const targetLevel = int(raw.targetLevel)
+        if (targetLevel === null) return null
+        out.targetLevel = targetLevel
+      }
+      return out
+    }
+    case 'relic.decomposeByFilter': {
+      const out: Extract<GameAction, { type: 'relic.decomposeByFilter' }> = { type: 'relic.decomposeByFilter' }
+      if (raw.rarity !== undefined) {
+        const rarity = str(raw.rarity)
+        if (!rarity || !['SSR', 'SR', 'R', 'N'].includes(rarity)) return null
+        out.rarity = rarity as Rarity
+      }
+      if (raw.maxLevel !== undefined) {
+        const maxLevel = int(raw.maxLevel)
+        if (maxLevel === null) return null
+        out.maxLevel = maxLevel
+      }
+      if (raw.setId !== undefined) {
+        const setId = str(raw.setId)
+        if (!setId || setId.length > 64) return null
+        out.setId = setId
+      }
+      if (raw.includeEquipped !== undefined) {
+        if (typeof raw.includeEquipped !== 'boolean') return null
+        out.includeEquipped = raw.includeEquipped
+      }
+      return out
     }
     case 'relic.equip': {
       const heroId = str(raw.heroId)

@@ -34,4 +34,22 @@ export function registerSaveRoutes(app: FastifyInstance, ctx: SaveContext): void
       offline: loaded.offline,
     })
   })
+
+  /**
+   * 导出存档串（只读）。
+   *
+   * ⚠ 必须由**服务端**产出：分包后客户端镜像里只有已装备遗物，
+   *   客户端自己拼出来的「备份」会丢掉整个仓库。
+   *
+   * 定位：玩家级小档备份 / 早期迁移。**正式恢复路径是数据库备份**
+   *   （见 roadmap P1-3）；超过导入通道上限（`SAVE_IMPORT.MAX_ENCODED_CHARS`）
+   *   的大档无法靠导出串恢复。
+   */
+  app.get('/api/save/export', { preHandler: ctx.authGuard }, async (req, reply) => {
+    const auth = req.auth
+    if (!auth) throw new ApiError(401, ERROR_CODES.UNAUTHORIZED, '请先登录')
+    const text = await ctx.service.exportSaveText(auth.sub)
+    if (!text) throw new ApiError(404, ERROR_CODES.NO_SAVE, '该账号还没有存档')
+    return reply.code(200).send({ text })
+  })
 }

@@ -32,6 +32,10 @@ export const GAME_ERROR_CODES = {
   MAX_RELIC_LEVEL: 'MAX_RELIC_LEVEL',
   /** 遗物已锁定，不可分解 */
   RELIC_LOCKED: 'RELIC_LOCKED',
+  /** 批量操作没有选中任何遗物 */
+  RELIC_BATCH_EMPTY: 'RELIC_BATCH_EMPTY',
+  /** 批量操作超过单次上限 */
+  RELIC_BATCH_TOO_LARGE: 'RELIC_BATCH_TOO_LARGE',
   /** 编队为空 */
   TEAM_EMPTY: 'TEAM_EMPTY',
   /** 今天已经签到过了 */
@@ -75,6 +79,8 @@ export const GAME_ERROR_MESSAGES: Record<GameErrorCode, string> = {
   SKILL_CAP: '当前等级无法继续提升',
   MAX_RELIC_LEVEL: '已达强化等级上限',
   RELIC_LOCKED: '遗物已锁定',
+  RELIC_BATCH_EMPTY: '没有选中任何遗物',
+  RELIC_BATCH_TOO_LARGE: '单次批量操作的数量过多',
   TEAM_EMPTY: '请先在阵位中编队',
   ALREADY_SIGNED: '今天已经签到过了',
   CODE_INVALID: '兑换码无效',

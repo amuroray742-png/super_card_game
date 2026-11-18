@@ -24,10 +24,14 @@ import {
   type AccountUser,
   type AuthResult,
   type CloudSave,
+  type RelicPage,
+  type RelicStats,
 } from '../../platform/account.ts'
 import { storage } from '../../platform/storage.ts'
 import type { GameAction } from '../../core/systems/actions.ts'
 import type { ActionResponse } from '../../core/systems/action-protocol.ts'
+import type { RelicInstance } from '../../core/model/types.ts'
+import type { RelicAdvice } from '../../core/systems/relic-advice.ts'
 
 export type AccountStatus = 'unknown' | 'guest' | 'authenticated'
 
@@ -257,6 +261,42 @@ export const useAccountStore = defineStore('account', () => {
     return authorized((token) => accountClient.sendAction(token, actionId, action))
   }
 
+  // ─────────────────────── 只读查询（仓库 / 预览 / 导出） ───────────────────────
+
+  /** 仓库分页（服务端权威） */
+  async function fetchRelicPage(
+    query: {
+      page?: number
+      size?: number
+      rarity?: string
+      setId?: string
+      defId?: string
+      sort?: string
+    } = {},
+  ): Promise<RelicPage> {
+    return authorized((token) => accountClient.fetchRelicPage(token, query))
+  }
+
+  /** 遗物统计（仓库总数 / 按定义分组） */
+  async function fetchRelicStats(): Promise<RelicStats> {
+    return authorized((token) => accountClient.fetchRelicStats(token))
+  }
+
+  /** 单件遗物 */
+  async function fetchRelicByUid(uid: string): Promise<RelicInstance> {
+    return authorized((token) => accountClient.fetchRelicByUid(token, uid))
+  }
+
+  /** 遗物推荐预览（与服务端执行同一函数） */
+  async function fetchRelicAdvice(heroId: string): Promise<RelicAdvice> {
+    return authorized((token) => accountClient.fetchRelicAdvice(token, heroId))
+  }
+
+  /** 导出存档串（服务端产出，含全部遗物） */
+  async function fetchSaveExport(): Promise<string> {
+    return authorized((token) => accountClient.fetchSaveExport(token))
+  }
+
   return {
     user,
     status,
@@ -274,6 +314,11 @@ export const useAccountStore = defineStore('account', () => {
     refreshSession,
     pullCloudSave,
     sendAction,
+    fetchRelicPage,
+    fetchRelicStats,
+    fetchRelicByUid,
+    fetchRelicAdvice,
+    fetchSaveExport,
   }
 })
 

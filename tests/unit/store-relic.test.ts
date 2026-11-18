@@ -11,6 +11,10 @@
  *
  * ⚠ 服务端权威后，遗物是**服务端**掉的、本地只是镜像：
  *   所以这里跑的是真实链路（真实后端 + 真实 core），不是客户端自算。
+ *
+ * ⚠ **存档分包**后，客户端镜像里**只有已装备遗物**（≤36 件）：
+ *   仓库里的其它遗物走 `GET /api/relics` 分页接口。
+ *   所以断言「仓库里有几件」必须问服务端，不能看镜像（铁律 #8 / #16）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
@@ -80,6 +84,24 @@ function cached(): { relics?: unknown[] } {
   return JSON.parse(mem.get(key ?? '') ?? '{}') as { relics?: unknown[] }
 }
 
+/**
+ * 服务端仓库（分页接口）。
+ *
+ * ⚠ 客户端镜像里只有已装备遗物 → 「仓库里有几件」只能问服务端。
+ */
+async function serverRelics(): Promise<Array<{ uid: string; defId: string; level: number }>> {
+  const store = useGameStore()
+  const page = await store.loadRelicPage({ page: 1, size: 200 })
+  return page?.items ?? []
+}
+
+/** 服务端仓库总件数（分页接口的 total） */
+async function serverRelicTotal(): Promise<number> {
+  const store = useGameStore()
+  const page = await store.loadRelicPage({ page: 1, size: 1 })
+  return page?.total ?? 0
+}
+
 describe('遗物获取链路', () => {
   beforeEach(async () => {
     await registerAndLoad('relic_user')
@@ -88,7 +110,7 @@ describe('遗物获取链路', () => {
   it('挂机一场：遗物真的进了仓库（不是被丢弃）', async () => {
     const store = useGameStore()
     await seedSave()
-    const before = store.save.relics.length
+    const before = await serverRelicTotal()
 
     advanceBattles(1)
     const result = await store.tickIdle(1)
@@ -97,8 +119,8 @@ describe('遗物获取链路', () => {
     const dropped = result!.rewards.relics?.length ?? 0
     expect(dropped).toBeGreaterThan(0)
 
-    // 服务端入库后，镜像里确实多了
-    expect(store.save.relics.length).toBe(before + dropped)
+    // 服务端入库后，仓库里确实多了
+    expect(await serverRelicTotal()).toBe(before + dropped)
   })
 
   it('入库的遗物实例结构完整（defId / uid / 等级齐全，能被强化与装备）', async () => {
@@ -107,8 +129,9 @@ describe('遗物获取链路', () => {
     advanceBattles(2)
     await store.tickIdle(2)
 
-    const relic = store.save.relics[0]
-    expect(relic).toBeDefined()
+    const relics = await serverRelics()
+    expect(relics.length).toBeGreaterThan(0)
+    const relic = relics[0]
     expect(relic.defId).toBeTruthy()
     expect(relic.uid).toBeTruthy()
     expect(relic.level).toBeGreaterThanOrEqual(1)
@@ -119,21 +142,52 @@ describe('遗物获取链路', () => {
     await seedSave()
     advanceBattles(1)
     await store.tickIdle(1)
-    const one = store.save.relics.length
+    const one = await serverRelicTotal()
     advanceBattles(3)
     await store.tickIdle(3)
-    expect(store.save.relics.length).toBe(one + 3)
+    expect(await serverRelicTotal()).toBe(one + 3)
   })
 
-  it('遗物也进了本地缓存（断网时还能看到最近进度）', async () => {
+  it('仓库分页接口可用：分页取到的件数与总数对得上', async () => {
     const store = useGameStore()
     await seedSave()
-    advanceBattles(1)
-    await store.tickIdle(1)
-    const inSave = store.save.relics.length
-    expect(inSave).toBeGreaterThan(0)
+    advanceBattles(4)
+    await store.tickIdle(4)
 
-    expect(cached().relics?.length ?? 0).toBe(inSave)
+    const page = await store.loadRelicPage({ page: 1, size: 2 })
+    expect(page).not.toBeNull()
+    expect(page!.items.length).toBeLessThanOrEqual(2)
+    expect(page!.total).toBeGreaterThanOrEqual(page!.items.length)
+    expect(page!.pages).toBe(Math.max(1, Math.ceil(page!.total / page!.size)))
+  })
+
+  it('遗物统计接口给出仓库总数（顶栏件数与图鉴收藏数靠它）', async () => {
+    const store = useGameStore()
+    await seedSave()
+    advanceBattles(2)
+    await store.tickIdle(2)
+
+    const stats = await store.loadRelicStats()
+    expect(stats).not.toBeNull()
+    expect(stats!.total).toBe(await serverRelicTotal())
+    expect(Object.keys(stats!.byDefId).length).toBeGreaterThan(0)
+  })
+
+  it('镜像只带已装备遗物（仓库不进镜像，首屏不会被几千件遗物撑爆）', async () => {
+    const store = useGameStore()
+    const rng = new Rng(7)
+    await seedSave((save) => {
+      save.relics = [
+        makeTestRelic('set_zhanshen_1', rng, 1),
+        makeTestRelic('set_zhanshen_2', rng, 1),
+        makeTestRelic('set_zhanshen_3', rng, 1),
+      ]
+    })
+
+    // 一件都没装备 → 镜像里的遗物数组是空的
+    expect(store.save.relics).toHaveLength(0)
+    // 但服务端仓库里确实有 3 件
+    expect(await serverRelicTotal()).toBe(3)
   })
 
   it('离线结算同样产出遗物（服务端按自己的时间补算）', async () => {
@@ -144,7 +198,7 @@ describe('遗物获取链路', () => {
     await store.claimOffline()
     expect(store.offlineReport).not.toBeNull()
     expect(store.offlineReport!.rewards.relics?.length ?? 0).toBeGreaterThan(0)
-    expect(store.save.relics.length).toBeGreaterThan(0)
+    expect(await serverRelicTotal()).toBeGreaterThan(0)
   })
 })
 
@@ -176,13 +230,10 @@ describe('遗物强化', () => {
 
     await store.upgradeRelic(relic.uid)
 
-    expect(store.save.relics[0].level).toBe(2)
+    const upgraded = (await serverRelics()).find((r) => r.uid === relic.uid)
+    expect(upgraded?.level).toBe(2)
     expect(store.save.player.silver).toBe(silver0 - RELIC_UPGRADE.silver)
     expect(store.save.player.relicStones).toBe(stones0 - RELIC_UPGRADE.stones)
-
-    // 缓存里也是强化后的版本
-    const cachedRelic = (cached().relics as Array<{ level: number }> | undefined)?.[0]
-    expect(cachedRelic?.level).toBe(2)
   })
 
   it('资源不足时拒绝强化：不扣资源、等级不变', async () => {
@@ -197,7 +248,8 @@ describe('遗物强化', () => {
 
     await store.upgradeRelic(relic.uid)
 
-    expect(store.save.relics[0].level).toBe(1)
+    const unchanged = (await serverRelics()).find((r) => r.uid === relic.uid)
+    expect(unchanged?.level).toBe(1)
     expect(store.save.player.silver).toBe(0)
     expect(store.save.player.relicStones).toBe(0)
   })
@@ -209,10 +261,13 @@ describe('遗物强化', () => {
     await seedSave((save) => {
       save.relics = [relic]
     })
-    const before = getRelicMods(store.save.relics[0]).map((m) => m.value)
+    const before = getRelicMods(relic).map((m) => m.value)
 
     await store.upgradeRelic(relic.uid)
-    const after = getRelicMods(store.save.relics[0]).map((m) => m.value)
+
+    const upgraded = (await serverRelics()).find((r) => r.uid === relic.uid)
+    expect(upgraded).toBeDefined()
+    const after = getRelicMods({ ...relic, level: upgraded!.level }).map((m) => m.value)
 
     // 主词条变大，副词条不变 → 至少有一条变大
     expect(after.some((v, i) => v > before[i])).toBe(true)
@@ -224,6 +279,9 @@ describe('遗物强化', () => {
  *
  * ⚠ 守的是「点了按钮之后遗物真的穿上了、战力真的涨了」，
  *   不是「core 里有个推荐函数」——同 AGENTS.md 铁律 #22 的教训。
+ *
+ * ⚠ 预览走**服务端**（`GET /api/relics/advice`）：分包后客户端镜像里
+ *   只有已装备遗物，本地算不出「仓库里哪件更强」。
  */
 describe('遗物一键推荐装备', () => {
   beforeEach(async () => {
@@ -248,7 +306,7 @@ describe('遗物一键推荐装备', () => {
       save.relics = pool.map((id) => makeTestRelic(id, rng, 60))
     })
 
-    const before = store.relicAdvice('xiangyu')
+    const before = await store.fetchRelicAdvice('xiangyu')
     expect(before).not.toBeNull()
     expect(before!.currentPower).toBeGreaterThan(0)
 
@@ -261,7 +319,7 @@ describe('遗物一键推荐装备', () => {
     expect(equipped).toHaveLength(6)
 
     // 战力确实涨了（重新取属性，与推荐算的是同一套口径）
-    const after = store.relicAdvice('xiangyu')
+    const after = await store.fetchRelicAdvice('xiangyu')
     expect(after!.currentPower).toBeGreaterThanOrEqual(before!.currentPower)
   })
 
@@ -303,5 +361,128 @@ describe('遗物一键推荐装备', () => {
     expect(advice).not.toBeNull()
     expect(advice!.gain).toBe(0)
     expect(getEquippedRelics(store.save, 'xiangyu').filter(Boolean)).toHaveLength(0)
+  })
+})
+
+/**
+ * 批量操作与锁定（真实链路）。
+ *
+ * ⚠ 守的是「批量走服务端权威动作」——覆盖已装备、锁定与重复提交
+ *   （roadmap P1-1 验收条件）。
+ */
+describe('遗物批量操作与锁定', () => {
+  beforeEach(async () => {
+    await registerAndLoad('relic_user')
+  })
+
+  it('锁定：锁定件不被批量分解，且锁定状态真的落库', async () => {
+    const store = useGameStore()
+    const rng = new Rng(31337)
+    const relics = [
+      makeTestRelic('set_zhanshen_1', rng, 1),
+      makeTestRelic('set_zhanshen_2', rng, 1),
+    ]
+    await seedSave((save) => {
+      save.relics = relics
+    })
+
+    await store.lockRelic(relics[0].uid, true)
+    const locked = (await serverRelics()).find((r) => r.uid === relics[0].uid)
+    expect(locked).toBeDefined()
+
+    const res = await store.decomposeRelics([relics[0].uid, relics[1].uid])
+    expect(res).not.toBeNull()
+    expect(res!.decomposed).toBe(1)
+    expect(res!.skipped).toEqual([relics[0].uid])
+
+    const left = await serverRelics()
+    expect(left.map((r) => r.uid)).toEqual([relics[0].uid])
+  })
+
+  it('批量分解：全部拆掉，银两与强化石按同一口径返还', async () => {
+    const store = useGameStore()
+    const rng = new Rng(4242)
+    const relics = [
+      makeTestRelic('set_zhanshen_1', rng, 3),
+      makeTestRelic('set_zhanshen_2', rng, 3),
+      makeTestRelic('set_zhanshen_3', rng, 3),
+    ]
+    await seedSave((save) => {
+      save.relics = relics
+    })
+    const silver0 = store.save.player.silver
+
+    const res = await store.decomposeRelics(relics.map((r) => r.uid))
+    expect(res).not.toBeNull()
+    expect(res!.decomposed).toBe(3)
+    expect(await serverRelicTotal()).toBe(0)
+    expect(store.save.player.silver).toBe(silver0 + res!.silver)
+  })
+
+  it('重复提交的 uid 只处理一次', async () => {
+    const store = useGameStore()
+    const rng = new Rng(777)
+    const relic = makeTestRelic('set_zhanshen_1', rng, 1)
+    await seedSave((save) => {
+      save.relics = [relic]
+    })
+
+    const res = await store.decomposeRelics([relic.uid, relic.uid, relic.uid])
+    expect(res).not.toBeNull()
+    expect(res!.decomposed).toBe(1)
+    expect(await serverRelicTotal()).toBe(0)
+  })
+
+  it('已装备的遗物批量分解时先卸下（装备关系不留悬空引用）', async () => {
+    const store = useGameStore()
+    const rng = new Rng(8888)
+    const relic = makeTestRelic('set_zhanshen_1', rng, 1)
+    await seedSave((save) => {
+      save.relics = [relic]
+      save.equipped['xiangyu#0'] = { heroId: 'xiangyu', relicId: relic.uid }
+    })
+
+    const res = await store.decomposeRelics([relic.uid])
+    expect(res).not.toBeNull()
+    expect(res!.unequipped).toBe(1)
+    expect(getEquippedRelics(store.save, 'xiangyu').filter(Boolean)).toHaveLength(0)
+  })
+
+  it('批量强化：资源不够就整批拒绝（一件都不强化）', async () => {
+    const store = useGameStore()
+    const rng = new Rng(9999)
+    const relics = [
+      makeTestRelic('set_zhanshen_1', rng, 1),
+      makeTestRelic('set_zhanshen_2', rng, 1),
+    ]
+    await seedSave((save) => {
+      save.relics = relics
+      save.player.silver = 0
+      save.player.relicStones = 0
+    })
+
+    const res = await store.upgradeRelics(relics.map((r) => r.uid))
+    expect(res).toBeNull()
+    const after = await serverRelics()
+    expect(after.every((r) => r.level === 1)).toBe(true)
+  })
+
+  it('一键分解：只清未锁定、未装备的低等级件', async () => {
+    const store = useGameStore()
+    const rng = new Rng(1212)
+    const junk = makeTestRelic('set_zhanshen_1', rng, 1)
+    const kept = makeTestRelic('set_zhanshen_2', rng, 60)
+    const locked = makeTestRelic('set_zhanshen_3', rng, 1)
+    await seedSave((save) => {
+      save.relics = [junk, kept, locked]
+      save.equipped['xiangyu#0'] = { heroId: 'xiangyu', relicId: kept.uid }
+    })
+    await store.lockRelic(locked.uid, true)
+
+    const res = await store.decomposeByFilter({ maxLevel: 1 })
+    expect(res).not.toBeNull()
+    expect(res!.decomposed).toBe(1)
+    const left = (await serverRelics()).map((r) => r.uid)
+    expect(left.sort()).toEqual([kept.uid, locked.uid].sort())
   })
 })

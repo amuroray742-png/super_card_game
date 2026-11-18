@@ -17,6 +17,7 @@ import { Rng } from '../rng.ts'
 import { runBattle } from './battle.ts'
 import { getTeamPower } from './team.ts'
 import { getRelicMods, generateRelic } from './relic.ts'
+import { emptyOverflow, type InventoryOverflowResult } from './inventory.ts'
 
 /**
  * 离线效率（0..1）：把真实时长折算成"满效率等价时长"。
@@ -149,6 +150,13 @@ export interface OfflineSettlementResult {
   nextTargetStage: number
   reachedStage: number
   newRelics: string[]
+  /**
+   * 库存溢出处理结果（仓库超过上限时自动分解了最没用的遗物）。
+   *
+   * ⚠ **可见**：玩家必须看见「仓库满了，有 N 件被自动分解」，
+   *   否则「掉落被悄悄吞掉」会被当成 bug。
+   */
+  overflow: InventoryOverflowResult
 }
 
 /**
@@ -181,6 +189,7 @@ export function settleOffline(
       lastClearedStage: null,
       nextTargetStage: currentStage,
       newRelics: [],
+      overflow: emptyOverflow(),
     }
   }
 
@@ -197,6 +206,7 @@ export function settleOffline(
     lastClearedStage: run.lastClearedStage,
     nextTargetStage: run.nextTargetStage,
     newRelics: run.newRelics,
+    overflow: emptyOverflow(),
   }
 }
 

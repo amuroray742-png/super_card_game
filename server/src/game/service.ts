@@ -19,11 +19,18 @@
  * - 收益只经 `rewards` 入库（铁律 #4 / #26）
  */
 import { randomInt } from 'node:crypto'
-import type { SaveData } from '../../../src/core/model/types.ts'
-import { deserialize, serialize, serializePublicSave } from '../../../src/core/save/serialize.ts'
+import type { RelicInstance, SaveData } from '../../../src/core/model/types.ts'
+import {
+  exportSave,
+  readSaveBody,
+  restoreSave,
+  serializePublicSave,
+  serializeSaveBody,
+} from '../../../src/core/save/serialize.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
 import { Rng } from '../../../src/core/rng.ts'
 import { ACCOUNT, LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
+import { IDLE } from '../../../src/core/config/economy.ts'
 import { GAME_ERROR_CODES, GAME_ERROR_MESSAGES } from '../../../src/core/config/game-errors.ts'
 import {
   applyAction,
@@ -34,10 +41,28 @@ import {
   type GameActionType,
 } from '../../../src/core/systems/actions.ts'
 import type { OfflineSettlementResult } from '../../../src/core/systems/idle.ts'
+import { computeRelicAdvice } from '../../../src/core/systems/actions.ts'
+import type { RelicAdvice } from '../../../src/core/systems/relic-advice.ts'
 import type { ActionRequest, ActionResponse, SaveSnapshot } from '../../../src/core/systems/action-protocol.ts'
 import type { Db } from '../db.ts'
 import { UserLock } from './lock.ts'
-import { expireActionResults, readActionLog, readFlag, readSave, writeActionLog, writeFlag, writeSave } from './repo.ts'
+import {
+  countRelics,
+  expireActionResults,
+  readActionLog,
+  readFlag,
+  readRelicByUid,
+  readRelicPage,
+  readRelicStats,
+  readRelics,
+  readRelicsByUids,
+  readSave,
+  replaceRelics,
+  syncRelics,
+  writeActionLog,
+  writeFlag,
+  writeSave,
+} from './repo.ts'
 
 /** 服务端随机种子（密码学随机源；**不得**用常量种子——所有玩家会抽到同一串） */
 export function serverSeed(): number {
@@ -46,6 +71,35 @@ export function serverSeed(): number {
 
 function publicSnapshot(save: SaveData): SaveSnapshot {
   return { payload: serializePublicSave(save), savedAt: save.savedAt }
+}
+
+/** 遗物快照（uid → 等级 / 锁定）：增量同步遗物行时用来判断「变了没」 */
+function relicSnapshot(relics: RelicInstance[]): Map<string, { level: number; locked: boolean }> {
+  const map = new Map<string, { level: number; locked: boolean }>()
+  for (const relic of relics) {
+    map.set(relic.uid, { level: relic.level, locked: relic.locked })
+  }
+  return map
+}
+
+/**
+ * 离线结算明细的**回包过滤**。
+ *
+ * 收益照算、照落库（玩家断网期间不损失收益），但只有「离线时长达到阈值」
+ * 才把明细回传去弹窗——否则在线期间每点一下都会弹一次「离线结算」。
+ */
+function offlineForClient(offline: OfflineSettlementResult | null): OfflineSettlementResult | null {
+  if (!offline) return null
+  return offline.elapsedSeconds >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC ? offline : null
+}
+
+/** 存档主体里已装备的遗物 id（心跳只需要这几件） */
+function equippedIdsOf(body: { equipped?: Record<string, { relicId?: string }> }): string[] {
+  const out: string[] = []
+  for (const entry of Object.values(body.equipped ?? {})) {
+    if (entry && typeof entry.relicId === 'string' && entry.relicId) out.push(entry.relicId)
+  }
+  return out
 }
 
 /** 幂等日志里存的内容（只存成功动作的结果） */
@@ -93,23 +147,93 @@ export class GameService {
   async load(userId: number): Promise<{ save: SaveSnapshot; offline: OfflineSettlementResult | null } | null> {
     return this.lock.run(userId, () => {
       const now = Date.now()
-      const row = readSave(this.db, userId)
-      if (!row) return null
+      const loaded = this.readSaveForUser(userId)
+      if (!loaded) return null
+      const { save } = loaded
 
-      const save = deserialize(row.payload)
       const prepared = this.prepare(save, now)
       if (prepared.dirty) {
         save.savedAt = now
-        writeSave(this.db, userId, serialize(save), save.savedAt, now)
+        this.writeSaveAndRelics(userId, save, loaded.before, now)
       }
       return {
         save: publicSnapshot(save),
-        offline: prepared.offline,
+        offline: offlineForClient(prepared.offline),
       }
     })
   }
 
   // ─────────────────────────── 内部实现 ───────────────────────────
+
+  /**
+   * 读存档（主体 + 遗物 → 完整存档）。
+   *
+   * ⚠ 旧格式兼容：早期 payload 是一整份存档（顶层带 `relics` 数组）。
+   *   读到这种 payload 时当场拆表（同一事务、幂等），之后一律走新路径。
+   *
+   * @param equippedOnly 只取「已装备」的遗物（心跳用：≤36 件，不必拉整张表）
+   */
+  private readSaveForUser(userId: number, opts: { equippedOnly?: boolean } = {}): {
+    save: SaveData
+    /** 载入时的遗物快照（uid → 等级 / 锁定），用于增量同步 */
+    before: Map<string, { level: number; locked: boolean }>
+  } | null {
+    const row = readSave(this.db, userId)
+    if (!row) return null
+    const { body, legacyRelics } = readSaveBody(row.payload)
+    const relics = legacyRelics ?? (opts.equippedOnly
+      ? readRelicsByUids(this.db, userId, equippedIdsOf(body))
+      : readRelics(this.db, userId))
+    const save = restoreSave(body, relics)
+
+    if (legacyRelics) {
+      // 存量大档：就地拆表（幂等；拆完 payload 只剩主体）
+      this.splitLegacyRelics(userId, save)
+    }
+    return { save, before: relicSnapshot(save.relics) }
+  }
+
+  /** 存量 payload → 拆表（同一事务；拆完 payload 只剩主体） */
+  private splitLegacyRelics(userId: number, save: SaveData): void {
+    const now = Date.now()
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      replaceRelics(this.db, userId, save.relics)
+      writeSave(this.db, userId, serializeSaveBody(save), save.savedAt, now)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  /**
+   * 落库：存档主体 + 遗物行（**同一事务**）。
+   *
+   * 遗物行只写**变化的部分** —— 仓库几千件时，全量重写会让事务时间
+   * 随遗物数线性增长，而心跳每 5 秒就来一次。
+   *
+   * @param syncRelics 是否同步遗物行。**心跳必须传 false**：
+   *   心跳只载入「已装备」的遗物（见 `readSaveForUser`），
+   *   若此时同步遗物行，会把仓库里其余几千件当成「已删除」抹掉。
+   */
+  private writeSaveAndRelics(
+    userId: number,
+    save: SaveData,
+    before: Map<string, { level: number; locked: boolean }>,
+    now: number,
+    opts: { syncRelics?: boolean } = {},
+  ): void {
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      writeSave(this.db, userId, serializeSaveBody(save), save.savedAt, now)
+      if (opts.syncRelics !== false) syncRelics(this.db, userId, before, save.relics)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
 
   private executeSync(userId: number, request: ActionRequest): ActionResponse {
     const now = Date.now()
@@ -119,8 +243,8 @@ export class GameService {
     // ① 成功动作 ID 永久防重，心跳只按服务端时间续约。
     const logged = isHeartbeat ? undefined : readActionLog(this.db, userId, request.actionId)
     if (logged) {
-      const row = readSave(this.db, userId)
-      const save = row ? publicSnapshot(deserialize(row.payload)) : undefined
+      const loaded = this.readSaveForUser(userId)
+      const save = loaded ? publicSnapshot(loaded.save) : undefined
       if (!logged.result || logged.created_at <= expiresBefore) {
         return {
           ok: false,
@@ -176,7 +300,12 @@ export class GameService {
         message: GAME_ERROR_MESSAGES.IMPORT_FORBIDDEN,
       }
     }
-    const save = row ? deserialize(row.payload) : createNewSave(now, serverSeed())
+    // 读存档（主体 + 遗物 → 完整存档）；旧格式 payload 会在读取时就地拆表
+    // ⚠ 心跳是「轻量心跳」：只载入**已装备**的遗物（≤36 件），不拉整张遗物表
+    const loaded = row ? this.readSaveForUser(userId, { equippedOnly: isHeartbeat }) : null
+    const save = loaded ? loaded.save : createNewSave(now, serverSeed())
+    // 遗物快照取自**载入时**（prepare / 动作新增的遗物要在落库时插进表里）
+    const relicBefore = loaded ? loaded.before : new Map<string, { level: number; locked: boolean }>()
 
     // ③ 挂机动作自己消费账本，避免入口预结算吞掉其上限与返回结果。
     const prepared = this.prepare(save, now, request.action.type !== 'idle.tick' && request.action.type !== 'idle.claimOffline' && !isHeartbeat)
@@ -194,7 +323,7 @@ export class GameService {
     if (!outcome.ok) {
       if (prepared.dirty) {
         save.savedAt = now
-        writeSave(this.db, userId, serialize(save), save.savedAt, now)
+        this.writeSaveAndRelics(userId, save, relicBefore, now, { syncRelics: !isHeartbeat })
       }
       return {
         ok: false,
@@ -202,8 +331,10 @@ export class GameService {
         code: outcome.code,
         message: outcome.message,
         silent: outcome.silent,
-        save: row ? publicSnapshot(save) : undefined,
-        offline: prepared.offline,
+        // ⚠ 心跳是「轻量心跳」：只续约租约，不回传存档主体
+        //   （心跳每 5 秒一次，回包会变成一笔持续的带宽成本）。
+        save: isHeartbeat ? undefined : (row ? publicSnapshot(save) : undefined),
+        offline: offlineForClient(prepared.offline),
       }
     }
 
@@ -212,9 +343,9 @@ export class GameService {
       syncRngState(save, rng)
     }
 
-    // ⑦ 落库：存档与幂等日志**同一事务**（避免「扣了费却没记日志」→ 重试再扣一次）
+    // ⑦ 落库：存档主体、遗物行与幂等日志**同一事务**
+    //    （避免「扣了费却没记日志」→ 重试再扣一次；也避免「主体写了、遗物没写」）
     save.savedAt = now
-    const payload = serialize(save)
     const stored: StoredOutcome = {
       ok: true,
       result: outcome.result,
@@ -223,7 +354,10 @@ export class GameService {
     }
     this.db.exec('BEGIN IMMEDIATE')
     try {
-      writeSave(this.db, userId, payload, save.savedAt, now)
+      writeSave(this.db, userId, serializeSaveBody(save), save.savedAt, now)
+      // ⚠ 心跳不碰遗物行：它只载入过「已装备」的那几件，
+      //   此时同步遗物行会把仓库里其余几千件当成「已删除」抹掉。
+      if (!isHeartbeat) syncRelics(this.db, userId, relicBefore, save.relics)
       if (!isHeartbeat) {
         writeActionLog(this.db, userId, request.actionId, JSON.stringify(stored), now)
         expireActionResults(this.db, userId, expiresBefore)
@@ -244,8 +378,10 @@ export class GameService {
       result: outcome.result,
       message: outcome.message,
       messageKind: outcome.messageKind,
-      save: publicSnapshot(save),
-      offline: prepared.offline,
+      // ⚠ 轻量心跳：心跳不发放任何奖励，客户端镜像无需刷新 →
+      //   不回传存档主体（省掉每 5 秒一次的整包回传）。
+      save: isHeartbeat ? undefined : publicSnapshot(save),
+      offline: offlineForClient(prepared.offline),
     }
   }
 
@@ -273,5 +409,88 @@ export class GameService {
     syncRngState(save, settleRng)
     dirty ||= JSON.stringify([save.lastTickAt, save.idle]) !== before
     return { offline, dirty }
+  }
+
+  // ─────────────────────────── 只读查询（仓库 / 导出） ───────────────────────────
+
+  /**
+   * 仓库分页（只读）。
+   *
+   * ⚠ 遗物不再随存档回包下发：仓库里可能有数千件，
+   *   整包回传会把每个动作的响应撑到 MB 级。
+   */
+  async relicPage(
+    userId: number,
+    query: {
+      page: number
+      size: number
+      rarity?: string
+      setId?: string
+      defId?: string
+      sort?: string
+    },
+  ): Promise<{ items: RelicInstance[]; total: number; page: number; size: number; pages: number }> {
+    return this.lock.run(userId, () => {
+      const size = Math.min(Math.max(1, query.size), 200)
+      const page = Math.max(1, query.page)
+      // ⚠ total 必须与 items 用同一套筛选，否则页数按全量算 → 后面全是空页
+      const total = countRelics(this.db, userId, {
+        rarity: query.rarity,
+        setId: query.setId,
+        defId: query.defId,
+      })
+      const items = readRelicPage(this.db, userId, {
+        limit: size,
+        offset: (page - 1) * size,
+        rarity: query.rarity,
+        setId: query.setId,
+        defId: query.defId,
+        sort: query.sort,
+      })
+      return { items, total, page, size, pages: Math.max(1, Math.ceil(total / size)) }
+    })
+  }
+
+  /** 单件遗物（只读） */
+  async relicByUid(userId: number, uid: string): Promise<RelicInstance | null> {
+    return this.lock.run(userId, () => readRelicByUid(this.db, userId, uid) ?? null)
+  }
+
+  /**
+   * 遗物统计（只读）：仓库总数 + 按定义 id 分组。
+   *
+   * 客户端镜像里只有已装备遗物，顶栏件数与图鉴收藏数必须由服务端给。
+   */
+  async relicStats(userId: number): Promise<{ total: number; byDefId: Record<string, number> }> {
+    return this.lock.run(userId, () => readRelicStats(this.db, userId))
+  }
+
+  /**
+   * 遗物推荐预览（只读）。
+   *
+   * ⚠ 预览与服务端执行**必须同源**：客户端镜像里只有已装备遗物，
+   *   本地算不出「仓库里哪件更强」。这里用全量候选池算，
+   *   与 `relic.autoEquip` 动作是**同一个函数** → 预览 = 执行（铁律 #2 / #4）。
+   */
+  async relicAdvice(userId: number, heroId: string): Promise<RelicAdvice | null> {
+    return this.lock.run(userId, () => {
+      const loaded = this.readSaveForUser(userId)
+      if (!loaded) return null
+      return computeRelicAdvice(loaded.save, heroId)
+    })
+  }
+
+  /**
+   * 导出存档串（只读）。
+   *
+   * ⚠ 必须由**服务端**产出：客户端镜像里只有已装备遗物，
+   *   自己拼出来的「备份」会丢掉整个仓库。
+   */
+  async exportSaveText(userId: number): Promise<string | null> {
+    return this.lock.run(userId, () => {
+      const loaded = this.readSaveForUser(userId)
+      if (!loaded) return null
+      return exportSave(loaded.save)
+    })
   }
 }

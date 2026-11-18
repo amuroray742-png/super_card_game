@@ -1,12 +1,18 @@
 <script setup lang="ts">
 /**
  * 铸造：遗物仓库与装备管理。
+ *
+ * ⚠ **仓库走服务端分页**（`GET /api/relics`）：存档分包后客户端镜像里
+ *   只有已装备遗物，仓库可能有数千件，整包拉下来会把每个动作的响应
+ *   撑到 MB 级。筛选 / 排序 / 分页条件全部传给服务端，不在前端过滤。
+ *
  * 套装件数与生效判定取 core 的 RELIC_SETS / getSetModsBySetIds，组件不另立规则。
  */
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { RELIC_DEFS, RELIC_SETS, getRelicMods, getSetModsBySetIds, relicUpgradeCost } from '../../core/systems/relic.ts'
+import { RELIC } from '../../core/config/economy.ts'
 import { relicIconPath } from '../../core/config/art.ts'
 import { formatNumber } from '../utils/format'
 import type { Rarity, RelicInstance, StatMod } from '../../core/model/types.ts'
@@ -16,27 +22,30 @@ const router = useRouter()
 
 const RARITIES: Rarity[] = ['SSR', 'SR', 'R', 'N']
 
+/** 稀有度筛选（服务端过滤） */
 const rarityFilter = ref<Rarity | '全部'>('全部')
-const sortByLevel = ref(true)
-const selectedUid = ref<string | null>(null)
+/** 排序：等级高→低 / 等级低→高（服务端排序） */
+const sortAsc = ref(false)
+/** 当前页码 */
+const page = ref(1)
+/** 每页条数 */
+const pageSize = ref(60)
+/** 选中的遗物（详情面板） */
+const selected = ref<RelicInstance | null>(null)
+/** 批量勾选的 uid 集合 */
+const checked = ref<Set<string>>(new Set())
 
-/** 仓库中的遗物（按筛选与排序） */
-const relics = computed<RelicInstance[]>(() => {
-  const list = store.save.relics.filter((r) => {
-    if (rarityFilter.value === '全部') return true
-    return (RELIC_DEFS.get(r.defId)?.rarity ?? 'N') === rarityFilter.value
-  })
-  const rank: Record<string, number> = { SSR: 3, SR: 2, R: 1, N: 0 }
-  return [...list].sort((a, b) => {
-    if (sortByLevel.value && b.level !== a.level) return b.level - a.level
-    const ra = rank[RELIC_DEFS.get(a.defId)?.rarity ?? 'N'] ?? 0
-    const rb = rank[RELIC_DEFS.get(b.defId)?.rarity ?? 'N'] ?? 0
-    if (rb !== ra) return rb - ra
-    return a.uid.localeCompare(b.uid)
-  })
+/** 当前页的遗物（服务端返回） */
+const relics = computed<RelicInstance[]>(() => store.relicPage.items)
+const total = computed(() => store.relicPage.total)
+const pages = computed(() => store.relicPage.pages)
+
+/** 库存占用（0..1）：接近上限时提示玩家清理 */
+const usage = computed(() => {
+  if (RELIC.INVENTORY_CAP <= 0) return 0
+  return total.value / RELIC.INVENTORY_CAP
 })
 
-const selected = computed(() => (selectedUid.value ? store.relicsByUid.get(selectedUid.value) ?? null : null))
 const selectedDef = computed(() => (selected.value ? RELIC_DEFS.get(selected.value.defId) ?? null : null))
 const selectedSet = computed(() =>
   selectedDef.value ? RELIC_SETS.get(selectedDef.value.setId) ?? null : null,
@@ -45,13 +54,13 @@ const selectedSet = computed(() =>
 /** 选中遗物的词条（core：主词条随等级缩放） */
 const selectedMods = computed<StatMod[]>(() => (selected.value ? getRelicMods(selected.value) : []))
 
-/** 仓库中各套装件数 */
+/** 仓库中各套装件数（服务端统计，不在客户端遍历仓库） */
 const ownedSetCount = computed(() => {
   const map = new Map<string, number>()
-  for (const r of store.save.relics) {
-    const d = RELIC_DEFS.get(r.defId)
-    if (!d) continue
-    map.set(d.setId, (map.get(d.setId) ?? 0) + 1)
+  for (const [defId, count] of Object.entries(store.relicStats.byDefId)) {
+    const def = RELIC_DEFS.get(defId)
+    if (!def) continue
+    map.set(def.setId, (map.get(def.setId) ?? 0) + count)
   }
   return map
 })
@@ -81,6 +90,120 @@ function teamCountOf(setId: string): number {
   return teamSetIds.value.filter((id) => id === setId).length
 }
 
+// ─────────────────────────── 仓库加载 ───────────────────────────
+
+/** 按当前筛选 / 排序 / 页码重新拉取仓库 */
+async function reload(nextPage = page.value) {
+  page.value = nextPage
+  await store.loadRelicPage({
+    page: nextPage,
+    size: pageSize.value,
+    rarity: rarityFilter.value === '全部' ? undefined : rarityFilter.value,
+    sort: sortAsc.value ? 'level' : undefined,
+  })
+  await store.loadRelicStats()
+  syncSelected()
+}
+
+/**
+ * 列表刷新后，把选中项同步成新数据。
+ *
+ * ⚠ 仓库列表是**服务端**的数据：强化后等级变了、锁定后标记变了，
+ *   详情面板若还拿着旧对象，就会显示旧等级（实测「强化后按钮仍写 +2」）。
+ */
+function syncSelected() {
+  const uid = selected.value?.uid
+  if (!uid) return
+  const fresh = store.relicPage.items.find((r) => r.uid === uid)
+  // 已被分解 / 移出本页 → 取消选中（详情面板不再显示一件不存在的遗物）
+  selected.value = fresh ?? null
+}
+
+onMounted(() => {
+  void reload(1)
+})
+
+watch(rarityFilter, () => {
+  void reload(1)
+})
+watch(sortAsc, () => {
+  void reload(page.value)
+})
+
+function prevPage() {
+  if (page.value <= 1) return
+  void reload(page.value - 1)
+}
+
+function nextPage() {
+  if (page.value >= pages.value) return
+  void reload(page.value + 1)
+}
+
+// ─────────────────────────── 选择与批量 ───────────────────────────
+
+function selectRelic(relic: RelicInstance) {
+  selected.value = relic
+}
+
+function isChecked(uid: string): boolean {
+  return checked.value.has(uid)
+}
+
+function toggleCheck(uid: string) {
+  const next = new Set(checked.value)
+  if (next.has(uid)) next.delete(uid)
+  else next.add(uid)
+  checked.value = next
+}
+
+function checkAllOnPage() {
+  const next = new Set(checked.value)
+  for (const r of relics.value) next.add(r.uid)
+  checked.value = next
+}
+
+function clearChecked() {
+  checked.value = new Set()
+}
+
+const checkedCount = computed(() => checked.value.size)
+
+/** 勾选中的遗物（去重后按服务端顺序） */
+const checkedUids = computed(() => relics.value.map((r) => r.uid).filter((uid) => checked.value.has(uid)))
+
+async function batchDecompose() {
+  if (checkedUids.value.length === 0) return
+  const res = await store.decomposeRelics(checkedUids.value)
+  if (res) {
+    store.notify(`已分解 ${res.decomposed} 件，返还银两 ${formatNumber(res.silver)}`, 'ok')
+    clearChecked()
+    syncSelected()
+  }
+}
+
+async function batchUpgrade() {
+  if (checkedUids.value.length === 0) return
+  const res = await store.upgradeRelics(checkedUids.value)
+  if (res) {
+    store.notify(`已强化 ${res.upgraded} 件`, 'ok')
+    clearChecked()
+    syncSelected()
+  }
+}
+
+/** 一键分解：清掉 1 级的未锁定未装备件 */
+async function decomposeJunk() {
+  const res = await store.decomposeByFilter({ maxLevel: RELIC.MIN_LEVEL })
+  if (res) {
+    store.notify(`已清理 ${res.decomposed} 件低等级遗物`, 'ok')
+    clearChecked()
+    syncSelected()
+  }
+}
+
+// ─────────────────────────── 单件操作 ───────────────────────────
+
 /** 目标英灵选择器 */
 const heroPickerOpen = ref(false)
 
@@ -100,14 +223,14 @@ function emptyCount(heroId: string): number {
 }
 
 function equipTo(heroId: string) {
-  const uid = selectedUid.value
-  if (!uid) return
+  const relic = selected.value
+  if (!relic) return
   const slot = firstEmptySlot(heroId)
   if (slot < 0) {
     store.notify('该英灵的遗物槽已满，请先卸下遗物', 'warn')
     return
   }
-  store.equip(heroId, slot, uid)
+  store.equip(heroId, slot, relic.uid)
   heroPickerOpen.value = false
   store.notify('已装备遗物', 'ok')
 }
@@ -179,10 +302,19 @@ const upgradePreview = computed(() => {
 })
 
 /** 强化选中遗物 */
-function upgradeSelected() {
-  const uid = selectedUid.value
-  if (!uid) return
-  store.upgradeRelic(uid)
+async function upgradeSelected() {
+  const relic = selected.value
+  if (!relic) return
+  await store.upgradeRelic(relic.uid)
+  syncSelected()
+}
+
+/** 锁定 / 解锁选中遗物 */
+async function toggleLock() {
+  const relic = selected.value
+  if (!relic) return
+  await store.lockRelic(relic.uid, !relic.locked)
+  syncSelected()
 }
 </script>
 
@@ -220,13 +352,27 @@ function upgradeSelected() {
       </button>
     </section>
 
-    <!-- 筛选 -->
+    <!-- 库存概览 -->
     <section class="panel">
       <div class="row-between">
         <div class="tiny muted">遗物仓库</div>
-        <button class="btn btn-sm btn-ghost" @click="sortByLevel = !sortByLevel">
-          {{ sortByLevel ? '按强化等级' : '按稀有度' }}
+        <button class="btn btn-sm btn-ghost" @click="sortAsc = !sortAsc">
+          {{ sortAsc ? '等级低→高' : '等级高→低' }}
         </button>
+      </div>
+      <div class="row-between tiny" style="margin-top: 4px">
+        <span class="muted">容量</span>
+        <b data-testid="relic-total">
+          {{ formatNumber(total) }} / {{ formatNumber(RELIC.INVENTORY_CAP) }}
+          <span v-if="usage >= RELIC.INVENTORY_WARN_RATIO" class="warn-text">（接近上限）</span>
+        </b>
+      </div>
+      <div class="cap-bar">
+        <div
+          class="cap-fill"
+          :class="{ warn: usage >= RELIC.INVENTORY_WARN_RATIO }"
+          :style="{ width: `${Math.min(100, usage * 100)}%` }"
+        ></div>
       </div>
       <div class="chips">
         <button class="chip" :class="{ on: rarityFilter === '全部' }" @click="rarityFilter = '全部'">全部</button>
@@ -240,40 +386,94 @@ function upgradeSelected() {
           {{ r }}
         </button>
       </div>
-      <div class="tiny muted">共 {{ store.save.relics.length }} 件，当前显示 {{ relics.length }} 件</div>
+      <div class="row-between tiny">
+        <span class="muted">共 {{ formatNumber(total) }} 件 · 第 {{ page }} / {{ pages }} 页</span>
+        <button class="btn btn-sm btn-ghost" @click="decomposeJunk">一键清理 1 级</button>
+      </div>
+    </section>
+
+    <!-- 批量工具条 -->
+    <section class="panel">
+      <div class="row-between">
+        <div class="tiny muted">已选 {{ checkedCount }} 件</div>
+        <div class="row" style="gap: 6px">
+          <button class="btn btn-sm btn-ghost" @click="checkAllOnPage">全选本页</button>
+          <button class="btn btn-sm btn-ghost" :disabled="checkedCount === 0" @click="clearChecked">清空</button>
+        </div>
+      </div>
+      <div class="row" style="gap: 6px; margin-top: 8px">
+        <button
+          class="btn btn-sm"
+          style="flex: 1"
+          data-testid="relic-batch-upgrade"
+          :disabled="checkedCount === 0"
+          @click="batchUpgrade"
+        >
+          批量强化 +1
+        </button>
+        <button
+          class="btn btn-sm btn-danger"
+          style="flex: 1"
+          data-testid="relic-batch-decompose"
+          :disabled="checkedCount === 0"
+          @click="batchDecompose"
+        >
+          批量分解
+        </button>
+      </div>
+      <p class="tiny muted" style="margin: 6px 0 0">
+        锁定的遗物不会被批量分解；已装备的会先卸下再分解。
+      </p>
     </section>
 
     <!-- 遗物列表 -->
     <section class="panel">
       <div class="panel-title"><span>遗物</span></div>
-      <div v-if="relics.length === 0" class="empty">
+      <div v-if="store.relicPageError" class="tiny warn-text">{{ store.relicPageError }}</div>
+      <div v-else-if="store.relicPageLoading" class="empty">加载中…</div>
+      <div v-else-if="relics.length === 0" class="empty">
         仓库暂无遗物<br />
         <span class="tiny">可前往推征获取</span>
       </div>
       <div v-else class="relic-grid">
-        <button
+        <div
           v-for="r in relics"
           :key="r.uid"
           class="relic-cell"
-          :class="{ on: selectedUid === r.uid }"
-          @click="selectedUid = r.uid"
+          :class="{ on: selected?.uid === r.uid }"
         >
-          <img
-            class="relic-icon"
-            :src="relicIconPath(r.defId)"
-            :alt="RELIC_DEFS.get(r.defId)?.name ?? r.defId"
-            width="44"
-            height="44"
-            loading="lazy"
-          />
-          <span class="tag" :class="`tag-${(RELIC_DEFS.get(r.defId)?.rarity ?? 'N').toLowerCase()}`">
-            {{ RELIC_DEFS.get(r.defId)?.rarity ?? 'N' }}
-          </span>
-          <span class="relic-name">{{ RELIC_DEFS.get(r.defId)?.name ?? r.defId }}</span>
-          <span class="tiny muted">
-            {{ RELIC_SETS.get(RELIC_DEFS.get(r.defId)?.setId ?? '')?.name ?? '—' }} · +{{ r.level }}
-          </span>
-        </button>
+          <label class="check-box">
+            <input
+              type="checkbox"
+              data-testid="relic-check"
+              :checked="isChecked(r.uid)"
+              @change="toggleCheck(r.uid)"
+            />
+          </label>
+          <button class="relic-open" data-testid="relic-open" @click="selectRelic(r)">
+            <img
+              class="relic-icon"
+              :src="relicIconPath(r.defId)"
+              :alt="RELIC_DEFS.get(r.defId)?.name ?? r.defId"
+              width="44"
+              height="44"
+              loading="lazy"
+            />
+            <span class="tag" :class="`tag-${(RELIC_DEFS.get(r.defId)?.rarity ?? 'N').toLowerCase()}`">
+              {{ RELIC_DEFS.get(r.defId)?.rarity ?? 'N' }}
+            </span>
+            <span class="relic-name">{{ RELIC_DEFS.get(r.defId)?.name ?? r.defId }}</span>
+            <span class="tiny muted">
+              {{ RELIC_SETS.get(RELIC_DEFS.get(r.defId)?.setId ?? '')?.name ?? '—' }} · +{{ r.level }}
+            </span>
+            <span v-if="r.locked" class="tag tag-sr">锁</span>
+          </button>
+        </div>
+      </div>
+      <div class="row-between" style="margin-top: 10px">
+        <button class="btn btn-sm btn-ghost" :disabled="page <= 1" @click="prevPage">上一页</button>
+        <span class="tiny muted">{{ page }} / {{ pages }}</span>
+        <button class="btn btn-sm btn-ghost" :disabled="page >= pages" @click="nextPage">下一页</button>
       </div>
     </section>
 
@@ -304,6 +504,11 @@ function upgradeSelected() {
         </button>
         <button class="btn btn-primary btn-sm" style="flex: 1" @click="heroPickerOpen = true">
           装备到英灵
+        </button>
+      </div>
+      <div class="row" style="gap: 6px; margin-top: 6px">
+        <button class="btn btn-sm btn-ghost" style="flex: 1" data-testid="relic-lock" @click="toggleLock">
+          {{ selected.locked ? '解除锁定' : '锁定（不会被自动分解）' }}
         </button>
       </div>
       <div v-if="upgradeCost" class="tiny muted" style="margin-top: 4px">
@@ -411,6 +616,26 @@ function upgradeSelected() {
   background: #2a2419;
 }
 
+/* 库存占用条 */
+.cap-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--c-bg-2);
+  border: 1px solid var(--c-line);
+  overflow: hidden;
+  margin: 6px 0 2px;
+}
+
+.cap-fill {
+  height: 100%;
+  background: var(--c-gold);
+  transition: width 0.2s ease;
+}
+
+.cap-fill.warn {
+  background: #d4763a;
+}
+
 .relic-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
@@ -418,14 +643,35 @@ function upgradeSelected() {
 }
 
 .relic-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border-radius: 10px;
+  border: 1px solid var(--c-line);
+  background: var(--c-bg-2);
+}
+
+.relic-cell.on {
+  border-color: var(--c-gold);
+  background: #2a2419;
+}
+
+.check-box {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  line-height: 1;
+}
+
+.relic-open {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
   padding: 8px;
-  border-radius: 10px;
-  border: 1px solid var(--c-line);
-  background: var(--c-bg-2);
+  width: 100%;
   text-align: left;
   min-height: 72px;
 }
@@ -435,11 +681,6 @@ function upgradeSelected() {
   height: 44px;
   border-radius: 50%;
   display: block;
-}
-
-.relic-cell.on {
-  border-color: var(--c-gold);
-  background: #2a2419;
 }
 
 .relic-name {

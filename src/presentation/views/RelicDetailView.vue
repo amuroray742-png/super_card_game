@@ -3,7 +3,7 @@
  * 遗物详情：套装 / 主副词条 / 强化成长 / 强化与分解。
  * 词条数值一律取 core 的 getRelicMods，组件不自行推算。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { RELIC } from '../../core/config/economy.ts'
@@ -16,7 +16,32 @@ const route = useRoute()
 const router = useRouter()
 
 const uid = computed(() => String(route.params.uid ?? ''))
-const relic = computed(() => store.relicsByUid.get(uid.value) ?? null)
+
+/**
+ * 当前遗物。
+ *
+ * ⚠ 仓库里的遗物**不在客户端镜像里**（分包后镜像只带已装备件），
+ *   所以详情页要向服务端要单件（`GET /api/relics/:uid`）；
+ *   已装备的那件本地就有，直接用（省一次请求）。
+ */
+const relic = ref<RelicInstance | null>(null)
+const loading = ref(true)
+
+watch(
+  uid,
+  async (id) => {
+    loading.value = true
+    const local = store.relicsByUid.get(id) ?? null
+    relic.value = local
+    if (!local) {
+      const fetched = await store.fetchRelic(id)
+      relic.value = fetched ?? null
+    }
+    loading.value = false
+  },
+  { immediate: true },
+)
+
 const def = computed(() => (relic.value ? RELIC_DEFS.get(relic.value.defId) ?? null : null))
 const set = computed(() => (def.value ? RELIC_SETS.get(def.value.setId) ?? null : null))
 
@@ -91,7 +116,8 @@ function decompose() {
 
 <template>
   <div class="page">
-    <div v-if="!relic || !def" class="empty">
+    <div v-if="loading" class="empty">加载中…</div>
+    <div v-else-if="!relic || !def" class="empty">
       未找到该遗物<br />
       <span class="tiny">它可能已被分解</span>
     </div>

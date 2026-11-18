@@ -49,18 +49,10 @@
 import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-
-/**
- * 禁止访问的 origin。
- *
- * `localhost:5173` 是开发服务器——玩家很可能正在这个地址游玩，
- * 自动化访问它等于动玩家的真实存档。
- */
-const FORBIDDEN_HOSTS = new Set(['localhost', '127.0.0.1'])
-const FORBIDDEN_PORTS = new Set(['5173'])
+import { assertSafeOrigin, ISOLATED_PREVIEW_URL } from './origin-guard.ts'
 
 /** 隔离预览服务默认端口（与 dev server 刻意不同） */
-const DEFAULT_URL = 'http://127.0.0.1:4188'
+const DEFAULT_URL = ISOLATED_PREVIEW_URL
 
 interface Options {
   url: string
@@ -106,21 +98,8 @@ function parseArgs(argv: string[]): Options {
   }
 }
 
-/** origin 守卫：命中玩家可能正在使用的 origin 直接拒绝执行 */
-export function assertSafeOrigin(url: string): void {
-  const u = new URL(url)
-  if (FORBIDDEN_HOSTS.has(u.hostname) && FORBIDDEN_PORTS.has(u.port)) {
-    throw new Error(
-      [
-        `拒绝访问 ${u.origin}：这是玩家可能正在游玩的开发服务器 origin。`,
-        '自动化访问会与玩家共用同一份 localStorage，直接改动玩家的真实存档。',
-        '请改用隔离的预览服务，例如：',
-        '  npm run build && npm run preview -- --port 4188 --host 127.0.0.1',
-        '  npx tsx tools/capture/screenshot.ts --url http://127.0.0.1:4188 ...',
-      ].join('\n'),
-    )
-  }
-}
+/** origin 守卫：命中玩家可能正在使用的 origin 直接拒绝执行（实现见 origin-guard.ts） */
+export { assertSafeOrigin }
 
 /** 在隔离上下文里造一份存档：十连需要结晶与保底资格 */
 async function prepareIsolatedSave(page: Page, pull: boolean): Promise<void> {

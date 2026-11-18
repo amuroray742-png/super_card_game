@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS saves (
 `
 
 /** 当前表结构版本 */
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 export function openDb(path: string): Db {
   if (path !== ':memory:') {
@@ -82,6 +82,27 @@ function migrate(db: Db): void {
     db.exec(`
       CREATE INDEX IF NOT EXISTS action_log_replayable
         ON action_log (user_id, created_at) WHERE result <> '';
+      PRAGMA user_version = 3;
+    `)
+  }
+  if (row.user_version < 4) {
+    // v4：遗物实例独立成表（存档分包）
+    //
+    // 遗物是唯一随挂机时长线性增长的存档字段：12 小时离线能积出数千件，
+    // 整份存档会涨到 MB 级，而心跳每 5 秒就会整份重写并整份回包。
+    // 拆表后「存档主体」的体积与遗物数量无关，仓库改走分页查询。
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS relic_instances (
+        user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        uid       TEXT    NOT NULL,
+        def_id    TEXT    NOT NULL,
+        level     INTEGER NOT NULL,
+        sub_stats TEXT    NOT NULL,
+        locked    INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, uid)
+      );
+      CREATE INDEX IF NOT EXISTS relic_instances_sort
+        ON relic_instances (user_id, level DESC, uid);
       PRAGMA user_version = ${SCHEMA_VERSION};
     `)
   }

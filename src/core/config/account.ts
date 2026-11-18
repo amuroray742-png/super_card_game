@@ -65,6 +65,8 @@ export const ACCOUNT_ERROR_CODES = {
   RATE_LIMITED: 'RATE_LIMITED',
   /** 服务端尚无该账号的存档 */
   NO_SAVE: 'NO_SAVE',
+  /** 目标不存在（只读查询接口用） */
+  NOT_FOUND: 'NOT_FOUND',
   /** 推送的存档比服务端旧（冲突），响应里带服务端版本 */
   STALE_SAVE: 'STALE_SAVE',
   /** 服务器内部错误 */
@@ -88,6 +90,7 @@ export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   UNAUTHORIZED: '登录状态已失效，请重新登录',
   RATE_LIMITED: '尝试过于频繁，请稍后再试',
   NO_SAVE: '云端还没有存档',
+  NOT_FOUND: '目标不存在',
   STALE_SAVE: '进度已在其他设备更新',
   INTERNAL: '服务暂时不可用，请稍后再试',
   NETWORK: '无法连接服务器，请检查网络或后端地址',

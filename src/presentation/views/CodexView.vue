@@ -3,7 +3,7 @@
  * 图鉴：英灵 / 遗物 / 敌人三册。
  * 数据源为 core 配置表；未获得的内容以剪影与未解锁标注，不泄露具体数值。
  */
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { HEROES } from '../../core/config/heroes/index.ts'
@@ -42,11 +42,16 @@ function owned(heroId: string): boolean {
   return !!store.save.heroes[heroId]
 }
 
-/** 遗物册 */
+/**
+ * 遗物册。
+ *
+ * ⚠ 仓库件数由**服务端统计**给出（客户端镜像里只有已装备遗物），
+ *   表现层不自己遍历仓库（那会把几千件塞进首屏）。
+ */
 const relicOwnedCount = computed(() => {
   const map = new Map<string, number>()
-  for (const r of store.save.relics) {
-    map.set(r.defId, (map.get(r.defId) ?? 0) + 1)
+  for (const [defId, count] of Object.entries(store.relicStats.byDefId)) {
+    map.set(defId, count)
   }
   return map
 })
@@ -59,9 +64,18 @@ function relicsOfSet(setId: string) {
   return relicList.value.filter((r) => r.setId === setId)
 }
 
-/** 打开某遗物定义下已获得的一 instance */
-function openRelic(defId: string) {
-  const inst = store.save.relics.find((r) => r.defId === defId)
+/**
+ * 打开某遗物定义下已获得的一 instance。
+ *
+ * ⚠ 仓库里的遗物不在客户端镜像里 → 向服务端要一件（`defId` 精确查）。
+ */
+async function openRelic(defId: string) {
+  if (!relicOwnedCount.value.get(defId)) {
+    store.notify('尚未获得该遗物', 'warn')
+    return
+  }
+  const result = await store.queryRelics({ defId, size: 1 })
+  const inst = result?.items[0]
   if (!inst) {
     store.notify('尚未获得该遗物', 'warn')
     return
@@ -71,6 +85,11 @@ function openRelic(defId: string) {
 
 /** 敌册 */
 const enemyList = computed(() => ENEMIES)
+
+// 遗物册的持有数由服务端统计给出 → 进页面拉一次
+onMounted(() => {
+  void store.loadRelicStats()
+})
 </script>
 
 <template>
@@ -138,7 +157,7 @@ const enemyList = computed(() => ENEMIES)
       <section class="panel">
         <div class="row-between">
           <div class="tiny muted">遗物 {{ relicList.length }} 件 · 套装 {{ setList.length }} 套</div>
-          <div class="tiny muted">仓库 {{ store.save.relics.length }} 件</div>
+          <div class="tiny muted">仓库 {{ formatNumber(store.relicStats.total) }} 件</div>
         </div>
       </section>
 

@@ -77,7 +77,12 @@ const busy = ref(false)
 async function doExport() {
   busy.value = true
   try {
-    exportText.value = await store.exportSaveText()
+    const text = await store.exportSaveText()
+    if (!text) {
+      store.notify('导出失败，请检查网络连接', 'warn')
+      return
+    }
+    exportText.value = text
     store.notify('存档已生成，可复制保存', 'ok')
   } catch {
     store.notify('导出失败', 'warn')
@@ -190,6 +195,10 @@ async function doReset() {
       <div class="panel-title"><span>存档</span></div>
       <p class="tiny muted" style="margin: 0 0 8px">
         进度随账号在服务端同步，跨设备请登录同一账号。导出仅用于备份；旧档只允许无云档账号首次迁移，不能覆盖已有云端进度。
+      </p>
+      <p class="tiny muted" style="margin: 0 0 8px">
+        导出串含完整仓库（含全部遗物）。仓库很大时导出会超出导入上限——
+        这种情况请以**服务端备份**为准，导出串只作小档备份与早期迁移用。
       </p>
       <div class="row" style="gap: 6px">
         <button class="btn btn-sm" style="flex: 1" :disabled="busy" @click="doExport">导出存档</button>

@@ -164,6 +164,39 @@ export async function cachedSaveOf(page: Page, accountId: number | string): Prom
 }
 
 /**
+ * 清空编队，**暂停挂机收益**。
+ *
+ * ⚠ 为什么端到端里必须先做这一步：
+ *   挂机用的是**时间账本**（`save.idle.effectiveMs`），在线时长按 3 倍倍率
+ *   （`IDLE.ONLINE_MULTIPLIER`）持续累积，凑够一场战斗的时长就在
+ *   **下一次动作**里一次性结算掉。
+ *   于是「这次动作到底扣了多少」是**不可确定**的——玩家钱包在扣费的同时还在进账。
+ *   实测：强化扣 2 枚强化石，同一次动作结算出 1 场战斗又补回 4 枚 → 净额 +2。
+ *
+ *   清空编队后 `settleIdleLedger` 直接返回 null（无编队 → 无战斗 → 无掉落），
+ *   扣费口径就能被**精确断言**（银两正好 -500、强化石正好 -2）。
+ *
+ *   growth.spec.ts 用的是同一套做法 —— 两边共用这个 helper，避免两处各写一套。
+ */
+export async function pauseFarming(page: Page): Promise<void> {
+  await page.goto('/#/formation')
+  await page.waitForLoadState('networkidle')
+  const slots = page.locator('.slot')
+  const picker = page.locator('.dialog').filter({ hasText: '选择英灵' })
+  const total = await slots.count()
+  expect(total).toBeGreaterThan(0)
+  for (let i = 0; i < total; i++) {
+    const slot = slots.nth(i)
+    if ((await slot.locator('.slot-empty').count()) > 0) continue
+    await slot.click()
+    await picker.getByRole('button', { name: new RegExp(`清空第 ${i + 1} 槽`) }).click()
+    await expect(slot.locator('.slot-empty')).toHaveCount(1)
+    await picker.getByRole('button', { name: '关闭', exact: true }).click()
+  }
+  await expect(slots.locator('.slot-empty')).toHaveCount(total)
+}
+
+/**
  * 等真实挂机时间后，通过玩家按钮领取一次服务端结算。
  * 场次数只是领取上限；不改时钟、不注入收益，也不假定在线倍率。
  * 每轮至少等一个基础场次，兼容在线 3x 与离线效率账本。
@@ -214,6 +247,69 @@ export interface CachedSave {
   relics?: Array<{ defId: string; uid: string; level: number }>
   equipped?: Record<string, { heroId: string }>
   settings?: { speed?: number }
+}
+
+/** 服务端遗物实例（分页接口回包里的一条） */
+export interface ServerRelic {
+  defId: string
+  uid: string
+  level: number
+  locked: boolean
+}
+
+/** 服务端仓库分页回包 */
+export interface ServerRelicPage {
+  items: ServerRelic[]
+  total: number
+  page: number
+  size: number
+  pages: number
+}
+
+/**
+ * 仓库总件数（铸造页上显示的是**服务端**统计）。
+ *
+ * ⚠ 存档分包后，客户端镜像里**只有已装备遗物**（≤36 件），
+ *   「仓库里有几件」不能看本地缓存——那会永远显示 0 或几十。
+ *
+ * ⚠ 刷新方式必须是「换一个路由再回来」，不能 `page.reload()`：
+ *   整页重载会触发 `GET /api/save`，服务端趁这次载入补算挂机收益
+ *   → 仓库件数凭空多出几件，「这一轮掉了几件」的对账就算不准了。
+ *   同理也不能 goto 到**当前就在的**那个 hash（可能整页重载）。
+ */
+export async function relicTotal(page: Page): Promise<number> {
+  const onForge = page.url().includes('/#/forge')
+  if (onForge) {
+    // 已经在铸造页：先离开再回来，逼页面重新拉一次服务端统计
+    await page.goto('/#/formation')
+  }
+  await page.goto('/#/forge')
+  await page.waitForLoadState('networkidle')
+  await page.getByTestId('relic-total').waitFor({ state: 'visible', timeout: 8000 })
+  const text = await page.getByTestId('relic-total').innerText()
+  const digits = text.replace(/,/g, '').match(/\d+/)?.[0] ?? '0'
+  return Number(digits)
+}
+
+/**
+ * 读服务端仓库的实例列表（抓 `GET /api/relics` 的真实响应）。
+ *
+ * ⚠ 不自己拿令牌去查：`/api/auth/refresh` 会**轮换** refresh token，
+ *   在测试里刷新一次就把页面正在用的会话打断了。
+ *   抓页面上真实发出的那个响应，既不打断会话，又拿的是权威数据。
+ *
+ * ⚠ **不要 `page.reload()`**：重新载入会触发一次 `GET /api/save`，
+ *   服务端趁这次载入补算挂机收益 → 仓库件数凭空多出几件，
+ *   「这一轮掉了几件」的对账就算不准了。
+ *   改成「先离开铸造页 → 再进铸造页」，让页面自然发出那个请求。
+ */
+export async function serverRelics(page: Page): Promise<ServerRelicPage> {
+  await page.goto('/#/formation')
+  const [response] = await Promise.all([
+    page.waitForResponse((r) => new URL(r.url()).pathname === '/api/relics'),
+    page.goto('/#/forge'),
+  ])
+  return (await response.json()) as ServerRelicPage
 }
 
 /**

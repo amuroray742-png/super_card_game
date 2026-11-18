@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { startServerHarness, type ServerHarness } from './helpers/server-harness.ts'
+import { readServerSave } from './helpers/server-save.ts'
 import { registerAndLoad, TEST_PASSWORD } from './helpers/store-harness.ts'
 
 /** 模拟存储：key = slot */
@@ -153,7 +154,11 @@ describe('在线租约心跳', () => {
     expect(await a).toBe(true)
     expect(await b).toBe(true)
     expect(heartbeats).toBe(1)
-    expect(store.save.idle.activeUntil).toBeGreaterThan(Date.now())
+    // ⚠ 心跳是「轻量心跳」：只续约租约，**不回传存档主体**
+    //   → 客户端镜像不刷新（镜像里的 activeUntil 是旧值，属正常）。
+    //   租约真的续上了要去**服务端**看（客户端不得自己改 save.*，铁律 #28）。
+    const serverSave = readServerSave(harness.bundle.db, useAccountStore().user!.id)
+    expect(serverSave.idle.activeUntil).toBeGreaterThan(Date.now())
     expect(store.save.player.silver).toBe(before)
     store.invalidate()
     expect(await store.heartbeat()).toBeNull()

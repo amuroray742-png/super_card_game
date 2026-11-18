@@ -17,6 +17,30 @@ import {
 import type { GameAction } from '../core/systems/actions.ts'
 import type { ActionResponse } from '../core/systems/action-protocol.ts'
 import type { OfflineSettlementResult } from '../core/systems/idle.ts'
+import type { RelicInstance } from '../core/model/types.ts'
+import type { RelicAdvice } from '../core/systems/relic-advice.ts'
+
+/** 仓库分页回包 */
+export interface RelicPage {
+  /** 当前页的遗物 */
+  items: RelicInstance[]
+  /** 仓库总件数 */
+  total: number
+  /** 当前页码（1 起） */
+  page: number
+  /** 每页条数 */
+  size: number
+  /** 总页数 */
+  pages: number
+}
+
+/** 遗物统计回包 */
+export interface RelicStats {
+  /** 仓库总件数 */
+  total: number
+  /** 遗物定义 id → 持有件数 */
+  byDefId: Record<string, number>
+}
 
 /** 账号信息 */
 export interface AccountUser {
@@ -265,6 +289,88 @@ export class AccountClient {
   async deleteAccount(accessToken: string): Promise<void> {
     const { status, body } = await this.request<null>('DELETE', '/api/account', { token: accessToken })
     if (status !== 204) this.fail(status, body)
+  }
+
+  // ─────────────────────── 只读查询（仓库 / 预览 / 导出） ───────────────────────
+  //
+  // ⚠ 遗物不再随存档回包下发（分包）：仓库走分页查询，存档主体只带已装备遗物。
+  //   这些接口**只读**，不改变存档——写存档的唯一入口仍是 `POST /api/action`。
+
+  /** 仓库分页 */
+  async fetchRelicPage(
+    accessToken: string,
+    query: {
+      page?: number
+      size?: number
+      rarity?: string
+      setId?: string
+      defId?: string
+      sort?: string
+    } = {},
+  ): Promise<RelicPage> {
+    const params = new URLSearchParams()
+    if (query.page !== undefined) params.set('page', String(query.page))
+    if (query.size !== undefined) params.set('size', String(query.size))
+    if (query.rarity) params.set('rarity', query.rarity)
+    if (query.setId) params.set('setId', query.setId)
+    if (query.defId) params.set('defId', query.defId)
+    if (query.sort) params.set('sort', query.sort)
+    const suffix = params.toString()
+    const { status, body } = await this.request<RelicPage>(
+      'GET',
+      `/api/relics${suffix ? `?${suffix}` : ''}`,
+      { token: accessToken },
+    )
+    if (status !== 200 || !body) this.fail(status, body)
+    return body
+  }
+
+  /** 遗物统计（仓库总数 + 按定义 id 分组） */
+  async fetchRelicStats(accessToken: string): Promise<RelicStats> {
+    const { status, body } = await this.request<RelicStats>('GET', '/api/relics/stats', {
+      token: accessToken,
+    })
+    if (status !== 200 || !body) this.fail(status, body)
+    return body
+  }
+
+  /** 单件遗物 */
+  async fetchRelicByUid(accessToken: string, uid: string): Promise<RelicInstance> {
+    const { status, body } = await this.request<RelicInstance>(
+      'GET',
+      `/api/relics/${encodeURIComponent(uid)}`,
+      { token: accessToken },
+    )
+    if (status !== 200 || !body) this.fail(status, body)
+    return body
+  }
+
+  /**
+   * 遗物推荐预览。
+   *
+   * ⚠ 与服务端执行 `relic.autoEquip` 用**同一个函数** → 预览 = 执行（铁律 #2 / #4）。
+   */
+  async fetchRelicAdvice(accessToken: string, heroId: string): Promise<RelicAdvice> {
+    const { status, body } = await this.request<RelicAdvice>(
+      'GET',
+      `/api/relics/advice?heroId=${encodeURIComponent(heroId)}`,
+      { token: accessToken },
+    )
+    if (status !== 200 || !body) this.fail(status, body)
+    return body
+  }
+
+  /**
+   * 导出存档串。
+   *
+   * ⚠ 由服务端产出（含全部遗物）；客户端镜像里只有已装备遗物，自己拼会丢仓库。
+   */
+  async fetchSaveExport(accessToken: string): Promise<string> {
+    const { status, body } = await this.request<{ text: string }>('GET', '/api/save/export', {
+      token: accessToken,
+    })
+    if (status !== 200 || !body?.text) this.fail(status, body)
+    return body.text
   }
 }
 

@@ -11,6 +11,7 @@ import { openDb, type Db } from './db.ts'
 import { makeAuthGuard } from './authGuard.ts'
 import { createLimiter, registerAuthRoutes } from './routes/auth.ts'
 import { registerSaveRoutes } from './routes/save.ts'
+import { registerRelicRoutes } from './routes/relics.ts'
 import { registerAccountRoutes } from './routes/account.ts'
 import { registerHealthRoutes } from './routes/health.ts'
 import { registerActionRoutes } from './routes/action.ts'
@@ -84,6 +85,7 @@ export function buildApp(options: AppOptions): AppBundle {
   )
   registerActionRoutes(app, { service, limiter: actionLimiter, authGuard })
   registerSaveRoutes(app, { authGuard, service })
+  registerRelicRoutes(app, { authGuard, service })
   registerAccountRoutes(app, { db, authGuard })
 
   return {

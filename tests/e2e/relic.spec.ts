@@ -1,5 +1,16 @@
 import { test, expect, type Page } from '@playwright/test'
-import { cachedSaveOf, registerAccount, seedSession, settleIdleThroughUi, skipGachaReveal, uniqueUsername } from './helpers'
+import { RELIC } from '../../src/core/config/economy.ts'
+import {
+  cachedSaveOf,
+  pauseFarming,
+  registerAccount,
+  relicTotal,
+  seedSession,
+  serverRelics,
+  settleIdleThroughUi,
+  skipGachaReveal,
+  uniqueUsername,
+} from './helpers'
 
 // 遗物必须用真实挂机时间收集，不能靠连点凭空产出。
 test.setTimeout(240_000)
@@ -71,12 +82,26 @@ async function setupTeam(page: Page): Promise<void> {
   }
 }
 
-/** 读取存档里的遗物实例列表 */
-async function relicsOf(
+/**
+ * 仓库里的遗物实例（**服务端权威**）。
+ *
+ * ⚠ 存档分包后，客户端镜像里**只有已装备遗物**（≤36 件），
+ *   仓库里可能几千件 → 「仓库里有几件」只能问服务端（铁律 #8 / #16）。
+ */
+async function relicsOf(page: Page): Promise<Array<{ defId: string; uid: string; level: number }>> {
+  const result = await serverRelics(page)
+  return result.items
+}
+
+/** 在推征页结算一场（读仓库件数会换页，所以每次结算前先回推征页） */
+async function settleOnExpedition(
   page: Page,
   accountId: number,
-): Promise<Array<{ defId: string; uid: string; level: number }>> {
-  return (await cachedSaveOf(page, accountId))?.relics ?? []
+  battles = 10,
+): Promise<ReturnType<typeof settleIdleThroughUi> extends Promise<infer T> ? T : never> {
+  await page.goto('/#/expedition')
+  await page.waitForLoadState('networkidle')
+  return settleIdleThroughUi(page, accountId, battles)
 }
 
 /**
@@ -85,10 +110,13 @@ async function relicsOf(
  */
 async function collectRelics(page: Page, accountId: number, target = 10): Promise<void> {
   const deadline = Date.now() + 180_000
-  while ((await relicsOf(page, accountId)).length < target && Date.now() < deadline) {
+  while (Date.now() < deadline) {
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
     await settleIdleThroughUi(page, accountId)
+    if ((await relicTotal(page)) >= target) return
   }
-  expect((await relicsOf(page, accountId)).length, `真实挂机未收集到 ${target} 件遗物`).toBeGreaterThanOrEqual(target)
+  expect(await relicTotal(page), `真实挂机未收集到 ${target} 件遗物`).toBeGreaterThanOrEqual(target)
 }
 
 /** 读取某英灵当前已装备的遗物数量 */
@@ -136,17 +164,17 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
     expect(dropped).toBeGreaterThan(0)
     expect(dropped).toBe(settlement.rewards.relics?.length ?? 0)
 
-    // 仓库里真的有遗物了
-    await page.goto('/#/forge')
-    await page.waitForLoadState('networkidle')
+    // 仓库里真的有遗物了（服务端分页接口 = 页面渲染的那份数据）
+    const firstPage = await serverRelics(page)
+    expect(firstPage.total).toBe(dropped)
     const cells = page.locator('.relic-cell')
     await expect(cells.first()).toBeVisible()
     await expect(cells).toHaveCount(dropped)
     // 页面上的总件数与提示里的数量一致
-    await expect(page.getByText(`共 ${dropped} 件`)).toBeVisible()
+    expect(await relicTotal(page)).toBe(dropped)
 
     // 存档里的实例结构完整（id 合法、能被强化与装备）
-    const saved = await relicsOf(page, accountId)
+    const saved = await relicsOf(page)
     expect(saved).toHaveLength(dropped)
     for (const r of saved) {
       expect(r.defId).toBeTruthy()
@@ -157,14 +185,14 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
     // 刷新后旧实例不丢；载入可能补算新增掉落，因此不能固定总数。
     await page.reload()
     await page.waitForLoadState('networkidle')
-    const reloaded = await relicsOf(page, accountId)
+    const reloaded = await relicsOf(page)
     expect(reloaded.length).toBeGreaterThanOrEqual(saved.length)
     for (const relic of saved) expect(reloaded).toContainEqual(relic)
     await expect(page.locator('.relic-cell')).toHaveCount(reloaded.length)
-    await expect(page.getByText(`共 ${reloaded.length} 件`)).toBeVisible()
+    expect(await relicTotal(page)).toBe(reloaded.length)
 
     // 遗物是**可用的实例**：点开能看到词条并能装备
-    await page.locator('.relic-cell').first().click()
+    await page.getByTestId('relic-open').first().click()
     await expect(page.getByRole('button', { name: '装备到英灵' })).toBeVisible()
   })
 
@@ -173,17 +201,17 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
     await pullHeroes(page)
     await setupTeam(page)
 
-    await page.goto('/#/expedition')
-    await page.waitForLoadState('networkidle')
+    // ⚠ 读仓库件数会**换页**（读的是服务端数据），所以每次结算前先回推征页
+    const beforeFirst = await relicTotal(page)
 
-    const first = await settleIdleThroughUi(page, accountId, 1)
+    const first = await settleOnExpedition(page, accountId, 1)
     expect(first.rewards.relics?.length ?? 0).toBeGreaterThan(0)
-    const afterFirst = (await relicsOf(page, accountId)).length
-    expect(afterFirst).toBe(first.rewards.relics?.length)
+    const afterFirst = await relicTotal(page)
+    expect(afterFirst - beforeFirst).toBe(first.rewards.relics?.length ?? 0)
 
-    const second = await settleIdleThroughUi(page, accountId, 1)
+    const second = await settleOnExpedition(page, accountId, 1)
     expect(second.rewards.relics?.length ?? 0).toBeGreaterThan(0)
-    expect((await relicsOf(page, accountId)).length).toBe(afterFirst + (second.rewards.relics?.length ?? 0))
+    expect((await relicTotal(page)) - afterFirst).toBe(second.rewards.relics?.length ?? 0)
   })
 })
 
@@ -221,11 +249,21 @@ test.describe('遗物图标', () => {
       expect(src).toMatch(/^\/relics\/set_[a-z]+_\d+\.svg$/)
     }
 
-    // 图标真的加载出来了（不是 404 的空图）
-    const loaded = await icons.evaluateAll((els) =>
-      els.every((el) => (el as HTMLImageElement).naturalWidth > 0),
-    )
-    expect(loaded).toBe(true)
+    // 图标真的加载出来了（不是 404 的空图）。
+    // ⚠ 图片是**异步加载**的：格子可见 ≠ 图已加载完，
+    //   直接查 naturalWidth 会偶发读到 0（图片还在路上）→ 必须轮询等加载完成。
+    await expect
+      .poll(
+        async () =>
+          icons.evaluateAll((els) =>
+            els.every((el) => {
+              const img = el as HTMLImageElement
+              return img.complete && img.naturalWidth > 0
+            }),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBe(true)
   })
 })
 
@@ -249,10 +287,15 @@ test.describe('遗物强化', () => {
     await collectRelics(page, accountId)
     await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
 
+    // ⚠ 清空编队：挂机时间账本会在**下一次动作**里一次性结算掉攒下的战斗，
+    //   玩家钱包在「扣费」的同时还在「进账」→ 扣了多少根本不可确定。
+    //   清空编队后无编队 → 无战斗 → 无掉落，扣费口径才能精确断言。
+    await pauseFarming(page)
+
     // 铸造页 → 点第一件遗物 → 详情面板里必须有强化按钮
     await page.goto('/#/forge')
     await page.waitForLoadState('networkidle')
-    await page.locator('.relic-cell').first().click()
+    await page.getByTestId('relic-open').first().click()
     const upgrade = page.getByTestId('relic-upgrade')
     await expect(upgrade).toBeVisible()
     await expect(upgrade).toBeEnabled()
@@ -268,18 +311,18 @@ test.describe('遗物强化', () => {
     // 等级 +1 → 按钮指向 +3
     await expect(upgrade).toContainText('强化 +3')
 
-    // 银两与强化石真的被扣
-    await expect.poll(async () => (await resourcesOf(page, accountId)).silver, { timeout: 8000 }).toBeLessThan(
-      before.silver,
+    // 银两与强化石**精确**被扣（编队已清空，没有并发进来的挂机收益）
+    await expect.poll(async () => (await resourcesOf(page, accountId)).silver, { timeout: 8000 }).toBe(
+      before.silver - RELIC.SILVER_PER_LEVEL,
     )
-    await expect.poll(async () => (await resourcesOf(page, accountId)).stones, { timeout: 8000 }).toBeLessThan(
-      before.stones,
+    await expect.poll(async () => (await resourcesOf(page, accountId)).stones, { timeout: 8000 }).toBe(
+      before.stones - RELIC.STONES_PER_LEVEL,
     )
 
     // 落盘没丢：刷新后等级仍是 +2
     await page.reload()
     await page.waitForLoadState('networkidle')
-    await page.locator('.relic-cell').first().click()
+    await page.getByTestId('relic-open').first().click()
     await expect(page.getByTestId('relic-upgrade')).toContainText('强化 +3')
   })
 })
@@ -358,5 +401,87 @@ test.describe('一键推荐装备与套装效果', () => {
 
     // 套装区有「还差 N 件」的阶梯提示
     await expect(page.getByText(/还差 \d+ 件/).first()).toBeVisible()
+  })
+})
+
+/**
+ * 仓库批量操作与锁定。
+ *
+ * ⚠ 守的是「批量走服务端权威动作」——覆盖**已装备 / 锁定 / 重复提交**
+ *   （roadmap P1-1 验收条件）。
+ *
+ * ⚠ 锁定的语义 = **永不被自动分解**（含库存溢出）：
+ *   玩家特意留下的东西不该被一键清空。
+ */
+test.describe('仓库批量操作与锁定', () => {
+  test('锁定的件不会被批量分解；其余勾选的会被分解掉', async ({ page }) => {
+    const accountId = await bootLoggedIn(page)
+    await pullHeroes(page)
+    await setupTeam(page)
+
+    // 推征产遗物
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+    await collectRelics(page, accountId)
+
+    // ⚠ 清空编队：否则批量动作会顺手结算挂机收益、仓库件数凭空多出几件，
+    //   「分解掉了 1 件」就数不准了（挂机掉落会与分解同时发生）。
+    await pauseFarming(page)
+
+    await page.goto('/#/forge')
+    await page.waitForLoadState('networkidle')
+    expect(await relicTotal(page)).toBeGreaterThanOrEqual(2)
+
+    // 先把第一件锁上
+    await page.getByTestId('relic-open').first().click()
+    await page.getByTestId('relic-lock').click()
+    await expect(page.getByTestId('relic-lock')).toContainText('解除锁定')
+
+    // 仓库件数此刻是稳定的（无编队 → 无挂机掉落），批量分解后正好少 1 件。
+    // ⚠ 必须在**勾选之前**测量：读件数会离开再回到铸造页，页面重新挂载后
+    //   详情面板关闭、勾选清空（批量按钮随之不可点）。
+    const beforeBatch = await relicTotal(page)
+
+    // 勾选前两件 → 批量分解
+    const checks = page.getByTestId('relic-check')
+    await checks.nth(0).check()
+    await checks.nth(1).check()
+    await expect(page.getByText('已选 2 件')).toBeVisible()
+
+    await page.getByTestId('relic-batch-decompose').click()
+
+    // 只分解掉 1 件（另一件被锁定跳过）
+    await expect.poll(async () => relicTotal(page), { timeout: 8000 }).toBe(beforeBatch - 1)
+  })
+
+  test('批量强化：等级真的 +1，资源被扣', async ({ page }) => {
+    const accountId = await bootLoggedIn(page)
+    await pullHeroes(page)
+    await setupTeam(page)
+
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+    await collectRelics(page, accountId)
+
+    // 清空编队 → 无并发挂机收益 → 扣费可精确断言
+    await pauseFarming(page)
+
+    await page.goto('/#/forge')
+    await page.waitForLoadState('networkidle')
+
+    const silverBefore = (await cachedSaveOf(page, accountId))?.player?.silver ?? 0
+    const stonesBefore = (await cachedSaveOf(page, accountId))?.player?.relicStones ?? 0
+
+    const checks = page.getByTestId('relic-check')
+    await checks.nth(0).check()
+    await page.getByTestId('relic-batch-upgrade').click()
+
+    // 银两与强化石被扣（正好一件遗物 +1 级）
+    await expect
+      .poll(async () => (await cachedSaveOf(page, accountId))?.player?.silver ?? 0, { timeout: 8000 })
+      .toBe(silverBefore - RELIC.SILVER_PER_LEVEL)
+    await expect
+      .poll(async () => (await cachedSaveOf(page, accountId))?.player?.relicStones ?? 0, { timeout: 8000 })
+      .toBe(stonesBefore - RELIC.STONES_PER_LEVEL)
   })
 })

@@ -3,7 +3,7 @@
  * 英灵详情：属性 / 技能 / 被动 / 传记 / 羁绊 / 遗物槽。
  * 规则一律取自 core，组件只做展示与调用 store 的 action。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { HERO_INDEX } from '../../core/config/heroes/index.ts'
@@ -19,6 +19,7 @@ import {
   atRealmGate,
 } from '../../core/systems/growth.ts'
 import { RELIC_DEFS, RELIC_SETS, getHeroSetMods, relicUpgradeCost } from '../../core/systems/relic.ts'
+import type { RelicAdvice } from '../../core/systems/relic-advice.ts'
 import { relicIconPath } from '../../core/config/art.ts'
 import { resolveStats, computePower, getRealm, nextRealm } from '../../core/systems/stats.ts'
 import { RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
@@ -204,6 +205,29 @@ const starGain = computed(() => {
 /** 遗物选择器 */
 const pickerOpen = ref(false)
 const pickerSlot = ref(0)
+/**
+ * 选择器里的仓库列表（**服务端分页**）。
+ *
+ * ⚠ 客户端镜像里只有已装备遗物，仓库里可能几千件 → 选择器也走分页接口，
+ *   不把整个仓库拉进内存。
+ */
+const pickerPage = ref(1)
+const pickerSize = 30
+const pickerItems = ref<RelicInstance[]>([])
+const pickerTotal = ref(0)
+const pickerPages = ref(1)
+const pickerLoading = ref(false)
+
+async function loadPicker(page = pickerPage.value) {
+  pickerLoading.value = true
+  const result = await store.queryRelics({ page, size: pickerSize })
+  pickerLoading.value = false
+  if (!result) return
+  pickerPage.value = result.page
+  pickerItems.value = result.items
+  pickerTotal.value = result.total
+  pickerPages.value = result.pages
+}
 
 /** 已装备遗物的操作菜单 */
 const menuSlot = ref<number | null>(null)
@@ -240,6 +264,7 @@ function openPicker(slot: number) {
   pickerSlot.value = slot
   menuSlot.value = null
   pickerOpen.value = true
+  void loadPicker(1)
 }
 
 function chooseRelic(uid: string) {
@@ -293,11 +318,12 @@ const setRows = computed(() => {
   }
 
   // 仓库里每个套装共有多少件（含未装备的）——用来提示「还能换」
+  // ⚠ 仓库件数由**服务端统计**给出（客户端镜像里只有已装备遗物）
   const owned = new Map<string, number>()
-  for (const r of store.save.relics) {
-    const def = RELIC_DEFS.get(r.defId)
+  for (const [defId, count] of Object.entries(store.relicStats.byDefId)) {
+    const def = RELIC_DEFS.get(defId)
     if (!def) continue
-    owned.set(def.setId, (owned.get(def.setId) ?? 0) + 1)
+    owned.set(def.setId, (owned.get(def.setId) ?? 0) + count)
   }
 
   return [...counts.entries()]
@@ -328,14 +354,28 @@ const setRows = computed(() => {
 // ─────────────────────────── 一键推荐装备 ───────────────────────────
 
 /**
- * 遗物推荐方案（由 core 的 `recommendRelicLoadout` 产出）。
+ * 遗物推荐方案（**服务端计算**）。
  *
- * ⚠ 表现层不自己算「哪件更强」——那会与战斗里的属性口径分叉（铁律 #2）。
+ * ⚠ 分包后客户端镜像里只有已装备遗物，本地算不出「仓库里哪件更强」→
+ *   预览必须走服务端；服务端用的是与 `relic.autoEquip` 同一个函数，
+ *   所以「预览 = 执行」（铁律 #2 / #4）。
  */
-const relicAdvice = computed(() => store.relicAdvice(heroId.value))
+const relicAdvice = ref<RelicAdvice | null>(null)
+
+async function loadRelicAdvice() {
+  const advice = await store.fetchRelicAdvice(heroId.value)
+  relicAdvice.value = advice
+}
+
+/** 进页面 / 换英灵时拉一次预览 */
+watch(heroId, () => {
+  void loadRelicAdvice()
+}, { immediate: true })
 
 async function applyRecommendation() {
-  await store.autoEquipRelics(heroId.value)
+  const res = await store.autoEquipRelics(heroId.value)
+  if (res) relicAdvice.value = res
+  await loadRelicAdvice()
 }
 
 /**
@@ -713,9 +753,10 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
           <span>选择遗物 · 第 {{ pickerSlot + 1 }} 槽</span>
           <button class="btn btn-sm btn-ghost" @click="pickerOpen = false">关闭</button>
         </div>
-        <div v-if="store.save.relics.length === 0" class="empty">遗物仓库为空</div>
+        <div v-if="pickerLoading" class="empty">加载中…</div>
+        <div v-else-if="pickerItems.length === 0" class="empty">遗物仓库为空</div>
         <button
-          v-for="r in store.save.relics"
+          v-for="r in pickerItems"
           :key="r.uid"
           class="list-item pick-row"
           @click="chooseRelic(r.uid)"
@@ -741,6 +782,15 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
           </div>
           <span class="tiny muted">装备</span>
         </button>
+        <div class="row-between" style="margin-top: 8px">
+          <button class="btn btn-sm btn-ghost" :disabled="pickerPage <= 1" @click="loadPicker(pickerPage - 1)">
+            上一页
+          </button>
+          <span class="tiny muted">共 {{ pickerTotal }} 件 · {{ pickerPage }} / {{ pickerPages }}</span>
+          <button class="btn btn-sm btn-ghost" :disabled="pickerPage >= pickerPages" @click="loadPicker(pickerPage + 1)">
+            下一页
+          </button>
+        </div>
       </div>
     </div>
 

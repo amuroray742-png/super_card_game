@@ -23,6 +23,7 @@
     "art:relic": "tsx tools/relic-icons/generate.ts",
     "art:transcode": "tsx tools/artgen/transcode.ts",
     "art:capture": "tsx tools/capture/screenshot.ts",
+    "perf:long-hang": "tsx tools/perf/long-hang.ts",
     "server:dev": "node --watch --no-warnings server/src/index.ts",
     "server:start": "node --no-warnings server/src/index.ts",
     "check": "npm run validate:config && npm run scan:forbidden && npm run test && npm run build"

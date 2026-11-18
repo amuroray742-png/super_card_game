@@ -36,7 +36,7 @@ import type {
   TeamPreset,
 } from '../model/types.ts'
 import { GAME_ERROR_CODES, type GameErrorCode } from '../config/game-errors.ts'
-import { DAILY, LEVEL, REDEEM_CODES, BATTLE, IDLE } from '../config/economy.ts'
+import { DAILY, LEVEL, REDEEM_CODES, BATTLE, IDLE, RELIC } from '../config/economy.ts'
 import { STAGE_INDEX } from '../config/stages.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { getPool } from '../config/pools.ts'
@@ -61,6 +61,7 @@ import {
   generateRelic,
   nextRelicUid,
   relicUpgradeCost,
+  RELIC_DEFS,
   RELIC_SETS,
 } from './relic.ts'
 import {
@@ -79,6 +80,12 @@ import {
   summarizePull,
 } from './gacha.ts'
 import { runIdle, offlineEffectiveSeconds, type OfflineSettlementResult } from './idle.ts'
+import {
+  emptyOverflow,
+  enforceInventoryCap,
+  equippedRelicIds,
+  type InventoryOverflowResult,
+} from './inventory.ts'
 import {
   arenaSnapshotHash,
   resolveArenaMatch,
@@ -111,6 +118,10 @@ export type GameAction =
   | { type: 'hero.upgradeStar'; heroId: string }
   | { type: 'relic.upgrade'; uid: string }
   | { type: 'relic.decompose'; uid: string }
+  | { type: 'relic.lock'; uid: string; locked: boolean }
+  | { type: 'relic.decomposeBatch'; uids: string[] }
+  | { type: 'relic.upgradeBatch'; uids: string[]; targetLevel?: number }
+  | { type: 'relic.decomposeByFilter'; rarity?: Rarity; maxLevel?: number; setId?: string; includeEquipped?: boolean }
   | { type: 'relic.equip'; heroId: string; slot: number; relicId: string | null }
   | { type: 'relic.autoEquip'; heroId: string }
   | { type: 'team.setSlot'; index: number; heroId: string | null }
@@ -176,6 +187,32 @@ export interface DecomposeResult {
   stones: number
 }
 
+/** 批量分解结果 */
+export interface DecomposeBatchResult {
+  /** 实际分解件数 */
+  decomposed: number
+  /** 返还银两 */
+  silver: number
+  /** 返还强化石 */
+  stones: number
+  /** 因锁定而跳过的 uid（锁定件不会被分解，只会被跳过） */
+  skipped: string[]
+  /** 因已装备而被卸下的件数 */
+  unequipped: number
+}
+
+/** 批量强化结果 */
+export interface UpgradeBatchResult {
+  /** 实际强化的件数 */
+  upgraded: number
+  /** 消耗银两 */
+  silver: number
+  /** 消耗强化石 */
+  stones: number
+  /** 每件强化后的等级 */
+  levels: { uid: string; level: number }[]
+}
+
 export interface ArenaSettleResult {
   match: ArenaMatch
   reward: ArenaReward
@@ -194,6 +231,10 @@ export interface ActionResultMap {
   'hero.upgradeStar': { star: number }
   'relic.upgrade': RelicUpgradeResult
   'relic.decompose': DecomposeResult
+  'relic.lock': { uid: string; locked: boolean }
+  'relic.decomposeBatch': DecomposeBatchResult
+  'relic.upgradeBatch': UpgradeBatchResult
+  'relic.decomposeByFilter': DecomposeBatchResult
   'relic.equip': true
   'relic.autoEquip': RelicAdvice
   'team.setSlot': true
@@ -263,13 +304,15 @@ function heroName(heroId: string): string {
  *
  * ⚠ 所有可入库资源都走这里，表现层与客户端**不得**另写一份入库逻辑。
  *   遗物清单只认 `rewards.relics`（core 的 `rollRewards` 已经把它填好了）。
+ *
+ * @returns 库存溢出处理结果（没有溢出时是空结果）
  */
 export function applyRewardBundle(
   save: SaveData,
   rewards: RewardBundle,
   rng: Rng,
   now: number,
-): void {
+): InventoryOverflowResult {
   const p = save.player
   if (rewards.silver) p.silver += rewards.silver
   if (rewards.exp) p.exp += rewards.exp
@@ -288,12 +331,28 @@ export function applyRewardBundle(
       // uid 由**存档内**计数器派生 → 唯一且可复现（不用随机后缀，避免大档碰撞）
       save.relics.push(generateRelic(defId, rng, 1, nextRelicUid(save)))
     }
+    // 库存上限：溢出的最没用遗物自动分解，折算进银两与强化石。
+    // 锁定件 / 已装备件永不自动分解（宁可突破上限也不销毁玩家标记过的东西）。
+    return enforceInventoryCap(save)
   }
   if (rewards.heroes) {
     for (const heroId of rewards.heroes) {
       grantHero(save, heroId, now)
     }
   }
+  return emptyOverflow()
+}
+
+/** 负载内的 uid 去重（重复提交的第一层防护） */
+function dedupeUids(uids: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const uid of uids) {
+    if (seen.has(uid)) continue
+    seen.add(uid)
+    out.push(uid)
+  }
+  return out
 }
 
 /** 获得一名英灵（已拥有则跳过） */
@@ -466,6 +525,7 @@ export function settleIdleLedger(save: SaveData, ctx: ActionContext, upperLimit:
     elapsedSeconds: elapsedMs / 1000,
     cappedSeconds: budgetMs / 1000,
     efficiency: 1,
+    overflow: emptyOverflow(),
   }
   let farm = save.idle.farm
   for (let i = 0; i < battles; i++) {
@@ -485,11 +545,20 @@ export function settleIdleLedger(save: SaveData, ctx: ActionContext, upperLimit:
       continue
     }
 
-    applyRewardBundle(save, one.rewards, ctx.rng, ctx.now)
+    const overflow = applyRewardBundle(save, one.rewards, ctx.rng, ctx.now)
     for (const key of ['silver', 'exp', 'skillStones', 'relicStones', 'emblems'] as const) {
       if (one.rewards[key] !== undefined) run.rewards[key] = (run.rewards[key] ?? 0) + one.rewards[key]!
     }
     if (one.rewards.relics) (run.rewards.relics ??= []).push(...one.rewards.relics)
+    // 溢出自动分解的折算也要进结算明细（玩家看得见，不静默吞掉掉落）
+    if (overflow.salvaged > 0) {
+      run.overflow.salvaged += overflow.salvaged
+      run.overflow.silver += overflow.silver
+      run.overflow.stones += overflow.stones
+      run.rewards.silver = (run.rewards.silver ?? 0) + overflow.silver
+      run.rewards.relicStones = (run.rewards.relicStones ?? 0) + overflow.stones
+    }
+    run.overflow.skipped += overflow.skipped
     run.lastClearedStage = Math.max(run.lastClearedStage ?? 0, stage)
     run.reachedStage = Math.max(run.reachedStage, stage)
     run.newRelics.push(...one.newRelics)
@@ -755,6 +824,213 @@ function actionDecomposeRelic(
   return ok<DecomposeResult>(
     { uid: payload.uid, silver: value.silver, stones: value.stones },
     '已分解遗物',
+  )
+}
+
+/**
+ * 锁定 / 解锁遗物。
+ *
+ * ⚠ 此前 `RelicInstance.locked` 恒为 false，**没有任何动作能置位**，
+ *   但分解动作已按锁定拒绝 → 那条分支不可达。
+ *   锁定的语义：**永不被自动分解**（库存溢出时也受保护）。
+ */
+function actionRelicLock(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'relic.lock' }>,
+  _ctx: ActionContext,
+): ActionOutcome<{ uid: string; locked: boolean }> {
+  const relic = save.relics.find((r) => r.uid === payload.uid)
+  if (!relic) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
+  relic.locked = payload.locked
+  return ok<{ uid: string; locked: boolean }>(
+    { uid: relic.uid, locked: relic.locked },
+    relic.locked ? '遗物已锁定，不会被自动分解' : '遗物已解锁',
+  )
+}
+
+/**
+ * 批量分解。
+ *
+ * ⚠ 动作层契约：**先校验后修改** —— 任一前置条件不满足就整批拒绝，
+ *   存档一个字节都不变。
+ *
+ * 规则：
+ *   ① 负载内重复 uid 只处理一次（重复提交的第一层防护）；
+ *   ② **锁定件跳过**并回报（不是整批失败 —— 一把锁不该卡住整批操作）；
+ *   ③ 已装备的先卸下再分解，并回报卸下了几件；
+ *   ④ 遗物不存在 → 整批拒绝（说明这次请求已经过期）。
+ */
+function actionDecomposeRelicBatch(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'relic.decomposeBatch' }>,
+  _ctx: ActionContext,
+): ActionOutcome<DecomposeBatchResult> {
+  const uids = dedupeUids(payload.uids)
+  if (uids.length === 0) return fail(GAME_ERROR_CODES.RELIC_BATCH_EMPTY, '没有选中遗物')
+  if (uids.length > RELIC.BATCH_MAX) {
+    return fail(GAME_ERROR_CODES.RELIC_BATCH_TOO_LARGE, `单次最多分解 ${RELIC.BATCH_MAX} 件`)
+  }
+
+  // ── 校验阶段（不改存档） ──
+  const targets: RelicInstance[] = []
+  const skipped: string[] = []
+  for (const uid of uids) {
+    const relic = save.relics.find((r) => r.uid === uid)
+    if (!relic) return fail(GAME_ERROR_CODES.NOT_FOUND, '遗物不存在（可能已被分解）')
+    if (relic.locked) {
+      skipped.push(uid)
+      continue
+    }
+    targets.push(relic)
+  }
+  if (targets.length === 0) {
+    return ok<DecomposeBatchResult>(
+      { decomposed: 0, silver: 0, stones: 0, skipped, unequipped: 0 },
+      '选中的遗物都已锁定，未做任何改动',
+    )
+  }
+
+  // ── 修改阶段 ──
+  let unequipped = 0
+  for (const relic of targets) {
+    for (const key of Object.keys(save.equipped)) {
+      if (save.equipped[key].relicId === relic.uid) {
+        delete save.equipped[key]
+        unequipped++
+      }
+    }
+  }
+  const removed = new Set(targets.map((r) => r.uid))
+  let silver = 0
+  let stones = 0
+  for (const relic of targets) {
+    const value = decomposeValue(relic)
+    silver += value.silver
+    stones += value.stones
+  }
+  save.relics = save.relics.filter((r) => !removed.has(r.uid))
+  save.player.silver += silver
+  save.player.relicStones += stones
+
+  return ok<DecomposeBatchResult>(
+    { decomposed: targets.length, silver, stones, skipped, unequipped },
+    `已分解 ${targets.length} 件遗物`,
+  )
+}
+
+/**
+ * 一键分解（按筛选条件）。
+ *
+ * 默认只清理**最低等级**（1 级）的未锁定、未装备遗物 —— 一步到位的「清垃圾」。
+ * 想清更多就在请求里显式给 `maxLevel`。
+ */
+function actionDecomposeRelicByFilter(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'relic.decomposeByFilter' }>,
+  _ctx: ActionContext,
+): ActionOutcome<DecomposeBatchResult> {
+  const maxLevel = payload.maxLevel ?? RELIC.MIN_LEVEL
+  if (!Number.isSafeInteger(maxLevel) || maxLevel < RELIC.MIN_LEVEL || maxLevel > RELIC.MAX_LEVEL) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '强化等级不合法')
+  }
+  const equipped = equippedRelicIds(save)
+  const candidates = save.relics.filter((relic) => {
+    if (relic.locked) return false
+    if (!payload.includeEquipped && equipped.has(relic.uid)) return false
+    if (relic.level > maxLevel) return false
+    if (payload.rarity) {
+      if ((RELIC_DEFS.get(relic.defId)?.rarity ?? 'N') !== payload.rarity) return false
+    }
+    if (payload.setId) {
+      if ((RELIC_DEFS.get(relic.defId)?.setId ?? '') !== payload.setId) return false
+    }
+    return true
+  })
+
+  if (candidates.length === 0) {
+    return ok<DecomposeBatchResult>(
+      { decomposed: 0, silver: 0, stones: 0, skipped: [], unequipped: 0 },
+      '没有符合条件的遗物',
+    )
+  }
+  // 复用批量分解的落库逻辑（同一份口径，不另写一套）
+  const capped = candidates.slice(0, RELIC.BATCH_MAX)
+  const outcome = actionDecomposeRelicBatch(
+    save,
+    { type: 'relic.decomposeBatch', uids: capped.map((r) => r.uid) },
+    _ctx,
+  )
+  if (!outcome.ok) return outcome
+  const result = outcome.result
+  const extra = candidates.length - capped.length
+  return ok<DecomposeBatchResult>(
+    { ...result, skipped: [...result.skipped], decomposed: result.decomposed },
+    extra > 0
+      ? `已分解 ${result.decomposed} 件（还有 ${extra} 件超出单次上限，可再执行一次）`
+      : `已分解 ${result.decomposed} 件遗物`,
+  )
+}
+
+/**
+ * 批量强化。
+ *
+ * 花费**先算清再扣**：总费用不够就整批拒绝，存档不变（铁律 #10 / #22）。
+ */
+function actionUpgradeRelicBatch(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'relic.upgradeBatch' }>,
+  _ctx: ActionContext,
+): ActionOutcome<UpgradeBatchResult> {
+  const uids = dedupeUids(payload.uids)
+  if (uids.length === 0) return fail(GAME_ERROR_CODES.RELIC_BATCH_EMPTY, '没有选中遗物')
+  if (uids.length > RELIC.BATCH_MAX) {
+    return fail(GAME_ERROR_CODES.RELIC_BATCH_TOO_LARGE, `单次最多强化 ${RELIC.BATCH_MAX} 件`)
+  }
+  const targetLevel = payload.targetLevel
+  if (targetLevel !== undefined && (!Number.isSafeInteger(targetLevel) || targetLevel < RELIC.MIN_LEVEL || targetLevel > RELIC.MAX_LEVEL)) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '目标强化等级不合法')
+  }
+
+  // ── 校验阶段 ──
+  const targets: { relic: RelicInstance; to: number }[] = []
+  let silver = 0
+  let stones = 0
+  for (const uid of uids) {
+    const relic = save.relics.find((r) => r.uid === uid)
+    if (!relic) return fail(GAME_ERROR_CODES.NOT_FOUND, '遗物不存在')
+    const to = targetLevel ?? relic.level + 1
+    if (to > RELIC.MAX_LEVEL) {
+      return fail(GAME_ERROR_CODES.MAX_RELIC_LEVEL, '已达最高强化等级')
+    }
+    if (to <= relic.level) {
+      return fail(GAME_ERROR_CODES.NOT_FOUND, '目标强化等级不高于当前等级')
+    }
+    const perLevel = relicUpgradeCost(relic.level)
+    if (!perLevel) return fail(GAME_ERROR_CODES.MAX_RELIC_LEVEL, '已达最高强化等级')
+    const steps = to - relic.level
+    silver += perLevel.silver * steps
+    stones += perLevel.stones * steps
+    targets.push({ relic, to })
+  }
+
+  if (save.player.silver < silver || save.player.relicStones < stones) {
+    return fail(
+      GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
+      `银两或强化石不足（需要 银两 ${formatNumber(silver)}、强化石 ${formatNumber(stones)}）`,
+    )
+  }
+
+  // ── 修改阶段 ──
+  save.player.silver -= silver
+  save.player.relicStones -= stones
+  const levels: { uid: string; level: number }[] = []
+  for (const { relic, to } of targets) {
+    relic.level = to
+    levels.push({ uid: relic.uid, level: relic.level })
+  }
+  return ok<UpgradeBatchResult>(
+    { upgraded: targets.length, silver, stones, levels },
+    `已强化 ${targets.length} 件遗物`,
   )
 }
 
@@ -1079,6 +1355,10 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
   'hero.upgradeStar': actionUpgradeStar,
   'relic.upgrade': actionRelicUpgrade,
   'relic.decompose': actionDecomposeRelic,
+  'relic.lock': actionRelicLock,
+  'relic.decomposeBatch': actionDecomposeRelicBatch,
+  'relic.upgradeBatch': actionUpgradeRelicBatch,
+  'relic.decomposeByFilter': actionDecomposeRelicByFilter,
   'relic.equip': actionRelicEquip,
   'relic.autoEquip': actionAutoEquip,
   'team.setSlot': actionSetSlot,

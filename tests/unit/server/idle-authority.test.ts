@@ -5,7 +5,8 @@ import { UserLock } from '../../../server/src/game/lock.ts'
 import { writeSave } from '../../../server/src/game/repo.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
 import { createHeroState } from '../../../src/core/systems/growth.ts'
-import { serialize, deserialize } from '../../../src/core/save/serialize.ts'
+import { serialize } from '../../../src/core/save/serialize.ts'
+import { readServerSave } from '../helpers/server-save.ts'
 
 let bundle: AppBundle | undefined
 afterEach(async () => { vi.restoreAllMocks(); await bundle?.close() })
@@ -22,16 +23,21 @@ it('服务端载入和动作使用同一账本，保留余数并写回真实通�
   const service = new GameService(bundle.db, new UserLock())
   now += 6500
   const loaded = await service.load(id)
-  expect(loaded?.offline?.battles).toBe(1)
-  const after = deserialize(loaded!.save.payload)
+  // ⚠ 离线结算**弹窗**有阈值（IDLE.OFFLINE_SETTLE_THRESHOLD_SEC = 60 秒）：
+  //   6.5 秒的间隔不够弹窗——在线累积的收益不该弹「离线结算」。
+  //   但收益照算照落库（下面的服务端状态已经推进了）。
+  expect(loaded?.offline).toBeNull()
+  // ⚠ 存档分包：遗物在 `relic_instances` 表里，payload 里没有 → 必须从服务端读
+  const after = readServerSave(bundle.db, id)
   expect(after.campaign.clearedStage).toBe(1)
   expect(after.idle.currentStage).toBe(2)
   expect(after.lastTickAt).toBe(now - 500)
+  expect(after.relics).toHaveLength(1)
   const tick = await service.execute(id, { actionId: 'idle-zero', action: { type: 'idle.tick', battles: 100 } })
   expect((tick.result as { battles: number }).battles).toBe(0)
-  expect(deserialize(tick.save!.payload).relics).toHaveLength(1)
+  expect(readServerSave(bundle.db, id).relics).toHaveLength(1)
   now += 5500
   const next = await service.execute(id, { actionId: 'idle-next', action: { type: 'idle.tick', battles: 1 } })
   expect((next.result as { battles: number }).battles).toBe(1)
-  expect(deserialize(next.save!.payload).relics).toHaveLength(2)
+  expect(readServerSave(bundle.db, id).relics).toHaveLength(2)
 })

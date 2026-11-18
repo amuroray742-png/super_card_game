@@ -1,7 +1,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import type { ActionRequest, ActionResponse } from '../../src/core/systems/action-protocol.ts'
 import type { FeedExpResult } from '../../src/core/systems/actions.ts'
-import { cachedSaveOf, registerAccount, seedSession, settleIdleThroughUi, skipGachaReveal, uniqueUsername, type CachedSave } from './helpers'
+import { cachedSaveOf, pauseFarming, registerAccount, seedSession, settleIdleThroughUi, skipGachaReveal, uniqueUsername, type CachedSave } from './helpers'
 
 // 真实等待挂机预算；普通用例也不能再依赖连点瞬间领取十场。
 test.setTimeout(180_000)
@@ -116,23 +116,6 @@ async function farmExp(page: Page, accountId: number, target: number, timeout = 
   }
   expect(pool, `真实挂机经验池未达到 ${target}（实际 ${pool}）`).toBeGreaterThanOrEqual(target)
   return pool
-}
-
-/** 清空编队以暂停收益，随后可以精确核对每笔养成扣款。 */
-async function pauseFarming(page: Page): Promise<void> {
-  await page.goto('/#/formation')
-  const slots = page.locator('.slot')
-  const picker = page.locator('.dialog').filter({ hasText: '选择英灵' })
-  await expect(slots).toHaveCount(SLOT_TEXTS.length)
-  for (let i = 0; i < SLOT_TEXTS.length; i++) {
-    const slot = slots.nth(i)
-    if (await slot.locator('.slot-empty').count()) continue
-    await slot.click()
-    await picker.getByRole('button', { name: new RegExp(`清空第 ${i + 1} 槽`) }).click()
-    await expect(slot.locator('.slot-empty')).toHaveCount(1)
-    await picker.getByRole('button', { name: '关闭', exact: true }).click()
-  }
-  await expect(slots.locator('.slot-empty')).toHaveCount(SLOT_TEXTS.length)
 }
 
 /** 读取本次喂经验的权威响应，核对实际扣费与变更后的存档。 */
