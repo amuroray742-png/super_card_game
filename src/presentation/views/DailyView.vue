@@ -1,15 +1,26 @@
 <script setup lang="ts">
 /**
- * 每日：7 天签到、每日任务占位与竞技勋章周上限提示。
- * 签到奖励取自 core/config/economy.ts 的 DAILY 配置；跨天判定用 core/time.ts 的 dayIndex。
+ * 每日：7 天签到、每日任务、周目标与竞技产出提示。
+ *
+ * ## 分工
+ *
+ * - **条目 / 目标 / 奖励**：来自 `core/config/tasks.ts`（唯一出处）；
+ * - **进度与领取状态**：来自服务端存档（`store.save.daily`），
+ *   界面用 core 的纯函数 `taskViews` 按当前周期换算（跨日 / 跨周自动归位）；
+ * - **领取**：走服务端动作 `daily.claimTask`（判定与发奖都在服务端）。
+ *
+ * 界面**不自己算**「算不算完成」：那套判定在 core 里，服务端用的是同一份。
  */
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { ARENA, DAILY } from '../../core/config/economy.ts'
+import { taskViews, type TaskView } from '../../core/systems/tasks.ts'
 import { dayIndex } from '../../core/time.ts'
 import { formatNumber } from '../utils/format'
 
 const store = useGameStore()
+const router = useRouter()
 
 const daily = computed(() => store.save.daily)
 
@@ -25,11 +36,11 @@ interface SignInReward {
 /** 签到奖励表（数值全部来自 core 配置） */
 const REWARDS: SignInReward[] = DAILY.SIGN_IN_REWARDS.map((r) => ({ ...r }))
 
-/** 今天的自然日编号 */
-const today = dayIndex(Date.now())
+/** 今天的自然日编号（与服务端同一口径：北京时间） */
+const today = computed(() => dayIndex(store.now()))
 
 /** 今天是否已签到 */
-const signedToday = computed(() => daily.value.lastSignInDay === today)
+const signedToday = computed(() => daily.value.lastSignInDay === today.value)
 
 /** 连续签到天数（断签归零） */
 const streak = computed(() => daily.value.signInStreak)
@@ -58,7 +69,22 @@ function rewardText(reward: SignInReward): string {
   return parts.join(' · ')
 }
 
-/** 签到：奖励发放与连续天数推进由 store 负责（数值取自 core 配置） */
+/** 任务奖励文案（只可能是养成材料，见 config/tasks.ts 的 TaskReward） */
+function taskRewardText(view: TaskView): string {
+  const r = view.def.rewards
+  const parts: string[] = []
+  if (r.relicStones) parts.push(`强化石 ${r.relicStones}`)
+  if (r.skillStones) parts.push(`术式结晶 ${r.skillStones}`)
+  return parts.join(' · ')
+}
+
+/** 每日任务（北京时间 0 点重置） */
+const dailyTasks = computed(() => taskViews(daily.value, store.now(), 'daily'))
+
+/** 周目标（北京时间周一 0 点重置） */
+const weeklyTasks = computed(() => taskViews(daily.value, store.now(), 'weekly'))
+
+/** 签到：奖励发放与连续天数推进由服务端负责（数值取自 core 配置） */
 async function signIn() {
   const reward = await store.signInDaily()
   if (reward) {
@@ -70,6 +96,21 @@ async function signIn() {
     if (reward.relicStones) parts.push(`强化石 ${reward.relicStones}`)
     store.notify(parts.length ? `签到成功：${parts.join(' · ')}` : '签到成功', 'ok')
   }
+}
+
+/** 领取任务奖励（服务端判定与发奖） */
+async function claim(view: TaskView) {
+  const reward = await store.claimTask(view.def.id)
+  if (!reward) return
+  const parts: string[] = []
+  if (reward.skillStones) parts.push(`术式结晶 ${reward.skillStones}`)
+  if (reward.relicStones) parts.push(`强化石 ${reward.relicStones}`)
+  store.notify(parts.length ? `已领取：${parts.join(' · ')}` : '任务奖励已领取', 'ok')
+}
+
+/** 前往对应玩法（铁律 #10：任务要能真的把人带到玩法上） */
+function go(view: TaskView) {
+  if (view.def.route) router.push({ name: view.def.route })
 }
 </script>
 
@@ -109,18 +150,78 @@ async function signIn() {
     <section class="panel">
       <div class="panel-title">
         <span>每日任务</span>
-        <span class="tiny muted">{{ daily.taskClaimed.length }} 项已领取</span>
+        <span class="tiny muted">每日 0 点重置</span>
       </div>
-      <div class="task-row">
-        <span>推征若干场</span>
-        <span class="tiny muted">{{ daily.taskProgress.battle ?? 0 }}</span>
+      <div
+        v-for="view in dailyTasks"
+        :key="view.def.id"
+        class="task-card"
+        :data-testid="`task-${view.def.id}`"
+        :class="{ done: view.completed, claimed: view.claimed }"
+      >
+        <div class="task-head">
+          <span class="task-title">{{ view.def.title }}</span>
+          <button
+            v-if="view.def.route"
+            class="btn btn-ghost btn-sm"
+            :data-testid="`task-go-${view.def.id}`"
+            @click="go(view)"
+          >
+            前往
+          </button>
+        </div>
+        <div class="tiny muted task-progress">
+          进度 {{ view.progress }} / {{ view.def.target }} · 奖励 {{ taskRewardText(view) }}
+        </div>
+        <button
+          class="btn btn-primary btn-sm btn-block"
+          :data-testid="`task-claim-${view.def.id}`"
+          :disabled="!view.completed || view.claimed"
+          @click="claim(view)"
+        >
+          {{ view.claimed ? '已领取' : view.completed ? '领取奖励' : '未完成' }}
+        </button>
       </div>
-      <div class="task-row">
-        <span>完成召唤</span>
-        <span class="tiny muted">{{ daily.taskProgress.pull ?? 0 }}</span>
+    </section>
+
+    <!-- 周目标 -->
+    <section class="panel">
+      <div class="panel-title">
+        <span>周目标</span>
+        <span class="tiny muted">每周一 0 点重置</span>
+      </div>
+      <div
+        v-for="view in weeklyTasks"
+        :key="view.def.id"
+        class="task-card"
+        :data-testid="`task-${view.def.id}`"
+        :class="{ done: view.completed, claimed: view.claimed }"
+      >
+        <div class="task-head">
+          <span class="task-title">{{ view.def.title }}</span>
+          <button
+            v-if="view.def.route"
+            class="btn btn-ghost btn-sm"
+            :data-testid="`task-go-${view.def.id}`"
+            @click="go(view)"
+          >
+            前往
+          </button>
+        </div>
+        <div class="tiny muted task-progress">
+          进度 {{ view.progress }} / {{ view.def.target }} · 奖励 {{ taskRewardText(view) }}
+        </div>
+        <button
+          class="btn btn-primary btn-sm btn-block"
+          :data-testid="`task-claim-${view.def.id}`"
+          :disabled="!view.completed || view.claimed"
+          @click="claim(view)"
+        >
+          {{ view.claimed ? '已领取' : view.completed ? '领取奖励' : '未完成' }}
+        </button>
       </div>
       <p class="tiny muted" style="margin: 8px 0 0">
-        每日任务为占位内容，具体条目与奖励将在后续版本开放。
+        任务奖励只有养成材料（强化石 / 术式结晶），不影响召唤节奏与竞技产出。
       </p>
     </section>
 
@@ -165,17 +266,36 @@ async function signIn() {
   line-height: 1.5;
 }
 
-.task-row {
+.task-card {
+  padding: 8px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--c-line);
+  background: var(--c-bg-2);
+}
+
+.task-card.done {
+  border-color: #3d6b52;
+}
+
+.task-card.claimed {
+  opacity: 0.72;
+}
+
+.task-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--c-line);
-  font-size: 13px;
+  gap: 8px;
 }
 
-.task-row:last-of-type {
-  border-bottom: none;
+.task-title {
+  font-size: 13px;
+  color: var(--c-text);
+}
+
+.task-progress {
+  margin: 4px 0 6px;
 }
 
 .ok-text {

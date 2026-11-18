@@ -962,6 +962,26 @@ export const useGameStore = defineStore('game', () => {
     return runAction({ type: 'daily.signIn' }, true)
   }
 
+  /**
+   * 当前时间（注入的时钟）。
+   *
+   * 界面按**同一个**时钟判定周期（每日 0 点 / 每周一 0 点），
+   * 不自己调 `Date.now()`——否则设备时间偏差会让显示与服务端判定对不上。
+   */
+  function now(): number {
+    return clock.now()
+  }
+
+  /**
+   * 领取任务奖励（每日任务 / 周目标）。
+   *
+   * 判定与发奖都在服务端（core 纯函数）：客户端只发意图。
+   * 断线重试由服务端幂等日志兜底；换设备看到的是同一份进度。
+   */
+  async function claimTask(taskId: string) {
+    return runAction({ type: 'daily.claimTask', taskId }, true)
+  }
+
   /** 兑换一次性兑换码 */
   async function redeemCode(code: string): Promise<boolean> {
     const res = await runAction({ type: 'code.redeem', code }, true)
@@ -1077,6 +1097,8 @@ export const useGameStore = defineStore('game', () => {
     runArenaMatch,
     settleArena,
     signInDaily,
+    claimTask,
+    now,
     redeemCode,
     exportSaveText,
     importSaveText,

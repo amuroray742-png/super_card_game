@@ -80,6 +80,7 @@ import {
   summarizePull,
 } from './gacha.ts'
 import { runIdle, offlineEffectiveSeconds, type OfflineSettlementResult } from './idle.ts'
+import { advanceTasks, rollTasks, taskRewardBundle, taskView } from './tasks.ts'
 import {
   emptyOverflow,
   enforceInventoryCap,
@@ -131,6 +132,7 @@ export type GameAction =
   | { type: 'rebirth.do' }
   | { type: 'arena.settle' }
   | { type: 'daily.signIn' }
+  | { type: 'daily.claimTask'; taskId: string }
   | { type: 'code.redeem'; code: string }
   | { type: 'save.create' }
   | { type: 'save.reset' }
@@ -244,6 +246,7 @@ export interface ActionResultMap {
   'rebirth.do': RebirthPreview
   'arena.settle': ArenaSettleResult
   'daily.signIn': RewardBundle
+  'daily.claimTask': RewardBundle
   'code.redeem': RewardBundle
   'save.create': true
   'save.reset': true
@@ -460,6 +463,8 @@ function actionPull(
     }
   }
   save.stats.totalPulls += count
+  // 任务计数：召唤次数（每日任务与周目标同时推进）
+  save.daily = advanceTasks(save.daily, 'pull', count, ctx.now)
 
   const summary = summarizePull(outcome)
   return ok<PullActionResult>(
@@ -576,6 +581,8 @@ export function settleIdleLedger(save: SaveData, ctx: ActionContext, upperLimit:
   // 兼容旧水位展示；实际计量由measuredAt + effectiveMs负责。
   save.lastTickAt = Math.max(save.lastTickAt, (save.idle.measuredAt ?? ctx.now) - save.idle.effectiveMs)
   save.idle.totalIdleSeconds += run.battles * BATTLE.SECONDS_PER_BATTLE
+  // 任务计数：推征场次（每日任务与周目标同时推进）
+  save.daily = advanceTasks(save.daily, 'battle', run.battles, ctx.now)
   return run
 }
 
@@ -785,7 +792,7 @@ function actionUpgradeStar(
 function actionRelicUpgrade(
   save: SaveData,
   payload: Extract<GameAction, { type: 'relic.upgrade' }>,
-  _ctx: ActionContext,
+  ctx: ActionContext,
 ): ActionOutcome<RelicUpgradeResult> {
   const relic = save.relics.find((r) => r.uid === payload.uid)
   if (!relic) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
@@ -799,6 +806,8 @@ function actionRelicUpgrade(
   save.player.silver -= cost.silver
   save.player.relicStones -= cost.stones
   applyRelicUpgrade(relic)
+  // 任务计数：遗物强化件数
+  save.daily = advanceTasks(save.daily, 'relicUpgrade', 1, ctx.now)
   return ok<RelicUpgradeResult>({ uid: relic.uid, level: relic.level, cost })
 }
 
@@ -979,7 +988,7 @@ function actionDecomposeRelicByFilter(
 function actionUpgradeRelicBatch(
   save: SaveData,
   payload: Extract<GameAction, { type: 'relic.upgradeBatch' }>,
-  _ctx: ActionContext,
+  ctx: ActionContext,
 ): ActionOutcome<UpgradeBatchResult> {
   const uids = dedupeUids(payload.uids)
   if (uids.length === 0) return fail(GAME_ERROR_CODES.RELIC_BATCH_EMPTY, '没有选中遗物')
@@ -1028,6 +1037,8 @@ function actionUpgradeRelicBatch(
     relic.level = to
     levels.push({ uid: relic.uid, level: relic.level })
   }
+  // 任务计数：批量强化按**件数**计（强化 3 件 = 3 次）
+  save.daily = advanceTasks(save.daily, 'relicUpgrade', targets.length, ctx.now)
   return ok<UpgradeBatchResult>(
     { upgraded: targets.length, silver, stones, levels },
     `已强化 ${targets.length} 件遗物`,
@@ -1244,7 +1255,48 @@ function actionSignIn(
 
   d.signInStreak = index + 1
   d.lastSignInDay = today
+  // 任务计数：签到次数
+  save.daily = advanceTasks(save.daily, 'signIn', 1, ctx.now)
   return ok<RewardBundle>({ ...reward }, '签到成功')
+}
+
+/**
+ * 领取任务奖励（roadmap P2-1）。
+ *
+ * ## 契约
+ *
+ * - **先校验后修改**：任务不存在 / 未完成 / 本周期已领过 → 直接失败，存档一字节未变；
+ * - **周期滚动先于校验**：跨日 / 跨周后进度与领取状态都要先归位，
+ *   否则「昨天没领的每日任务」会在今天被重复领取；
+ * - **奖励只经 `rewards` 入库**（铁律 #26）：走 `applyRewardBundle`，
+ *   不自己往 `player` 上加数字；
+ * - **服务端权威**：进度存在存档里 → 换设备看到同一份进度，
+ *   重复领取由服务端拒绝（客户端传新 actionId 也领不到第二次）。
+ */
+function actionClaimTask(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'daily.claimTask' }>,
+  ctx: ActionContext,
+): ActionOutcome<RewardBundle> {
+  const view = taskView(save.daily, ctx.now, payload.taskId)
+  if (!view) return fail(GAME_ERROR_CODES.TASK_NOT_FOUND, '任务不存在')
+  if (view.claimed) {
+    return fail(GAME_ERROR_CODES.TASK_ALREADY_CLAIMED, '该任务的奖励已经领取过了')
+  }
+  if (!view.completed) {
+    return fail(
+      GAME_ERROR_CODES.TASK_NOT_COMPLETED,
+      `任务还没完成（${view.progress} / ${view.def.target}）`,
+    )
+  }
+
+  // ── 校验通过，开始修改存档 ──
+  const rewards = taskRewardBundle(view.def.rewards)
+  applyRewardBundle(save, rewards, ctx.rng, ctx.now)
+  // 写回滚动 + 领取记录（跨日 / 跨周的归位也在这里落库）
+  const next = rollTasks(save.daily, ctx.now)
+  save.daily = { ...next, taskClaimed: [...next.taskClaimed, view.def.id] }
+  return ok<RewardBundle>(rewards, '任务奖励已领取')
 }
 
 /** 兑换一次性兑换码 */
@@ -1368,6 +1420,7 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
   'rebirth.do': actionRebirth,
   'arena.settle': actionArenaSettle,
   'daily.signIn': actionSignIn,
+  'daily.claimTask': actionClaimTask,
   'code.redeem': actionRedeemCode,
   'save.create': actionCreate,
   'save.reset': actionReset,

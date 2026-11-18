@@ -646,10 +646,26 @@ export interface SaveData {
     defenseLoadout: ArenaLoadout | null
     snapshotHash: string | null
   }
-  daily: {
-    signInStreak: number
-    lastSignInDay: number
-    taskProgress: Record<string, number>
-    taskClaimed: string[]
-  }
+  daily: DailyState
+}
+
+/**
+ * 日常状态（签到 + 任务）。
+ *
+ * 任务计数按 `metric:period` 分开存（见 `core/systems/tasks.ts` 的 `counterKey`）：
+ * 同一个行为同时计入每日与每周两个口径，但重置边界不同 → 必须分开。
+ */
+export interface DailyState {
+  /** 连续签到天数（断签归零） */
+  signInStreak: number
+  /** 最后签到的自然日编号（北京时间） */
+  lastSignInDay: number
+  /** 任务计数：`metric:period` → 累计次数 */
+  taskProgress: Record<string, number>
+  /** 本周期已领取的任务 id */
+  taskClaimed: string[]
+  /** 任务计数所属的自然日（北京时间）；与今天不同 → 每日任务重置 */
+  taskDay: number
+  /** 任务计数所属的自然周（北京时间）；与本周不同 → 周目标重置 */
+  taskWeek: number
 }

@@ -96,7 +96,14 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   save.rng = { seed: seed(), counter: 0 }
   delete save.idle.farm
   save.createdAt = save.savedAt = save.lastTickAt = save.stats.firstStartAt = now
-  save.daily = { signInStreak: 0, lastSignInDay: dayIndex(now), taskProgress: {}, taskClaimed: [] }
+  save.daily = {
+    signInStreak: 0,
+    lastSignInDay: dayIndex(now),
+    taskProgress: {},
+    taskClaimed: [],
+    taskDay: dayIndex(now),
+    taskWeek: arenaWeekIndex(now),
+  }
   save.arena.rewardWeek = arenaWeekIndex(now)
   // 「本周已获得」必须从 0 起算：置成周上限值等于宣告本周已满，
   // 导入后整周拿不到竞技勋章与竞技抽卡券（公式见 arena.ts 的 min(base, CAP - weekly)）。

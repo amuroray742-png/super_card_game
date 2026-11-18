@@ -45,6 +45,10 @@
  * npx tsx tools/capture/screenshot.ts --relic --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/relic.png
  *
+ * # 每日任务场景（注册账号 → 十连 → 每日页：签到 / 每日任务 / 周目标）
+ * npx tsx tools/capture/screenshot.ts --daily --api http://127.0.0.1:8791 \
+ *   --url http://127.0.0.1:4188 --out artifacts/art-preview/daily.png
+ *
  * # 浏览器兼容性测量（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏）
  * npx tsx tools/capture/screenshot.ts --compat --route /login \
  *   --url http://127.0.0.1:4188 --compat-out artifacts/baselines/browser-compat.json
@@ -72,6 +76,8 @@ interface Options {
   gachaReveal: boolean
   /** 遗物场景：登录 → 十连 → 编队 → 推征产遗物 → 铸造页 + 英灵页 */
   relic: boolean
+  /** 每日任务场景：登录 → 十连 → 每日页（签到 / 每日任务 / 周目标） */
+  daily: boolean
   /** 浏览器兼容性测量模式（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏） */
   compat: boolean
   /** 兼容性报告的输出路径（JSON） */
@@ -101,6 +107,7 @@ function parseArgs(argv: string[]): Options {
     gachaTicket: argv.includes('--gacha-ticket'),
     gachaReveal: argv.includes('--gacha-reveal'),
     relic: argv.includes('--relic'),
+    daily: argv.includes('--daily'),
     compat: argv.includes('--compat'),
     compatOut: get('--compat-out') ?? 'artifacts/baselines/browser-compat.json',
     api: get('--api') ?? '',
@@ -750,6 +757,25 @@ async function runCompatScenario(opts: Options): Promise<void> {
   }
 }
 
+/**
+ * 每日任务场景：登录 → 十连 → 每日页。
+ *
+ * 截图用于验收「每日任务 / 周目标看得到、点得动、知道还差多少」：
+ * 任务条目、进度、奖励、领取与前往按钮都要在同一屏里。
+ */
+async function runDailyScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  const base = await setupAccount(context, page, opts)
+  await page.goto(`${base}/#/daily`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: outPath, fullPage: opts.fullPage })
+  return ''
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   assertSafeOrigin(opts.url)
@@ -758,8 +784,8 @@ async function main(): Promise<void> {
     await runCompatScenario(opts)
     return
   }
-  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic) && !opts.api) {
-    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物场景需要 --api <隔离后端地址>（用于注册临时账号）')
+  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic || opts.daily) && !opts.api) {
+    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物 / 每日任务场景需要 --api <隔离后端地址>（用于注册临时账号）')
   }
 
   const target = `${opts.url.replace(/\/$/, '')}/#${opts.route}`
@@ -785,6 +811,8 @@ async function main(): Promise<void> {
       resultPath = await runBattleScenario(context, page, opts, outPath)
     } else if (opts.relic) {
       await runRelicScenario(context, page, opts, outPath)
+    } else if (opts.daily) {
+      await runDailyScenario(context, page, opts, outPath)
     } else if (opts.gachaTicket) {
       await runGachaTicketScenario(context, page, opts, outPath)
     } else if (opts.gachaReveal) {
@@ -808,7 +836,7 @@ async function main(): Promise<void> {
       await page.waitForTimeout(400)
     }
 
-    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic) {
+    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic && !opts.daily) {
       await page.screenshot({ path: outPath, fullPage: opts.fullPage })
     }
     if (resultPath) {

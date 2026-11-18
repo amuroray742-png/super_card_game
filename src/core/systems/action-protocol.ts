@@ -278,6 +278,11 @@ export function parseGameAction(raw: unknown): GameAction | null {
       return { type: 'arena.settle' }
     case 'daily.signIn':
       return { type: 'daily.signIn' }
+    case 'daily.claimTask': {
+      const taskId = str(raw.taskId)
+      if (!taskId || taskId.length > 64) return null
+      return { type: 'daily.claimTask', taskId }
+    }
     case 'code.redeem': {
       const code = str(raw.code)
       if (!code || code.length > 64) return null

@@ -38,6 +38,7 @@ import {
   DROP_TABLES,
 } from '../src/core/config/economy.ts'
 import { rarityProbabilities } from '../src/core/systems/gachaRates.ts'
+import { DAILY_TASKS, TASKS, WEEKLY_TASKS } from '../src/core/config/tasks.ts'
 import type { Rarity } from '../src/core/model/types.ts'
 
 // 加载注册型配置
@@ -406,6 +407,77 @@ if (ARENA.TICKET_WEEKLY_CAP <= 0) err('C/NUM', '竞技兑换抽卡券周上限�
 // 日常签到：7 天一轮，奖励表长度必须匹配
 if (DAILY.SIGN_IN_REWARDS.length !== DAILY.SIGN_IN_CYCLE) {
   err('C/NUM', `签到奖励数量 ${DAILY.SIGN_IN_REWARDS.length} 与周期 ${DAILY.SIGN_IN_CYCLE} 不符`)
+}
+
+// ─────────────────────────── F. 每日任务与周目标（P2-1） ───────────────────────────
+//
+// 三条红线在这里被**静态**挡住（roadmap 验收要求）：
+//   1. 奖励里不能出现圣杯结晶 / 抽卡券 → 不冲击抽卡间隔；
+//   2. 奖励里不能出现竞技专属资源 → 不冲击竞技产出隔离；
+//   3. 奖励总量 ≤ 每小时挂机产出的 2% → 不冲击养成资源回收。
+checkUnique('任务', TASKS.map((t) => t.id))
+
+/** 任务奖励允许出现的资源（与 config/tasks.ts 的 TaskReward 类型一致） */
+const ALLOWED_TASK_REWARDS = new Set(['skillStones', 'relicStones'])
+
+for (const task of TASKS) {
+  if (!Number.isInteger(task.target) || task.target <= 0) {
+    err('C/NUM', `任务 ${task.id} 的目标数 ${task.target} 不是正整数`)
+  }
+  const reward = task.rewards as Record<string, unknown>
+  for (const [key, value] of Object.entries(reward)) {
+    if (!ALLOWED_TASK_REWARDS.has(key)) {
+      err(
+        'E/ECONOMY',
+        `任务 ${task.id} 的奖励含不允许的资源「${key}」：只允许强化石 / 术式结晶`
+          + '（发圣杯结晶会冲击抽卡间隔，发竞技资源会冲击竞技产出隔离）',
+      )
+    }
+    if (typeof value !== 'number' || !(value > 0)) {
+      err('C/NUM', `任务 ${task.id} 的奖励 ${key} 非法：${String(value)}`)
+    }
+  }
+  // 引导路由必须是 vue-router 的 name（小写下划线），不能是路径
+  if (task.route && !/^[a-z][a-z_]*$/.test(task.route)) {
+    err('B/REF', `任务 ${task.id} 的引导路由名「${task.route}」不合法（应为 vue-router 的 name）`)
+  }
+}
+if (DAILY_TASKS.length === 0) err('C/NUM', '每日任务为空')
+if (WEEKLY_TASKS.length === 0) err('C/NUM', '周目标为空')
+
+/**
+ * 任务奖励预算：日投放 ≤ 每小时挂机产出的 2%。
+ *
+ * 分母取**第 1 章**的掉落期望（新号与日常玩家的实际产出水平）：
+ * 任务奖励必须小到「即使每天都做完，也只是挂机几分钟的量」，
+ * 否则等于在替玩家改经济节奏。
+ */
+const mid = ([lo, hi]: readonly [number, number]): number => (lo + hi) / 2
+const battlesPerHour = Math.round(3600 / BATTLE.SECONDS_PER_BATTLE)
+const stage1 = DROP_TABLES.stage_1
+const hourlyIncome = {
+  relicStones: mid(stage1.relicStones) * battlesPerHour,
+  skillStones: mid(stage1.skillStones) * battlesPerHour,
+}
+/** 任务日投放 = 每日任务全领 + 周目标摊到每天 */
+const taskDailyBudget = { relicStones: 0, skillStones: 0 }
+for (const task of DAILY_TASKS) {
+  taskDailyBudget.relicStones += task.rewards.relicStones ?? 0
+  taskDailyBudget.skillStones += task.rewards.skillStones ?? 0
+}
+for (const task of WEEKLY_TASKS) {
+  taskDailyBudget.relicStones += (task.rewards.relicStones ?? 0) / 7
+  taskDailyBudget.skillStones += (task.rewards.skillStones ?? 0) / 7
+}
+for (const key of ['relicStones', 'skillStones'] as const) {
+  const ratio = taskDailyBudget[key] / hourlyIncome[key]
+  if (ratio > 0.02) {
+    err(
+      'D/BAL',
+      `任务日投放 ${key} = ${taskDailyBudget[key].toFixed(1)}，`
+        + `达每小时挂机产出（${hourlyIncome[key].toFixed(0)}）的 ${(ratio * 100).toFixed(1)}%，超过 2% 上限`,
+    )
+  }
 }
 
 // ─────────────────────────── 输出 ───────────────────────────

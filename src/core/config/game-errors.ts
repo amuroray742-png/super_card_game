@@ -40,6 +40,12 @@ export const GAME_ERROR_CODES = {
   TEAM_EMPTY: 'TEAM_EMPTY',
   /** 今天已经签到过了 */
   ALREADY_SIGNED: 'ALREADY_SIGNED',
+  /** 任务 id 不存在 */
+  TASK_NOT_FOUND: 'TASK_NOT_FOUND',
+  /** 任务还没完成 */
+  TASK_NOT_COMPLETED: 'TASK_NOT_COMPLETED',
+  /** 本周期该任务已领取过了 */
+  TASK_ALREADY_CLAIMED: 'TASK_ALREADY_CLAIMED',
   /** 兑换码无效 */
   CODE_INVALID: 'CODE_INVALID',
   /** 兑换码已使用 */
@@ -83,6 +89,9 @@ export const GAME_ERROR_MESSAGES: Record<GameErrorCode, string> = {
   RELIC_BATCH_TOO_LARGE: '单次批量操作的数量过多',
   TEAM_EMPTY: '请先在阵位中编队',
   ALREADY_SIGNED: '今天已经签到过了',
+  TASK_NOT_FOUND: '任务不存在',
+  TASK_NOT_COMPLETED: '任务还没完成',
+  TASK_ALREADY_CLAIMED: '该任务的奖励已经领取过了',
   CODE_INVALID: '兑换码无效',
   CODE_USED: '该兑换码已使用',
   REBIRTH_LOCKED: '暂不满足圣杯重启条件',

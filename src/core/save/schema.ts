@@ -9,7 +9,7 @@ import { arenaWeekIndex } from '../time.ts'
 import { makeRelicUid, parseLegacyRelicUid, RELIC_DEFS, RELIC_SETS } from '../systems/relic.ts'
 import '../config/relics.ts'
 
-export const SAVE_VERSION = 7
+export const SAVE_VERSION = 8
 
 export type Migration = (save: SaveData) => SaveData
 
@@ -30,6 +30,8 @@ export const MIGRATIONS: Record<number, Migration> = {
       lastSignInDay: 0,
       taskProgress: {},
       taskClaimed: [],
+      taskDay: 0,
+      taskWeek: 0,
     }
     return save
   },
@@ -82,6 +84,25 @@ export const MIGRATIONS: Record<number, Migration> = {
       if (mapped) entry.relicId = mapped
     }
     save.relicSeq = seq
+    return save
+  },
+  // v7 → v8：任务计数改为**按周期分桶**（每日任务 / 周目标）
+  //
+  // 旧结构只有一个 `taskProgress` 字典，且从来没有内容（页面上的「每日任务」
+  // 一直是占位）。现在计数按 `metric:period` 分桶：
+  // 同一个行为同时计入每日与每周两个口径，但两者的重置边界不同。
+  //
+  // 迁移策略：清空旧计数与旧领取记录（本来就没有内容），
+  // 并补上周期归属字段（0 = 不属于任何一天 / 任何一周 → 首次动作时自动滚动）。
+  7: (save) => {
+    save.daily = {
+      signInStreak: save.daily?.signInStreak ?? 0,
+      lastSignInDay: save.daily?.lastSignInDay ?? 0,
+      taskProgress: {},
+      taskClaimed: [],
+      taskDay: 0,
+      taskWeek: 0,
+    }
     return save
   },
 }
@@ -146,6 +167,8 @@ export function createNewSave(now: number, seed = 0): SaveData {
       lastSignInDay: 0,
       taskProgress: {},
       taskClaimed: [],
+      taskDay: 0,
+      taskWeek: 0,
     },
   }
 }
@@ -184,7 +207,15 @@ export function normalizeSave(raw: unknown): SaveData {
     settings: { ...base.settings, ...(save.settings ?? {}) },
     stats: { ...base.stats, ...(save.stats ?? {}) },
     arena: { ...base.arena, ...(save.arena ?? {}) },
-    daily: { ...base.daily, ...(save.daily ?? {}) },
+    daily: {
+      ...base.daily,
+      ...(save.daily ?? {}),
+      // 任务字段逐个兜底：旧档没有它们，且不能被 undefined 覆盖掉
+      taskProgress: { ...(save.daily?.taskProgress ?? {}) },
+      taskClaimed: Array.isArray(save.daily?.taskClaimed) ? save.daily.taskClaimed : [],
+      taskDay: Number.isFinite(save.daily?.taskDay) ? (save.daily!.taskDay as number) : 0,
+      taskWeek: Number.isFinite(save.daily?.taskWeek) ? (save.daily!.taskWeek as number) : 0,
+    },
     heroes: save.heroes ?? {},
     relics: Array.isArray(save.relics) ? save.relics : [],
     relicSeq: Number.isFinite(save.relicSeq) ? Math.max(0, Math.floor(save.relicSeq!)) : 0,

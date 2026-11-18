@@ -13,10 +13,11 @@
  *   2. 满养成消耗明细
  *   3. 投放 / 消耗 = 回收倍数（>1 说明主线养得起，<1 说明需要额外来源）
  */
-import { DROP_TABLES, LEVEL, REALMS, SKILL, RELIC, STAR, STAGE } from '../../src/core/config/economy.ts'
+import { DROP_TABLES, LEVEL, REALMS, SKILL, RELIC, STAR, STAGE, BATTLE, DAILY } from '../../src/core/config/economy.ts'
 import { STAGES } from '../../src/core/config/stages.ts'
 import { totalExpToReach, starUpCost } from '../../src/core/systems/growth.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
+import { DAILY_TASKS, WEEKLY_TASKS } from '../../src/core/config/tasks.ts'
 
 interface Expected {
   silver: number
@@ -223,6 +224,119 @@ const counts = HEROES.reduce<Record<string, number>>((acc, h) => {
 }, {})
 console.log(
   `  SSR ${counts.SSR ?? 0} · SR ${counts.SR ?? 0} · R ${counts.R ?? 0} · N ${counts.N ?? 0} · 合计 ${HEROES.length}`,
+)
+
+// ─────────────────────────── 4. 日常投放（签到 + 任务） ───────────────────────────
+//
+// roadmap P2-1 的验收要求：任务奖励「没有冲击抽卡间隔、养成资源回收或竞技产出隔离」。
+// 这里把日常投放摊开算，三条红线各自对应一个**可核对的数字**：
+//
+//   1. 抽卡间隔：日常投放里的圣杯结晶 / 抽卡券**只有签到**有，任务奖励为 0；
+//   2. 养成回收：任务日投放 ≤ 每小时挂机产出的 2%（见 validate-config 的同一把尺）；
+//   3. 竞技隔离：任务奖励不含任何竞技资源（竞技勋章 / 竞技材料 / 竞技兑换券）。
+//
+// 口径：主线投放是**一次性**的，日常投放是**每天**的，
+// 所以对比时取「首周（7 天）」这个试玩自然周期。
+
+interface DailySupply {
+  relicStones: number
+  skillStones: number
+  crystals: number
+  tickets: number
+}
+
+const zeroSupply = (): DailySupply => ({
+  relicStones: 0,
+  skillStones: 0,
+  crystals: 0,
+  tickets: 0,
+})
+
+/** 签到：一轮 7 天的奖励总和 */
+const signInSupply = zeroSupply()
+for (const reward of DAILY.SIGN_IN_REWARDS) {
+  signInSupply.relicStones += reward.relicStones ?? 0
+  signInSupply.skillStones += reward.skillStones ?? 0
+  signInSupply.crystals += reward.crystals ?? 0
+  signInSupply.tickets += reward.tickets ?? 0
+}
+
+/** 每日任务：全部领完的量 */
+const dailyTaskSupply = zeroSupply()
+for (const task of DAILY_TASKS) {
+  dailyTaskSupply.relicStones += task.rewards.relicStones ?? 0
+  dailyTaskSupply.skillStones += task.rewards.skillStones ?? 0
+}
+
+/** 周目标：一周的量（摊到每天 = ÷7） */
+const weeklyTaskSupply = zeroSupply()
+for (const task of WEEKLY_TASKS) {
+  weeklyTaskSupply.relicStones += task.rewards.relicStones ?? 0
+  weeklyTaskSupply.skillStones += task.rewards.skillStones ?? 0
+}
+
+/** 每小时挂机产出（第 1 章期望 × 每小时场次）——任务预算的分母 */
+const battlesPerHour = Math.round(3600 / BATTLE.SECONDS_PER_BATTLE)
+const stage1 = DROP_TABLES.stage_1
+const hourlyIncome = {
+  relicStones: mid(stage1.relicStones) * battlesPerHour,
+  skillStones: mid(stage1.skillStones) * battlesPerHour,
+}
+
+const taskPerDay = {
+  relicStones: dailyTaskSupply.relicStones + weeklyTaskSupply.relicStones / 7,
+  skillStones: dailyTaskSupply.skillStones + weeklyTaskSupply.skillStones / 7,
+}
+
+console.log('\n【日常投放】签到 + 每日任务 + 周目标（任务表：core/config/tasks.ts）\n')
+console.log('  来源              强化石   术式结晶   圣杯结晶   抽卡券')
+console.log('  ' + '-'.repeat(60))
+console.log(
+  `  签到（7 天一轮）  ${String(signInSupply.relicStones).padStart(6)} ${String(signInSupply.skillStones).padStart(10)}`
+  + ` ${String(signInSupply.crystals).padStart(10)} ${String(signInSupply.tickets).padStart(8)}`,
+)
+console.log(
+  `  每日任务（全领）  ${String(dailyTaskSupply.relicStones).padStart(6)} ${String(dailyTaskSupply.skillStones).padStart(10)}`
+  + ` ${String(dailyTaskSupply.crystals).padStart(10)} ${String(dailyTaskSupply.tickets).padStart(8)}`,
+)
+console.log(
+  `  周目标（一周）    ${String(weeklyTaskSupply.relicStones).padStart(6)} ${String(weeklyTaskSupply.skillStones).padStart(10)}`
+  + ` ${String(weeklyTaskSupply.crystals).padStart(10)} ${String(weeklyTaskSupply.tickets).padStart(8)}`,
+)
+console.log(
+  `  任务日投放        ${taskPerDay.relicStones.toFixed(1).padStart(6)} ${taskPerDay.skillStones.toFixed(1).padStart(10)}`
+  + ` ${String(0).padStart(10)} ${String(0).padStart(8)}`,
+)
+console.log(
+  `\n  每小时挂机产出（第 1 章 × ${battlesPerHour} 场）：`
+  + ` 强化石 ${hourlyIncome.relicStones.toFixed(0)} · 术式结晶 ${hourlyIncome.skillStones.toFixed(0)}`,
+)
+console.log(
+  `  任务日投放占比：强化石 ${((taskPerDay.relicStones / hourlyIncome.relicStones) * 100).toFixed(2)}%`
+  + ` · 术式结晶 ${((taskPerDay.skillStones / hourlyIncome.skillStones) * 100).toFixed(2)}%`
+  + '（分母是**一小时**的挂机产出）',
+)
+console.log(
+  '  红线核对：任务奖励里的圣杯结晶 = 0、抽卡券 = 0（抽卡节奏仍只由签到决定）；'
+  + '竞技资源 = 0（竞技产出隔离不变）',
+)
+
+console.log('\n【加上首周（7 天）日常投放后的回收倍数】\n')
+console.log('  资源            主线投放   日常投放    满养成消耗   回收倍数(前)   回收倍数(后)')
+console.log('  ' + '-'.repeat(72))
+const dailyRows: Array<[string, number, number, number]> = [
+  ['术式结晶', mainline.skillStones, taskPerDay.skillStones * 7, cost.skillStones],
+  ['遗物强化石', mainline.relicStones, taskPerDay.relicStones * 7, cost.relicStones],
+]
+for (const [name, supply, daily, need] of dailyRows) {
+  console.log(
+    `  ${name.padEnd(12)} ${fmt(supply).padStart(10)} ${fmt(daily).padStart(9)} ${fmt(need).padStart(12)}`
+      + ` ${ratio(supply, need).padStart(12)} ${ratio(supply + daily, need).padStart(13)}`,
+  )
+}
+console.log(
+  '\n  注：日常投放按**首周 7 天**计（主线投放是一次性的，日常投放每天都有）；'
+  + '天数为 D 时，「回收倍数(后)」随 D 线性上升。',
 )
 
 console.log('\n' + '='.repeat(84))
