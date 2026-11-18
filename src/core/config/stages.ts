@@ -8,6 +8,8 @@
  */
 import type { ChapterDef, StageDef } from '../model/types.ts'
 import { STAGE } from './economy.ts'
+import { getEnemy } from './enemies.ts'
+import { computePower } from '../systems/stats.ts'
 
 interface ChapterSpec {
   id: number
@@ -122,12 +124,26 @@ export const STAGES_PER_CHAPTER = STAGE.STAGES_PER_CHAPTER + 1
  *
  * 每章首关用该章锚点，章内 30 个普通关等比铺开到 `IN_CHAPTER_SPAN`，
  * 章末 BOSS 再乘 `BOSS_MULTIPLIER`。
- * 全曲线严格递增（章内递增 + 章边界由锚点比 ≥ 1.30 保证）。
+ * 全曲线严格递增（章内递增 + 章边界由锚点比 ≥ 章内总跨度 保证）。
+ *
+ * ⚠ 锚点表可注入（`scaleAnchors`）：`tools/balance/recalibrate.ts` 的标定迭代
+ *   需要用**上一轮算出来的锚点**再跑一遍推进模拟（锚点与推进互相依赖），
+ *   而配置里的锚点是 `as const` 的标定值，不能就地改。
+ *   公式本身只有这一份（铁律 #4）——注入的锚点与配置锚点走的是同一个函数。
  */
-export function stageEnemyScale(chapter: number, index: number, isBoss: boolean): number {
+export function stageEnemyScaleFor(
+  chapter: number,
+  index: number,
+  isBoss: boolean,
+  scaleAnchors: readonly number[] = STAGE.SCALE_ANCHORS,
+): number {
   const step = Math.pow(STAGE.IN_CHAPTER_SPAN, 1 / STAGE.STAGES_PER_CHAPTER)
-  const base = STAGE.SCALE_ANCHORS[chapter - 1] * Math.pow(step, index - 1)
+  const base = scaleAnchors[chapter - 1] * Math.pow(step, index - 1)
   return isBoss ? base * STAGE.BOSS_MULTIPLIER : base
+}
+
+export function stageEnemyScale(chapter: number, index: number, isBoss: boolean): number {
+  return stageEnemyScaleFor(chapter, index, isBoss)
 }
 
 /**
@@ -140,15 +156,133 @@ export function stageEnemyScale(chapter: number, index: number, isBoss: boolean)
  *   它必须**不晚于**该关真正打得赢的时刻，否则挂机会把玩家推进到打不过的关卡。
  *   详见 economy.ts 的 STAGE.POWER_ANCHORS 注释。
  */
-export function stagePowerRequired(chapter: number, index: number, isBoss: boolean): number {
+export function stagePowerRequiredFor(
+  chapter: number,
+  index: number,
+  isBoss: boolean,
+  powerAnchors: readonly number[] = STAGE.POWER_ANCHORS,
+): number {
   const lo =
     chapter === 1
       ? STAGE.FIRST_STAGE_POWER
-      : STAGE.POWER_ANCHORS[chapter - 2] * STAGE.CHAPTER_GATE_GAP
-  const hi = STAGE.POWER_ANCHORS[chapter - 1]
+      : powerAnchors[chapter - 2] * STAGE.CHAPTER_GATE_GAP
+  const hi = powerAnchors[chapter - 1]
+  // ⚠ 锚点异常时（hi ≤ lo，含 0）不能让门槛算出 NaN / 递减曲线：
+  //   NaN 会让挂机的放行判断 `power >= next.powerRequired` 恒为 false
+  //   → 玩家被**静默**卡在第 1 关（打了一整天，零推进）。
+  //   这里兜底成「不低于上一章门槛」，宁可略紧也不产生坏值。
+  const safeHi = Number.isFinite(hi) && hi > lo ? hi : lo
   // index 1..30 为普通关（等比铺开），章末 BOSS 直接取本章 BOSS 锚点
   const t = isBoss ? 1 : (index - 1) / STAGE.STAGES_PER_CHAPTER
-  return Math.round(lo * Math.pow(hi / lo, t))
+  return Math.round(lo * Math.pow(safeHi / lo, t))
+}
+
+export function stagePowerRequired(chapter: number, index: number, isBoss: boolean): number {
+  return stagePowerRequiredFor(chapter, index, isBoss)
+}
+
+/**
+ * 关卡的**真实难度** = 敌方基础战力 × 属性缩放倍率。
+ *
+ * ⚠ 难度**不是**缩放本身：敌方**基础属性**本身跨章增长约 **1.25×/章**
+ *   （§6.5 的「已知限制」：BOSS 基础战力 897 → 6,382），
+ *   所以章边界处新一章首关的**缩放**必然低于上一章 BOSS 的缩放
+ *   （否则难度增速会跑赢玩家养成），但**难度**仍然递增。
+ *   「难度不倒挂」必须按这个口径核对——
+ *   按缩放核对会把「基础属性增长」误判成「难度倒挂」（§6.5 实施修正）。
+ *
+ * ⚠ 这是**唯一**一份难度口径：配置校验（tools/validate-config.ts）与
+ *   守护单测（tests/unit/save-config.test.ts）都必须走它（铁律 #4）。
+ */
+export function stageDifficulty(stage: StageDef): number {
+  const powers = stage.enemyIds.map((id) => computePower(getEnemy(id).baseStats))
+  const base = powers.reduce((a, b) => a + b, 0) / Math.max(1, powers.length)
+  return base * stage.enemyScale
+}
+
+// ─────────────────────────── 难度曲线不变量 ───────────────────────────
+
+export interface StageMonotonicityIssue {
+  /** 前一关 id */
+  prevId: number
+  /** 违反不变量的关卡 id */
+  stageId: number
+  /** 人类可读的说明 */
+  reason: string
+}
+
+/**
+ * 难度曲线的**不变量核对**（唯一一份口径）。
+ *
+ * 返回违反不变量的关卡对；空数组 = 全部通过。
+ * 配置校验（`tools/validate-config.ts`）与守护单测
+ * （`tests/unit/save-config.test.ts`）都必须走它（铁律 #4）。
+ *
+ * 三条不变量：
+ *  ① **战力门槛全局严格递增**——门槛是挂机放行线，倒挂会让玩家推进到打不过的关卡。
+ *  ② **章内敌方缩放严格递增**——章末 BOSS 尖峰。
+ *  ③ **章首难度（基础属性 × 缩放）跨章严格递增**——章与章之间不倒挂。
+ *
+ * ⚠ **章内相邻关的「难度绝对值」允许波动**：关卡的敌人配置在 1~2 只之间轮换
+ *   （`enemyPool` 按 index 取 1 或 2 只），基础属性不同 ⇒
+ *   「基础属性 × 缩放」会跟着配比振荡。章内难度只看**缩放**（②）。
+ * ⚠ **章末 BOSS → 下一章首关的难度允许回落**：BOSS 的基础属性是普通敌的 3.6~6.9 倍，
+ *   跨章回落是设计上的「喘息」（下一章再重新爬坡）。
+ *   章与章之间的不倒挂由 ③ 的「章首 vs 章首」守住。
+ */
+export function stageMonotonicityIssues(
+  stages: readonly StageDef[] = STAGES,
+): StageMonotonicityIssue[] {
+  const issues: StageMonotonicityIssue[] = []
+  for (let i = 1; i < stages.length; i++) {
+    const prev = stages[i - 1]
+    const cur = stages[i]
+    if (cur.powerRequired <= prev.powerRequired) {
+      issues.push({
+        prevId: prev.id,
+        stageId: cur.id,
+        reason: `门槛 ${cur.powerRequired} 未高于关卡 ${prev.id} 的 ${prev.powerRequired}（放行线倒挂）`,
+      })
+    }
+    if (prev.chapter === cur.chapter && cur.enemyScale <= prev.enemyScale) {
+      issues.push({
+        prevId: prev.id,
+        stageId: cur.id,
+        reason: `章内缩放 ${cur.enemyScale} 未高于关卡 ${prev.id} 的 ${prev.enemyScale}（章内难度倒挂）`,
+      })
+    }
+  }
+
+  // ③ 章首 vs 章首：**不是**「上一章末关 vs 本章首关」——
+  //   章末 BOSS 的基础属性是普通敌的 3.6~6.9 倍，拿它比会把设计上的
+  //   「喘息」误判成倒挂。跨章递增比的是**两章的首关**。
+  const firstOf = (chapter: number): StageDef | undefined =>
+    stages.find((s) => s.chapter === chapter && s.index === 1)
+  const chapters = [...new Set(stages.map((s) => s.chapter))].sort((a, b) => a - b)
+  for (let i = 1; i < chapters.length; i++) {
+    const prevFirst = firstOf(chapters[i - 1])
+    const curFirst = firstOf(chapters[i])
+    if (!prevFirst || !curFirst) continue
+    if (curFirst.enemyScale <= prevFirst.enemyScale) {
+      issues.push({
+        prevId: prevFirst.id,
+        stageId: curFirst.id,
+        reason:
+          `第 ${curFirst.chapter} 章首关缩放 ${curFirst.enemyScale} 未高于 ` +
+          `第 ${prevFirst.chapter} 章首关的 ${prevFirst.enemyScale}（跨章倒挂）`,
+      })
+    }
+    if (stageDifficulty(curFirst) <= stageDifficulty(prevFirst)) {
+      issues.push({
+        prevId: prevFirst.id,
+        stageId: curFirst.id,
+        reason:
+          `第 ${curFirst.chapter} 章首关难度 ${stageDifficulty(curFirst).toFixed(0)} 未高于 ` +
+          `第 ${prevFirst.chapter} 章首关的 ${stageDifficulty(prevFirst).toFixed(0)}（跨章难度倒挂）`,
+      })
+    }
+  }
+  return issues
 }
 
 function buildStages(): StageDef[] {

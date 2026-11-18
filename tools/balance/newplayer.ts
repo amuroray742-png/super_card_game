@@ -73,8 +73,23 @@ const CHUNK_HOURS = Math.max(0.25, Number(values.chunk) || 1)
 // ─────────────────────────── 常量 ───────────────────────────
 
 const HOUR_MS = 3_600_000
-/** 「第一天」= 满效率挂机时长（`IDLE.FULL_EFFICIENCY_HOURS` 小时）。 */
-const DAY_HOURS = IDLE.FULL_EFFICIENCY_HOURS
+/**
+ * 「第一天」= **24 小时真实时长**（玩家逐段上线领奖 → 挂机 → 再上线）。
+ *
+ * ⚠ **实施修正（roadmap P1-2）**：原值取 `IDLE.FULL_EFFICIENCY_HOURS`（当时是 8），
+ *   隐含假设「满效率时长 = 一天的挂机量」。收窄离线曲线后这个假设不成立了：
+ *   真实一天的离线收益是 **f(24h)**（走 core 的离线效率曲线），
+ *   而不是 f(FULL_EFFICIENCY_HOURS)——满效率时长只是曲线里的第一段。
+ *
+ * ⚠ **上线频率是口径的一部分，不是细节**：离线曲线按「累计时长」折算，
+ *   而累计时长只在玩家**活跃**时归零，于是：
+ *     · 每小时上线一次（`--chunk 1`，**默认**）→ 每段都拿到满效率 → 首日 ≈ 24h 收益；
+ *     · 每天上线一次（`--chunk 24`）→ 首日只有 f(24h) ≈ 2.6h 收益。
+ *   两者相差 9 倍，**必须在文档里写清楚用的是哪一个**。
+ *   本基线用「每小时上线一次」（活跃首日）；「每天上线一次」的被动档见
+ *   `artifacts/baselines/recalibrate.json`（`npm run balance:recalibrate`）。
+ */
+const DAY_HOURS = 24
 /** BOSS 通关率的试验场数 */
 const BOSS_TRIALS = 120
 /** 逐关扫描的试验场数 */
@@ -366,16 +381,28 @@ interface AccountResult {
   }
 }
 
-/** 推进挂机账本并结算一段时长（走真实的 `idle.tick` 动作） */
+/**
+ * 推进挂机账本并结算一段时长（走真实的 `idle.tick` 动作）。
+ *
+ * ⚠ **实施修正（roadmap P1-2）**：这里原来直接改 `save.idle.measuredAt` /
+ *   `save.idle.activeUntil` 来「模拟离线」，结果**从第 4 小时起收益恒为 0**——
+ *   core 的离线计量是**累计时长**口径（`settleIdleLedger`），累计的离线时长
+ *   只有在玩家**活跃**（`onlineMs > 0`）时才归零；直接改字段永远走不到那条分支，
+ *   累计时长一路涨到 `CAP_HOURS` 之后，后续每段的折算增量就是 0。
+ *   真实玩家每天都会上线，所以模拟也必须每天上线一次——
+ *   走真实的「心跳计量离线段 → 心跳让租约生效（归零）→ 领奖」序列
+ *   （与 tools/balance/recalibrate.ts 同口径）。
+ */
 function advanceIdle(save: SaveData, ctx: ActionContext, hours: number): void {
   const ms = Math.round(hours * HOUR_MS)
-  // 先把「现在」推过去，再把「上次计量」钉在这一段之前：
-  //   `settleIdleLedger` 按 `ctx.now - measuredAt` 算经过时长，
-  //   顺序反了会算成两倍时长（结算出的场次翻倍）。
+  // ① 先把「现在」推过去，再让心跳计量这一段离线时长
+  //    （租约已过期 → 走离线曲线，不吃 3 倍在线倍率）
   ctx.now += ms
-  save.idle.measuredAt = ctx.now - ms
-  // 租约已过期 → 这一段按**离线**效率计（不吃 3 倍在线倍率）
-  save.idle.activeUntil = ctx.now - ms
+  applyAction(save, { type: 'idle.heartbeat' }, ctx)
+  // ② 再来一跳（一个心跳间隔后）：租约已生效 → onlineMs > 0 → 离线累计归零
+  ctx.now += IDLE.HEARTBEAT_INTERVAL_MS
+  applyAction(save, { type: 'idle.heartbeat' }, ctx)
+  // ③ 领奖：回放服务端已累计的场次（客户端只是上限）
   const battles = Math.floor(ms / 1000 / BATTLE.SECONDS_PER_BATTLE)
   applyAction(save, { type: 'idle.tick', battles: Math.max(1, battles) }, ctx)
 }

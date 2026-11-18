@@ -3,7 +3,7 @@ import { applyAction, settleIdleLedger } from '../../src/core/systems/actions.ts
 import { createNewSave } from '../../src/core/save/schema.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
 import { Rng } from '../../src/core/rng.ts'
-import { runIdle, settleOffline } from '../../src/core/systems/idle.ts'
+import { runIdle, settleOffline, computeOfflineEfficiency } from '../../src/core/systems/idle.ts'
 import { buildPveContext, buildTeam, buildTeamPower } from '../../src/core/systems/derive.ts'
 import { maxedHero } from './helpers.ts'
 import { BATTLE, IDLE } from '../../src/core/config/economy.ts'
@@ -22,7 +22,10 @@ function bossFixture() {
   const save = createNewSave(NOW, 1)
   const ids = ['jeannedarc', 'nangdengel', 'huatuo', 'bianque']
   ids.forEach((id, slot) => {
-    save.heroes[id] = { ...createHeroState(id, NOW), level: 44 }
+    // ⚠ 等级要同时满足两件事：编队战力**过**第 62 关（第二章 BOSS）的门槛，
+    //   但实战**打不赢**它 —— 这正是「过门槛却败于 BOSS」这条用例的前提。
+    //   门槛随锚点重标定而变（roadmap P1-2），所以这里的等级随之调整。
+    save.heroes[id] = { ...createHeroState(id, NOW), level: 62 }
     save.team.slots[slot] = id
   })
   save.campaign.clearedStage = 60
@@ -183,7 +186,7 @@ describe('挂机权威时间账本', () => {
     expect(frequent.save.idle.offlineElapsedMs).toBe(once.save.idle.offlineElapsedMs)
     expect(frequent.save.idle.offlineElapsedMs).toBe(10 * 3600000)
   })
-  it('10小时离线分段计量与一次计量均为9.8小时预算', () => {
+  it('10小时离线分段计量与一次计量均为同一条曲线的预算', () => {
     const frequent = fixture()
     const once = fixture()
     // 每小时计量但不领奖，避免回放上限影响对曲线积分的断言。
@@ -193,7 +196,9 @@ describe('挂机权威时间账本', () => {
     }
     once.ctx.now += 10 * 3600000
     settleIdleLedger(once.save, once.ctx, 0)
-    expect(frequent.save.idle.effectiveMs).toBeCloseTo(9.8 * 3600000)
+    // 预算取 core 的离线效率曲线（口径唯一：IDLE.FULL_EFFICIENCY_HOURS / CAP_HOURS / TAIL_RATE）
+    const budget = computeOfflineEfficiency(10 * 3600) * 3600000
+    expect(frequent.save.idle.effectiveMs).toBeCloseTo(budget)
     expect(frequent.save.idle.effectiveMs).toBeCloseTo(once.save.idle.effectiveMs!)
   })
   it('空队时间在编队动作前丢弃，新队不能追领', () => {

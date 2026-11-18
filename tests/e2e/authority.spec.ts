@@ -2,8 +2,10 @@ import { test, expect, type Page } from '@playwright/test'
 import {
   E2E_API_BASE,
   E2E_PASSWORD,
+  accessTokenOf,
   cachedSaveOf,
   loginAccount,
+  postAction,
   registerAccount,
   seedSession,
   settleIdleThroughUi,
@@ -26,21 +28,6 @@ import { getStage } from '../../src/core/config/stages.ts'
  *   4. **离线只读**：服务端不可达时只能看，不能改。
  */
 
-/** 直接调后端接口发一个动作 */
-async function postAction(
-  accessToken: string,
-  actionId: string,
-  action: unknown,
-): Promise<Record<string, unknown>> {
-  const res = await fetch(`${E2E_API_BASE}/api/action`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ actionId, action }),
-  })
-  const body = (await res.json()) as Record<string, unknown>
-  return body
-}
-
 /** 拉服务端存档（权威版本） */
 async function pullSave(accessToken: string): Promise<Record<string, never> | null> {
   const res = await fetch(`${E2E_API_BASE}/api/save`, {
@@ -49,17 +36,6 @@ async function pullSave(accessToken: string): Promise<Record<string, never> | nu
   if (res.status === 404) return null
   const body = (await res.json()) as { payload: string }
   return JSON.parse(body.payload) as Record<string, never>
-}
-
-/** 换一对新令牌（拿 access token） */
-async function accessTokenOf(session: { refreshToken: string }): Promise<string> {
-  const res = await fetch(`${E2E_API_BASE}/api/auth/refresh`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ refreshToken: session.refreshToken }),
-  })
-  const body = (await res.json()) as { accessToken: string }
-  return body.accessToken
 }
 
 /** 某个账号的本地缓存槽位键（口径取 core 的唯一来源） */

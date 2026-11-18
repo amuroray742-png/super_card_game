@@ -1,21 +1,34 @@
 /**
- * 投放回收表（Phase 10 / §10.4）。
+ * 投放回收表（Phase 10 / §10.4 · §5.8）。
  *
- * 回答一个问题：**主线推关能养出多少个满养成英灵？**
+ * 回答两个问题：
+ *   1. **产出速度 vs 消耗速度**：每一章的产出，能不能撑住该章的标准养成推进？
+ *   2. **存量视角**：主线 310 关首通投放 ÷ 满养成消耗（参考口径，不是闸门）。
+ *
+ * ⚠ **实施修正（roadmap P1-2 难度曲线重标定）**：
+ *   旧口径只有第 2 个问题，而且是**存量**比——在挂机游戏里必然失真：
+ *   经验的产出主体是**挂机刷取**（每天上千场），主线 310 次首通只是零头
+ *   （实测 4384万 vs 满养成 26.5亿 = 0.02×）。存量口径把零头当成全部产出，
+ *   结论必然是「缺口」，而玩家实际并不缺经验。
+ *   §5.8 原文就是「产出速度 vs 消耗速度」，本表改为**速度**口径出表，
+ *   存量段保留但降级为参考（不再是闸门）。
  *
  * 基准口径：
- *   - 消耗侧 = 1 个英灵满养成（Lv240 / 6★ / 技能满级 / 6 件遗物满强化）
+ *   - 消耗侧（速度）= **标准养成曲线**在该章的消耗：等级 → 星级 / 技能 / 遗物强化，
+ *     曲线取 `tools/balance/reference-build.ts`（与难度标定同一把尺，铁律 #4）。
+ *   - 产出侧（速度）= 真实挂机回放的奖励包（含主线首通掉落）+ 日常任务 / 周目标，
+ *     数据源 `artifacts/baselines/recalibrate.json`（`npm run balance:recalibrate` 产出）。
+ *   - 消耗侧（存量）= 1 个英灵满养成（Lv240 / 6★ / 技能满级 / 6 件遗物满强化）
  *     × 6 人编队；经验消耗按英雄计，其余按编队总量计。
- *   - 投放侧 = 主线 310 关全通（含每章 BOSS）的掉落总和，取区间期望值。
- *
- * 输出：
- *   1. 逐章投放明细
- *   2. 满养成消耗明细
- *   3. 投放 / 消耗 = 回收倍数（>1 说明主线养得起，<1 说明需要额外来源）
+ *   - 投放侧（存量）= 主线 310 关全通（含每章 BOSS）的掉落总和，取区间期望值。
  */
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { DROP_TABLES, LEVEL, REALMS, SKILL, RELIC, STAR, STAGE, BATTLE, DAILY, LADDER, LADDER_RETURN_REWARDS } from '../../src/core/config/economy.ts'
 import { STAGES } from '../../src/core/config/stages.ts'
-import { totalExpToReach, starUpCost } from '../../src/core/systems/growth.ts'
+import { totalExpToReach, starUpCost, expToNext } from '../../src/core/systems/growth.ts'
+import { referenceGearAt } from './reference-build.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
 import { DAILY_TASKS, WEEKLY_TASKS } from '../../src/core/config/tasks.ts'
 
@@ -187,7 +200,12 @@ console.log(
     ` = 升星 ${starEmblemsPerHero} + 突破 ${breakEmblemsPerHero}）`,
 )
 
-console.log('\n【回收倍数】主线 310 关投放 ÷ 满养成消耗\n')
+console.log('\n【存量视角 · 参考口径】主线 310 关首通投放 ÷ 满养成消耗\n')
+console.log(
+  '  ⚠ 这一段是**存量**比（打完主线累计能养出多少满养成），不是健康度闸门——\n' +
+    '    挂机游戏里经验的产出主体是每天上千场的挂机刷取，主线首通只是零头，\n' +
+    '    所以这一段的「经验 0.02×」不代表玩家缺经验。闸门看下面的【速度口径】。\n',
+)
 console.log('  资源            投放          消耗        回收倍数   判定')
 console.log('  ' + '-'.repeat(66))
 const rows: Array<[string, number, number]> = [
@@ -202,14 +220,14 @@ for (const [name, supply, need] of rows) {
   const ok = r >= 1
   console.log(
     `  ${name.padEnd(12)} ${fmt(supply).padStart(10)} ${fmt(need).padStart(12)} ` +
-      `${ratio(supply, need).padStart(10)}   ${ok ? '✓' : '✗ 缺口'}`,
+      `${ratio(supply, need).padStart(10)}   ${ok ? '✓' : '· 低于 1（见速度口径）'}`,
   )
 }
 
 const relicSupply = Object.values(mainline.relics).reduce((a, b) => a + b, 0)
 console.log(
   `  ${'遗物本体'.padEnd(12)} ${relicSupply.toFixed(0).padStart(10)} ${String(relicsInTeam).padStart(12)} ` +
-    `${ratio(relicSupply, relicsInTeam).padStart(10)}   ${relicSupply >= relicsInTeam ? '✓' : '✗ 缺口'}`,
+    `${ratio(relicSupply, relicsInTeam).padStart(10)}   ${relicSupply >= relicsInTeam ? '✓' : '· 低于 1（见速度口径）'}`,
 )
 
 console.log(
@@ -339,7 +357,205 @@ console.log(
   + '天数为 D 时，「回收倍数(后)」随 D 线性上升。',
 )
 
-// ─────────────────────────── 5. 回流投放（P2-2） ───────────────────────────
+// ─────────────────────────── 5. 速度口径（§5.8 · 闸门口径）───────────────────────────
+//
+// ⚠ 为什么要改口径：旧表只有「主线 310 关首通投放 ÷ 满养成消耗」的**存量**比。
+//   挂机游戏里经验的产出主体是**挂机刷取**（每天上千场），主线首通只是零头，
+//   存量口径把零头当全部产出 → 结论必然是「缺口」，而玩家实际并不缺经验。
+//   §5.8 原文就是「产出速度 vs 消耗速度」，本节按速度口径出表。
+//
+//   · 产出速度 = 真实挂机回放的奖励包（含主线首通掉落）+ 日常任务 / 周目标 / 签到
+//       —— 数据源 artifacts/baselines/recalibrate.json（`npm run balance:recalibrate` 产出）
+//   · 消耗速度 = **标准养成曲线**在该章的消耗（等级 → 星级 / 技能 / 遗物强化）
+//       —— 曲线取 tools/balance/reference-build.ts（与难度标定同一把尺，铁律 #4）
+//   · 回收比 = 产出速度 ÷ 消耗速度，≥1 ⇒ 该章产出足以支撑标准养成推进
+
+interface PaceFlow {
+  silver: number
+  exp: number
+  skillStones: number
+  relicStones: number
+  emblems: number
+  relics: number
+}
+
+interface PaceBaseline {
+  scaleAnchors: number[]
+  chapterDays: number[]
+  velocity: Array<{ chapter: number; days: number; produced: PaceFlow; spent: PaceFlow }>
+}
+
+const PACE_PATH = resolve(process.cwd(), 'artifacts/baselines/recalibrate.json')
+
+function readPaceBaseline(): PaceBaseline | null {
+  if (!existsSync(PACE_PATH)) return null
+  try {
+    const parsed = JSON.parse(readFileSync(PACE_PATH, 'utf8')) as PaceBaseline
+    return Array.isArray(parsed.velocity) && parsed.velocity.length > 0 ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/** 基线里的锚点是否与当前配置一致（不一致 ⇒ 基线过期，数字不可用） */
+function paceIsFresh(baseline: PaceBaseline): boolean {
+  if (!Array.isArray(baseline.scaleAnchors)) return false
+  if (baseline.scaleAnchors.length !== STAGE.SCALE_ANCHORS.length) return false
+  return baseline.scaleAnchors.every(
+    (v, i) => Math.abs(v - STAGE.SCALE_ANCHORS[i]) <= Math.max(1e-3, STAGE.SCALE_ANCHORS[i] * 1e-3),
+  )
+}
+
+interface StandardCost {
+  exp: number
+  silver: number
+  skillStones: number
+  relicStones: number
+  emblems: number
+}
+
+/** 每个英灵的技能数（createHeroState 建 3 条） */
+const SKILL_COUNT = 3
+
+/**
+ * 标准养成曲线在某段等级区间内的消耗（6 人编队）。
+ *
+ * ⚠ 消耗全部由**配置**推出（`expToNext` / `referenceGearAt` / `starUpCost` /
+ *   `REALMS[].breakCost`），不在这里复算任何扣费口径（铁律 #4）。
+ */
+function standardCost(fromLevel: number, toLevel: number): StandardCost {
+  let exp = 0
+  for (let l = fromLevel; l < toLevel; l++) exp += expToNext(l)
+  exp *= TEAM_SIZE
+
+  const [starFrom, skillFrom, relicFrom] = referenceGearAt(fromLevel)
+  const [starTo, skillTo, relicTo] = referenceGearAt(toLevel)
+
+  // 升星印记
+  let emblems = Math.max(0, starTo - starFrom) * (starUpCost(starFrom)?.emblems ?? 0) * TEAM_SIZE
+  // 境界突破印记（等级跨过该境界起点的那一章计入）
+  for (const realm of REALMS) {
+    if (!realm.breakCost) continue
+    if (realm.minLevel > fromLevel && realm.minLevel <= toLevel) {
+      emblems += realm.breakCost.emblems * TEAM_SIZE
+    }
+  }
+
+  const skillLevels = Math.max(0, skillTo - skillFrom)
+  const relicLevels = Math.max(0, relicTo - relicFrom)
+
+  return {
+    exp,
+    silver:
+      skillLevels * SKILL_COUNT * SKILL.SILVER_PER_LEVEL * TEAM_SIZE +
+      relicLevels * RELIC_SLOTS * TEAM_SIZE * RELIC.SILVER_PER_LEVEL,
+    skillStones: skillLevels * SKILL_COUNT * SKILL.SKILL_STONES_PER_LEVEL * TEAM_SIZE,
+    relicStones: relicLevels * RELIC_SLOTS * TEAM_SIZE * RELIC.STONES_PER_LEVEL,
+    emblems,
+  }
+}
+
+/** 设计阶梯：每章 BOSS 的目标等级（= LEVEL.MAX / CHAPTERS × 章序） */
+const LEVELS_PER_CHAPTER = LEVEL.MAX / STAGE.CHAPTERS
+const designLevel = (chapter: number): number => chapter * LEVELS_PER_CHAPTER
+
+/** 日常日均投放（签到摊到每天 + 任务日投放） */
+const dailySupply = {
+  relicStones: taskPerDay.relicStones + signInSupply.relicStones / DAILY.SIGN_IN_CYCLE,
+  skillStones: taskPerDay.skillStones + signInSupply.skillStones / DAILY.SIGN_IN_CYCLE,
+}
+
+console.log('\n【速度口径】产出速度 vs 消耗速度（§5.8 · 逐章 · 闸门口径）\n')
+console.log(
+  '  产出 = 真实挂机回放的奖励包（含主线首通掉落）+ 日常投放；消耗 = 标准养成曲线在该章的消耗。\n' +
+    '  数据源：artifacts/baselines/recalibrate.json（npm run balance:recalibrate 产出）\n',
+)
+
+const pace = readPaceBaseline()
+if (!pace) {
+  console.log('  ⚠ 缺少节奏基线 artifacts/baselines/recalibrate.json —— 先跑 `npm run balance:recalibrate`。\n')
+} else if (!paceIsFresh(pace)) {
+  console.log(
+    '  ⚠ 节奏基线**已过期**（锚点与当前配置不一致）—— 先跑 `npm run balance:recalibrate` 重采。\n',
+  )
+} else {
+  console.log(
+    '  章 | 天数 | 经验 产出/消耗        比 | 银两 产出/消耗        比 | ' +
+      '术式结晶 比 | 强化石 比 | 印记 比',
+  )
+  console.log('  ' + '-'.repeat(104))
+  const mins: Array<{ name: string; value: number }> = [
+    { name: '经验', value: Infinity },
+    { name: '银两', value: Infinity },
+    { name: '术式结晶', value: Infinity },
+    { name: '遗物强化石', value: Infinity },
+    { name: '英灵印记', value: Infinity },
+  ]
+  // 实际花费（模拟里理性玩家真正扣掉的量）与标准曲线的对比
+  const actualTight: Array<{ chapter: number; name: string; ratio: number }> = []
+  for (const row of pace.velocity) {
+    const c = row.chapter
+    const days = row.days
+    const produced = row.produced
+    const cost = standardCost(Math.max(LEVEL.MIN, designLevel(c - 1)), designLevel(c))
+    const supply = {
+      silver: produced.silver,
+      exp: produced.exp,
+      skillStones: produced.skillStones + dailySupply.skillStones * days,
+      relicStones: produced.relicStones + dailySupply.relicStones * days,
+      emblems: produced.emblems,
+    }
+    const ratios = [
+      supply.exp / Math.max(1, cost.exp),
+      supply.silver / Math.max(1, cost.silver),
+      supply.skillStones / Math.max(1, cost.skillStones),
+      supply.relicStones / Math.max(1, cost.relicStones),
+      supply.emblems / Math.max(1, cost.emblems),
+    ]
+    ratios.forEach((r, i) => {
+      mins[i].value = Math.min(mins[i].value, r)
+    })
+    // 实际花费（贪心强化）比标准曲线激进 ⇒ 记下最紧的一处
+    const actual = row.spent
+    const pairs: Array<[string, number, number]> = [
+      ['经验', actual.exp, cost.exp],
+      ['银两', actual.silver, cost.silver],
+      ['术式结晶', actual.skillStones, cost.skillStones],
+      ['遗物强化石', actual.relicStones, cost.relicStones],
+      ['英灵印记', actual.emblems, cost.emblems],
+    ]
+    for (const [name, spent, need] of pairs) {
+      if (need <= 0) continue
+      const r = spent / need
+      if (r > 1) actualTight.push({ chapter: c, name, ratio: r })
+    }
+    console.log(
+      `  ${String(c).padStart(2)} | ${String(days).padStart(4)} | ` +
+        `${fmt(supply.exp).padStart(9)}/${fmt(cost.exp).padEnd(9)} ${ratio(supply.exp, cost.exp).padStart(7)} | ` +
+        `${fmt(supply.silver).padStart(9)}/${fmt(cost.silver).padEnd(9)} ${ratio(supply.silver, cost.silver).padStart(7)} | ` +
+        `${ratio(supply.skillStones, cost.skillStones).padStart(10)} | ` +
+        `${ratio(supply.relicStones, cost.relicStones).padStart(8)} | ` +
+        `${ratio(supply.emblems, cost.emblems).padStart(7)}`,
+    )
+  }
+  console.log(
+    '\n  逐章最小回收比：' +
+      mins.map((m) => `${m.name} ${m.value === Infinity ? '—' : m.value.toFixed(2) + '×'}`).join(' · '),
+  )
+  const healthy = mins.every((m) => m.value >= 1)
+  console.log('  判定：' + (healthy ? '✓ 全部 ≥1（产出速度跟得上标准养成的消耗速度）' : '✗ 存在 <1 的章（该章资源不足以支撑标准养成推进）'))
+  if (actualTight.length > 0) {
+    actualTight.sort((a, b) => b.ratio - a.ratio)
+    const worst = actualTight[0]
+    console.log(
+      `\n  旁注：模拟里的「理性玩家」实际花费比标准曲线更激进（贪心强化遗物），` +
+        `最紧的是第 ${worst.chapter} 章 ${worst.name}（实际花到标准曲线的 ${worst.ratio.toFixed(2)}×）——` +
+        `该章资源偏紧，玩家要晚几天才能把遗物推到标准档，不是卡关。`,
+    )
+  }
+}
+
+// ─────────────────────────── 6. 回流投放（P2-2） ───────────────────────────
 //
 // roadmap P2-2 的验收要求：回流奖励不能冲击抽卡间隔与养成资源回收。
 // 回流是**低频事件**（每 30 天最多一次），所以按「日均」摊开算，

@@ -16,7 +16,7 @@
  */
 import { HEROES } from '../src/core/config/heroes/index.ts'
 import { POOLS, resolvePoolHeroIds } from '../src/core/config/pools.ts'
-import { STAGES } from '../src/core/config/stages.ts'
+import { STAGES, stageMonotonicityIssues } from '../src/core/config/stages.ts'
 import { RELIC_DEFS, RELIC_SETS } from '../src/core/systems/relic.ts'
 import { ENEMY_INDEX } from '../src/core/config/enemies.ts'
 import { BONDS } from '../src/core/config/bonds.ts'
@@ -338,18 +338,14 @@ if (STAGES.length !== STAGE.CHAPTERS * (STAGE.STAGES_PER_CHAPTER + 1)) {
   err('D/BAL', `关卡总数 ${STAGES.length} 与章节配置不符（期望 ${STAGE.CHAPTERS * (STAGE.STAGES_PER_CHAPTER + 1)}）`)
 }
 
-for (let i = 1; i < STAGES.length; i++) {
-  const prev = STAGES[i - 1]
-  const cur = STAGES[i]
-  if (cur.powerRequired <= prev.powerRequired) {
-    err('D/BAL', `关卡 ${cur.id} 门槛 ${cur.powerRequired} 未高于关卡 ${prev.id} 的 ${prev.powerRequired}（难度倒挂）`)
-  }
-  if (cur.enemyScale <= prev.enemyScale) {
-    err(
-      'D/BAL',
-      `关卡 ${cur.id} 敌人缩放 ${cur.enemyScale} 未高于关卡 ${prev.id} 的 ${prev.enemyScale}（敌方难度倒挂）`,
-    )
-  }
+// ⚠ **实施修正（roadmap P1-2 难度曲线重标定）**：不变量从「缩放全局严格递增」
+//   改为「**难度**（基础属性 × 缩放）不倒挂 + 章内缩放严格递增」。
+//   敌方**基础属性本身跨章增长**约 1.25×/章，章边界处新一章首关的缩放
+//   必然低于上一章 BOSS 的缩放——那是设计上的「喘息」，不是难度倒挂。
+//   按缩放核对会把「基础属性增长」误判成倒挂（§6.5 实施修正）。
+//   不变量的**唯一一份口径**在 core（`stageMonotonicityIssues`），守护单测同源（铁律 #4）。
+for (const issue of stageMonotonicityIssues(STAGES)) {
+  err('D/BAL', `关卡 ${issue.stageId} ${issue.reason}`)
 }
 
 const bosses = STAGES.filter((s) => s.isBoss)

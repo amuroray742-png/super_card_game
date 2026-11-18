@@ -6,7 +6,7 @@ import { createNewSave, migrate, normalizeSave, SAVE_VERSION } from '../../src/c
 import { deserialize, serialize } from '../../src/core/save/serialize.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
 import { RELICS, RELIC_SETS } from '../../src/core/config/relics.ts'
-import { STAGES, CHAPTERS } from '../../src/core/config/stages.ts'
+import { STAGES, CHAPTERS, stageDifficulty, stageMonotonicityIssues } from '../../src/core/config/stages.ts'
 import { ENEMIES } from '../../src/core/config/enemies.ts'
 import { POOLS } from '../../src/core/config/pools.ts'
 import { BONDS } from '../../src/core/config/bonds.ts'
@@ -195,9 +195,30 @@ describe('配置校验（§15.1）', () => {
     }
   })
 
-  it('敌方缩放单调递增（难度永不倒挂）', () => {
+  it('敌方难度不倒挂：门槛全局递增 + 章内缩放严格递增 + 章首难度跨章递增', () => {
+    // ⚠ **实施修正（roadmap P1-2）**：原断言是「全曲线缩放严格递增」，
+    //   它隐含假设「敌方基础属性不跨章增长」。实际基础属性约 1.25×/章
+    //   （§6.5「已知限制」第 1 条），章内总跨度抬到 2.03 后字面执行
+    //   「锚点比 ≥ 章内总跨度」会让难度增速 = 1.25 × 2.03 = 2.54×/章，
+    //   跑在玩家养成（1.03^24 = 2.03×/章）前面 → 曲线没有不动点。
+    //   正确的口径是「**难度**（基础属性 × 缩放）不倒挂」：
+    //   章内缩放严格递增（章末 BOSS 尖峰），章与章之间按**章首难度**递增。
+    //   不变量的唯一一份口径在 core（`stageMonotonicityIssues`），与配置校验同源（铁律 #4）。
+    expect(stageMonotonicityIssues(STAGES)).toEqual([])
+
     for (let i = 1; i < STAGES.length; i++) {
-      expect(STAGES[i].enemyScale).toBeGreaterThan(STAGES[i - 1].enemyScale)
+      const prev = STAGES[i - 1]
+      const cur = STAGES[i]
+      if (prev.chapter === cur.chapter) {
+        expect(cur.enemyScale).toBeGreaterThan(prev.enemyScale)
+      }
+    }
+    // 章首难度（基础属性 × 缩放）跨章严格递增
+    for (let c = 1; c < STAGE.CHAPTERS; c++) {
+      const prevFirst = STAGES[(c - 1) * 31]
+      const nextFirst = STAGES[c * 31]
+      expect(nextFirst.enemyScale).toBeGreaterThan(prevFirst.enemyScale)
+      expect(stageDifficulty(nextFirst)).toBeGreaterThan(stageDifficulty(prevFirst))
     }
   })
 
@@ -227,7 +248,7 @@ describe('配置校验（§15.1）', () => {
     // 两条曲线都是逐章锚点（不再用统一指数外推）
     expect(STAGE.SCALE_ANCHORS).toHaveLength(STAGE.CHAPTERS)
     expect(STAGE.POWER_ANCHORS).toHaveLength(STAGE.CHAPTERS)
-    expect(STAGE.IN_CHAPTER_SPAN).toBeCloseTo(1.087, 6)
+    expect(STAGE.IN_CHAPTER_SPAN).toBeCloseTo(1.765, 6)
     expect(STAGE.BOSS_MULTIPLIER).toBeCloseTo(1.15, 6)
     expect(STAGE.CHAPTER_GATE_GAP).toBeCloseTo(1.05, 6)
 
@@ -244,12 +265,14 @@ describe('配置校验（§15.1）', () => {
       }
     }
 
-    // 章边界严格递增：每章首关 > 上一章末关（门槛与敌方缩放都要）
+    // 章边界：门槛严格递增（下一章首关 > 上一章末关）。
+    // 敌方**难度**在章边界允许回落——章末 BOSS 的基础属性是普通敌的 3.6~6.9 倍，
+    // BOSS 打完进入下一章第一关是设计上的「喘息」（下一章再重新爬坡）。
+    // 章与章之间的难度递增由上面那条「章首难度跨章递增」守住。
     for (let c = 1; c < 10; c++) {
       const prevBoss = STAGES[c * 31 - 1]
       const nextFirst = STAGES[c * 31]
       expect(nextFirst.powerRequired).toBeGreaterThan(prevBoss.powerRequired)
-      expect(nextFirst.enemyScale).toBeGreaterThan(prevBoss.enemyScale)
     }
 
     // 门槛总跨度必须落在「玩家养成跨度」之内（Lv1 约 7.4×10³ → 满养成约 3.6×10⁷）

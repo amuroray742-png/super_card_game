@@ -13,34 +13,47 @@ import { IDLE } from '../../src/core/config/economy.ts'
 import { makeHero, maxedHero } from './helpers.ts'
 
 describe('离线收益曲线（§5.7）', () => {
-  it('8 小时内效率为 100%', () => {
+  it('满效率时长内效率为 100%', () => {
     expect(computeOfflineEfficiency(0)).toBe(0)
     expect(computeOfflineEfficiency(3600)).toBeCloseTo(1, 6)
-    expect(computeOfflineEfficiency(8 * 3600)).toBeCloseTo(8, 6)
+    expect(computeOfflineEfficiency(IDLE.FULL_EFFICIENCY_HOURS * 3600)).toBeCloseTo(
+      IDLE.FULL_EFFICIENCY_HOURS,
+      6,
+    )
   })
 
-  it('8~12小时保持线性衰减至60%，积分与请求次数无关', () => {
-    expect(computeOfflineEfficiency(10 * 3600)).toBeCloseTo(9.8)
-    expect(computeOfflineEfficiency(12 * 3600)).toBeCloseTo(11.2)
+  it('满效率时长之后线性衰减至 TAIL_RATE，积分与请求次数无关', () => {
+    // 曲线由 FULL_EFFICIENCY_HOURS / CAP_HOURS / TAIL_RATE 三段定义，
+    // 数值口径见 economy.ts 的 IDLE（实施修正：roadmap P1-2 收窄为 1h / 3h）。
+    const tail = IDLE.CAP_HOURS - IDLE.FULL_EFFICIENCY_HOURS
+    const tailAvg = (1 + IDLE.TAIL_RATE) / 2
+    expect(computeOfflineEfficiency(IDLE.CAP_HOURS * 3600)).toBeCloseTo(
+      IDLE.FULL_EFFICIENCY_HOURS + tail * tailAvg,
+    )
     expect(IDLE.ONLINE_MULTIPLIER).toBe(3)
   })
 
-  it('12 小时封顶，超出不再产出', () => {
-    expect(computeOfflineEfficiency(12 * 3600)).toBeCloseTo(
+  it('收益封顶时长后不再产出', () => {
+    expect(computeOfflineEfficiency(IDLE.CAP_HOURS * 3600)).toBeCloseTo(
       computeOfflineEfficiency(48 * 3600),
       6,
     )
-    expect(OFFLINE_CAP_SECONDS).toBe(12 * 3600)
+    expect(OFFLINE_CAP_SECONDS).toBe(IDLE.CAP_HOURS * 3600)
   })
 
   it('有效时长 = 真实时长 × 效率', () => {
     expect(offlineEffectiveSeconds(3600)).toBeCloseTo(3600, 6)
-    expect(offlineEffectiveSeconds(4 * 3600)).toBeCloseTo(4 * 3600, 6)
+    expect(offlineEffectiveSeconds(IDLE.FULL_EFFICIENCY_HOURS * 3600)).toBeCloseTo(
+      IDLE.FULL_EFFICIENCY_HOURS * 3600,
+      6,
+    )
   })
 
-  it('持续在线3倍：8小时离线等价在线2小时40分', () => {
-    const offline = offlineEffectiveSeconds(8 * 3600)
-    expect(offline / IDLE.ONLINE_MULTIPLIER).toBe(8 * 3600 / 3)
+  it('持续在线 3 倍：满效率时长的离线等价于三分之一的在线时长', () => {
+    const offline = offlineEffectiveSeconds(IDLE.FULL_EFFICIENCY_HOURS * 3600)
+    expect(offline / IDLE.ONLINE_MULTIPLIER).toBe(
+      (IDLE.FULL_EFFICIENCY_HOURS * 3600) / 3,
+    )
   })
 })
 

@@ -165,7 +165,9 @@ describe('境界突破（境界门槛）', () => {
   it('卡在门槛时经验不丢，突破后立即兑现', () => {
     const hero = createHeroState('probe', 0)
     hero.level = 59
-    const res = applyExp(hero, 5_000)
+    // ⚠ 喂的经验要**远超**跨过 Lv59→Lv60 的消耗，且剩余量仍够再触发一次
+    //   「撞门槛」的判定（等级成本随 roadmap P1-2 的 EXP_BASE 重标定而变）。
+    const res = applyExp(hero, 100_000)
     // Lv59 → Lv60 后卡住
     expect(hero.level).toBe(60)
     expect(res.blockedByRealm).toBe(true)

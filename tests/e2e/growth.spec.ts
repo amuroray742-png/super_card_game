@@ -1,7 +1,22 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import type { ActionRequest, ActionResponse } from '../../src/core/systems/action-protocol.ts'
 import type { FeedExpResult } from '../../src/core/systems/actions.ts'
-import { cachedSaveOf, pauseFarming, registerAccount, seedSession, settleIdleThroughUi, skipGachaReveal, uniqueUsername, type CachedSave } from './helpers'
+import { createNewSave } from '../../src/core/save/schema.ts'
+import { exportSave } from '../../src/core/save/serialize.ts'
+import { createHeroState, expToNext } from '../../src/core/systems/growth.ts'
+import {
+  accessTokenOf,
+  cachedSaveOf,
+  loginAccount,
+  pauseFarming,
+  postAction,
+  registerAccount,
+  seedSession,
+  settleIdleThroughUi,
+  skipGachaReveal,
+  uniqueUsername,
+  type CachedSave,
+} from './helpers'
 
 // 真实等待挂机预算；普通用例也不能再依赖连点瞬间领取十场。
 test.setTimeout(180_000)
@@ -354,32 +369,93 @@ test.describe('喂经验扣玩家经验池', () => {
  *   只测「喂经验会扣池子」守不住这个坑：卡在门槛上的英灵照样能扣池子，
  *   但永远升不了级。必须有一条**真的走到 Lv60 并突破**的用例。
  */
+
+/**
+ * 前置存档的固定口径。
+ *
+ * ⚠ 主角是**唯一 SSR**：圣殿按稀有度降序排（`stores/game.ts` 的 `ownedHeroes`），
+ *   所以「圣殿第一个英灵」必定是主角——定位不依赖排序细则。
+ */
+const REALM_PROTAGONIST = 'xiangyu'
+const REALM_TEAM = [
+  REALM_PROTAGONIST,
+  'nangdengel',
+  'tesla',
+  'turing',
+  'luban',
+  'chengjisihan',
+]
+/** 凡阶门槛是 Lv60 → 主角停在门槛下一级 */
+const REALM_GATE_LEVEL = 59
+/** Lv59 这支队能稳定打赢的关卡（战力余量 ~123%），掉落表是第 3 章 */
+const REALM_FARM_STAGE = 66
+/** 名阶突破要 10 枚印记（读 core 配置，见下方断言） */
+const REALM_EMBLEMS = 20
+
+/**
+ * 喂到门槛 + 突破后兑现所需的经验池下限。
+ *
+ * 口径全部取 core（铁律 #4 单一数据源），不写死数字：
+ * - `expToNext(59)`：从 Lv59 跨到门槛 Lv60 需要的经验；
+ * - `expToNext(61)`：突破到 Lv61 后，门槛上存下的经验要**再兑现一级**才够。
+ * 末尾 +1000 是余量，保证「兑现成等级」而不是刚好卡在边界上。
+ */
+const REALM_TARGET_POOL = expToNext(REALM_GATE_LEVEL) + expToNext(REALM_GATE_LEVEL + 2) + 1_000
+
 test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 Lv61）', () => {
-  // ⚠ 这条用例要真实挂机刷经验，比其它用例慢得多
-  test.setTimeout(1_800_000)
+  // ⚠ 前置是导入的，但「攒经验 → 喂 → 突破」全程真实：约 30 场挂机 + 几次动作
+  test.setTimeout(900_000)
 
   test('喂到境界门槛后，消耗英灵印记突破到新境界，存量经验立即兑现', async ({ page }) => {
-    const accountId = await bootLoggedIn(page)
-    await pullHeroes(page)
-    // 满编 6 人：队越强推征打得越远、经验掉得越快
-    await setupTeam(page, 6)
+    // ── 0) 造前置存档 ────────────────────────────────
+    //
+    // ⚠ 为什么用 `save.import` 造前置，而不是让英灵从 Lv1 一路打到 Lv60：
+    //   EXP_BASE 重标定后（60 → 900），单人 Lv1→Lv60 需要 118,500 经验，
+    //   真实挂机产出速率约 50 exp/s → 一条用例要跑 ~40 分钟，CI 根本不可接受。
+    //   而这条用例真正要守的是**境界门槛的语义**（卡门槛 → 突破 → 存量经验兑现），
+    //   不是「Lv1→Lv60 要爬多久」——那一条由 core 单测
+    //   （tests/unit/growth.test.ts 的「喂经验 + 突破可以一路到 Lv240」）守着。
+    //
+    //   `save.import` 是**玩家可用的动作**（铁律 #11：改存档一律走服务端动作层），
+    //   与 authority.spec.ts 的刷取用例同一模式；导入后一切动作仍由服务端权威执行。
+    const session = await registerAccount(uniqueUsername('realm'))
+    const token = await accessTokenOf(session)
+    const now = Date.now()
+    const save = createNewSave(now)
+    for (const [slot, id] of REALM_TEAM.entries()) {
+      save.heroes[id] = { ...createHeroState(id, now), level: REALM_GATE_LEVEL }
+      save.team.slots[slot] = id
+    }
+    save.campaign.clearedStage = REALM_FARM_STAGE - 1
+    save.campaign.chapterProgress = 3
+    save.idle.currentStage = REALM_FARM_STAGE
+    // 不自动推进：钉在余量足够的关卡上，产出稳定（推进到战力临界点会随机卡关）
+    save.idle.autoAdvance = false
+    save.player.emblems = REALM_EMBLEMS
 
-    // 记住主角（圣殿首位 = 新手保底 SSR）
+    const imported = await postAction(token, 'realm-fixture', {
+      type: 'save.import',
+      payload: exportSave(save),
+    })
+    expect(imported.ok, '前置存档导入失败').toBe(true)
+
+    await seedSession(page, await loginAccount(session.user.username))
+    const accountId = session.user.id
+
+    // ── 1) 定位主角（唯一 SSR → 圣殿第一位）──────────
     await page.goto('/#/temple')
     await page.waitForLoadState('networkidle')
     await page.locator('.hero-cell').first().click()
     await expect(page).toHaveURL(/#\/hero\//)
     const heroId = heroIdFromUrl(page)
-    expect(heroId).not.toBe('')
+    expect(heroId).toBe(REALM_PROTAGONIST)
 
-    // ── 1) 挂机攒经验池 ──
-    // 升到 Lv60 单人要 7874 经验；这里攒到 1.5 万，
-    // 好让突破后有**足够的存量经验**兑现成等级（否则只跨 1 级看不出兑现）。
-    const TARGET_POOL = 15_000
-    const pool = await farmExp(page, accountId, TARGET_POOL, 1_650_000)
-    expect(pool, `经验池没攒到 ${TARGET_POOL}（实际 ${pool}）`).toBeGreaterThanOrEqual(TARGET_POOL)
+    // ── 2) 挂机攒经验池 ──────────────────────────────
+    const pool = await farmExp(page, accountId, REALM_TARGET_POOL, 600_000)
+    expect(pool, `真实挂机经验池未达到 ${REALM_TARGET_POOL}（实际 ${pool}）`)
+      .toBeGreaterThanOrEqual(REALM_TARGET_POOL)
 
-    // ── 2) 全部喂给主角 → 撞到境界门槛 Lv60 ──
+    // ── 3) 全部喂给主角 → 撞到境界门槛 Lv60 ─────────
     // 收集过程全是真实挂机；收够后通过玩家编队操作暂停，隔离扣款/突破断言。
     await pauseFarming(page)
     await page.goto(`/#/hero/${heroId}`)
@@ -395,7 +471,7 @@ test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 
     const banked = fed.save.heroes?.[heroId]?.exp ?? 0
     expect(banked).toBeGreaterThan(0)
 
-    // ── 3) 境界门槛出现突破入口 ──
+    // ── 4) 境界门槛出现突破入口 ─────────────────────
     await expect(page.getByText(/已达名阶门槛/).first()).toBeVisible()
     const breakBtn = page.locator('[data-testid="break-realm"]')
     await expect(breakBtn).toBeVisible()
@@ -404,7 +480,7 @@ test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 
     const emblemsBefore = await emblemsOf(page, accountId)
     expect(emblemsBefore).toBeGreaterThanOrEqual(10)
 
-    // ── 4) 突破：扣印记 + 跨入 Lv61 + 存量经验兑现 ──
+    // ── 5) 突破：扣印记 + 跨入 Lv61 + 存量经验兑现 ────
     await breakBtn.click()
 
     await expect.poll(() => heroLevelOf(page, accountId, heroId), { timeout: 15_000 }).toBeGreaterThan(60)

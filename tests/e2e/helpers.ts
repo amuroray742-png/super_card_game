@@ -115,6 +115,42 @@ export async function loginAccount(
   return { refreshToken: body.refreshToken, user: body.user }
 }
 
+/**
+ * 换一对新令牌（拿 access token）。
+ *
+ * ⚠ refresh token 是**一次性轮换**的：刷新后旧 refresh token 立即作废。
+ *   需要第二个独立会话时用 `loginAccount` 重新登录，别复用同一个 refresh token。
+ */
+export async function accessTokenOf(session: { refreshToken: string }): Promise<string> {
+  const res = await fetch(`${E2E_API_BASE}/api/auth/refresh`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ refreshToken: session.refreshToken }),
+  })
+  const body = (await res.json()) as { accessToken: string }
+  return body.accessToken
+}
+
+/**
+ * 直接调后端接口发一个动作。
+ *
+ * ⚠ **只有服务端能改存档**（铁律 #11）：这条通道走的就是玩家那条
+ *   `POST /api/action`，服务端用 core 动作层执行后落库。
+ *   测试要造前置存档时必须走它，不能直接改数据库。
+ */
+export async function postAction(
+  accessToken: string,
+  actionId: string,
+  action: unknown,
+): Promise<Record<string, unknown>> {
+  const res = await fetch(`${E2E_API_BASE}/api/action`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ actionId, action }),
+  })
+  return (await res.json()) as Record<string, unknown>
+}
+
 /** 走界面注册 */
 export async function registerViaUi(
   page: Page,

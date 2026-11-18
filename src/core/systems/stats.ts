@@ -37,7 +37,10 @@ export function getRealm(level: number) {
   for (const realm of REALMS) {
     if (level >= realm.minLevel && level <= realm.maxLevel) return realm
   }
-  return REALMS[REALMS.length - 1]
+  // 越界兜底要**按方向**选：低于第一境界 → 按第一境界算，高于最后一境界 → 按最后一境界算。
+  // ⚠ 原实现一律返回最后一境界（神阶），于是等级低于凡阶下限时
+  //   会拿到神阶的 +60% 乘区与 40× 经验倍率——离线结算 / 导入存档里的越界等级会直接套用满境界。
+  return level < REALMS[0].minLevel ? REALMS[0] : REALMS[REALMS.length - 1]
 }
 
 /** 下一个境界（已满级返回 null） */

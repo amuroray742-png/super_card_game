@@ -126,7 +126,9 @@ describe('编队战力', () => {
     let now = Date.now()
     vi.spyOn(Date, 'now').mockImplementation(() => now)
     const store = await registerAndLoad('team_power')
-    const hero = createHeroState('xiangyu', now)
+    // ⚠ 等级要落在「打得赢第 1 关、但战力还够不到第 2 关门槛」的窗口里：
+    //   门槛随难度锚点重标定而变（roadmap P1-2），窗口也随之移动。
+    const hero = { ...createHeroState('xiangyu', now), level: 4 }
     const nextStage = getStage(2)
     await seedSave((save) => { save.heroes[hero.id] = hero })
 
