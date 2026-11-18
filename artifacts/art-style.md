@@ -112,7 +112,7 @@ npx tsx tools/artgen/build-batch.ts cg card
 # 2) 逐批调用 H3 Image（每次最多 10 条请求）
 npx tsx tools/artgen/run-batches.ts      # 内含限流节流与退避重试，可中断续跑
 
-# 3) 回执落盘 → public/portraits/<heroId>.jpg，并回写资源登记表
+# 3) 回执落盘 → public/portraits/<heroId>.webp，并回写资源登记表
 npx tsx tools/artgen/save-results.ts tools/artgen/out/batch-01-receipt.json ...
 
 # 4) 技术校验（尺寸 / 比例 / 完整性 / 重复图 / 覆盖率）
@@ -129,7 +129,7 @@ npx tsx tools/artgen/save-results.ts tools/artgen/out/batch-11-receipt.json
 npx tsx tools/artgen/tiebreak.ts shangyang luban
 ```
 
-- 产物路径 `public/portraits/<heroId>.jpg`，与占位 SVG 同名不同扩展名。
+- 生图回执提供 JPEG 源图，`save-results.ts` 经 `card-encode.ts` 编码后发布到 `public/portraits/<heroId>.webp`。存量 JPEG 可用 `npm run art:transcode -- --keep-source` 转码并保留源图。
 - 可用性登记在 `src/core/config/art.ts`（core 纯逻辑层不访问文件系统，构建期登记）。
   未产出卡面的英灵自动回落到 SVG 占位头像，**不会 404**。
 - 生图参数：`aspect_ratio` 由版式决定，`area=1K`（约 1024²，移动端 H5 足够），
