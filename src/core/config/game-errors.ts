@@ -44,6 +44,7 @@ export const GAME_ERROR_CODES = {
   REBIRTH_LOCKED: 'REBIRTH_LOCKED',
   /** 存档导入内容无效 */
   IMPORT_INVALID: 'IMPORT_INVALID',
+  IMPORT_FORBIDDEN: 'IMPORT_FORBIDDEN',
   /** 动作类型不认识 */
   UNKNOWN_ACTION: 'UNKNOWN_ACTION',
   /** 服务端暂时不可用 */
@@ -78,6 +79,7 @@ export const GAME_ERROR_MESSAGES: Record<GameErrorCode, string> = {
   CODE_USED: '该兑换码已使用',
   REBIRTH_LOCKED: '暂不满足圣杯重启条件',
   IMPORT_INVALID: '存档数据无效',
+  IMPORT_FORBIDDEN: '仅无云端存档且未迁移的账号可迁移一次旧档，已有进度不可覆盖',
   UNKNOWN_ACTION: '未知的操作',
   SERVER_UNAVAILABLE: '服务器暂时不可用，请稍后再试',
   SAVE_MISSING: '账号还没有存档',

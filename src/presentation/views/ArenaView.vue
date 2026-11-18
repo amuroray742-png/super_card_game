@@ -54,9 +54,12 @@ function heroName(id: string | null): string {
   return HERO_INDEX.get(id)?.name ?? id
 }
 
-function setName(id: string | null): string {
-  if (!id) return '—'
-  return RELIC_SETS.get(id)?.name ?? id
+function setName(ids: (string | null)[] | undefined): string {
+  const counts = new Map<string, number>()
+  for (const id of ids ?? []) {
+    if (id) counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+  return [...counts].map(([id, count]) => `${RELIC_SETS.get(id)?.name ?? id} ${count}件`).join(' / ') || '—'
 }
 </script>
 

@@ -70,6 +70,7 @@ router.beforeEach(async (to) => {
   if (to.path === '/login') return { path: '/' }
 
   const game = useGameStore(pinia)
+  if (game.loaded && (game.offline || account.offline)) await game.reconnect()
   if (!game.loaded) {
     await game.load()
   }

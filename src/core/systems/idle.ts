@@ -10,7 +10,7 @@
  * 收益通过**回放真实战斗**结算，而非按时长线性发放——
  * 这样不会出现"挂机 12 小时打不过却照样领满"的割裂感。
  */
-import type { BattleUnit, HeroRuntime, RewardBundle, StageDef } from '../model/types.ts'
+import type { BattleContext, BattleUnit, HeroRuntime, RewardBundle, StageDef } from '../model/types.ts'
 import { BATTLE, DROP_TABLES, IDLE } from '../config/economy.ts'
 import { getStage } from '../config/stages.ts'
 import { Rng } from '../rng.ts'
@@ -31,7 +31,8 @@ export function computeOfflineEfficiency(seconds: number): number {
     return FULL_EFFICIENCY_HOURS + tailHours * tailAvg
   }
   const tailHours = hours - FULL_EFFICIENCY_HOURS
-  const tailAvg = (1 + TAIL_RATE) / 2
+  const rateAtEnd = 1 - (1 - TAIL_RATE) * tailHours / (CAP_HOURS - FULL_EFFICIENCY_HOURS)
+  const tailAvg = (1 + rateAtEnd) / 2
   return FULL_EFFICIENCY_HOURS + tailHours * tailAvg
 }
 
@@ -43,13 +44,14 @@ export function offlineEffectiveSeconds(seconds: number): number {
 /** 满效率上限：12 小时封顶，超出部分不再产出 */
 export const OFFLINE_CAP_SECONDS = IDLE.CAP_HOURS * 3600
 
-/** 模拟战斗场次上限（防止长离线卡顿） */
-const MAX_SIM_BATTLES = 400
-
 export interface IdleRunResult {
   battles: number
   rewards: RewardBundle
   /** 战斗中推进到的最高关卡 */
+  /** 本次真正打赢的最高关卡；全败/零场为null。 */
+  lastClearedStage: number | null
+  /** 下次应挑战的关卡，与通关进度明确区分。 */
+  nextTargetStage: number
   reachedStage: number
   /** 卡住的关卡（战力不足） */
   blockedAtStage: number | null
@@ -71,6 +73,8 @@ export function runIdle(
   battles: number,
   seed: number,
   onRelicFound?: (relicId: string) => void,
+  ctx: BattleContext = { mode: 'pve', seed },
+  autoAdvance = true,
 ): IdleRunResult {
   const rng = new Rng(seed)
   const rewards: RewardBundle = {}
@@ -80,14 +84,16 @@ export function runIdle(
   let stageId = startStage
   let blockedAt: number | null = null
   let done = 0
+  let lastClearedStage: number | null = null
+  const limit = team.length === 0 ? 0 : Math.min(Math.max(0, Math.floor(battles)), IDLE.MAX_REPLAY_BATTLES)
 
-  for (let i = 0; i < battles; i++) {
+  for (let i = 0; i < limit; i++) {
     const stage = getStage(stageId)
     const result = runBattle({
       allies: team,
       enemies: stage.enemyIds.map((id) => ENEMY_LOOKUP(id)),
       enemyScale: stage.enemyScale,
-      ctx: { mode: 'pve', seed: seed + i },
+      ctx: { ...ctx, mode: 'pve', seed: seed + i },
     })
 
     done++
@@ -98,6 +104,7 @@ export function runIdle(
       break
     }
 
+    lastClearedStage = stageId
     const drop = rollRewards(stage, rng)
     mergeRewards(rewards, drop.rewards, shards)
     for (const relicId of drop.relics) {
@@ -107,9 +114,9 @@ export function runIdle(
 
     // 自动推进到下一关（若战力足够）
     const nextStageId = stageId + 1
-    if (nextStageId <= 310) {
+    if (autoAdvance && nextStageId <= 310) {
       const next = getStage(nextStageId)
-      const power = getTeamPower(team, { mode: 'pve' })
+      const power = getTeamPower(team, ctx)
       if (power >= next.powerRequired) {
         stageId = nextStageId
       }
@@ -121,7 +128,9 @@ export function runIdle(
   return {
     battles: done,
     rewards,
-    reachedStage: stageId,
+    reachedStage: lastClearedStage ?? startStage,
+    lastClearedStage,
+    nextTargetStage: stageId,
     blockedAtStage: blockedAt,
     newRelics,
   }
@@ -134,6 +143,10 @@ export interface OfflineSettlementResult {
   battles: number
   rewards: RewardBundle
   blockedAtStage: number | null
+  /** 本次真正打赢的最高关卡；全败/零场为null。 */
+  lastClearedStage: number | null
+  /** 下次应挑战的关卡，与通关进度明确区分。 */
+  nextTargetStage: number
   reachedStage: number
   newRelics: string[]
 }
@@ -148,6 +161,8 @@ export function settleOffline(
   currentStage: number,
   elapsedSeconds: number,
   seed: number,
+  ctx: BattleContext = { mode: 'pve', seed },
+  autoAdvance = true,
 ): OfflineSettlementResult {
   const capped = Math.min(Math.max(0, elapsedSeconds), OFFLINE_CAP_SECONDS)
   const effective = offlineEffectiveSeconds(capped)
@@ -163,37 +178,28 @@ export function settleOffline(
       rewards: {},
       blockedAtStage: null,
       reachedStage: currentStage,
+      lastClearedStage: null,
+      nextTargetStage: currentStage,
       newRelics: [],
     }
   }
 
-  const run = runIdle(team, currentStage, battles, seed)
-  const remainingRatio = rawBattles > battles ? rawBattles / battles : 1
+  const run = runIdle(team, currentStage, battles, seed, undefined, ctx, autoAdvance)
 
   return {
     elapsedSeconds,
     cappedSeconds: capped,
     efficiency: computeOfflineEfficiency(elapsedSeconds) / Math.max(1, elapsedSeconds / 3600),
     battles: run.battles,
-    rewards: scaleRewards(run.rewards, remainingRatio),
+    rewards: run.rewards,
     blockedAtStage: run.blockedAtStage,
     reachedStage: run.reachedStage,
+    lastClearedStage: run.lastClearedStage,
+    nextTargetStage: run.nextTargetStage,
     newRelics: run.newRelics,
   }
 }
 
-/** 按倍率放大奖励（用于超出模拟上限的部分外推） */
-function scaleRewards(rewards: RewardBundle, ratio: number): RewardBundle {
-  const out: RewardBundle = { ...rewards }
-  if (out.silver !== undefined) out.silver = Math.floor(out.silver * ratio)
-  if (out.exp !== undefined) out.exp = Math.floor(out.exp * ratio)
-  if (out.skillStones !== undefined) out.skillStones = Math.floor(out.skillStones * ratio)
-  if (out.relicStones !== undefined) out.relicStones = Math.floor(out.relicStones * ratio)
-  if (out.emblems !== undefined) out.emblems = Math.floor(out.emblems * ratio)
-  // ⚠ 遗物**不按倍率缩放**：遗物是「实例」（实物），外推段没有对应实例，
-  //   按比例裁数组会造出不存在的东西。这里原样保留（模拟段内的遗物照发）。
-  return out
-}
 
 // ─────────────────────────── 掉落 ───────────────────────────
 

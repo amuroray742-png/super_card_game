@@ -5,6 +5,9 @@
  */
 import type { SaveData } from '../model/types.ts'
 import { START_RESOURCES } from '../config/economy.ts'
+import { arenaWeekIndex } from '../time.ts'
+import { RELIC_DEFS, RELIC_SETS } from '../systems/relic.ts'
+import '../config/relics.ts'
 
 export const SAVE_VERSION = 5
 
@@ -48,13 +51,14 @@ export const MIGRATIONS: Record<number, Migration> = {
   },
 }
 
-export function emptyArena(): SaveData['arena'] {
+export function emptyArena(now = 0): SaveData['arena'] {
   return {
     tierPoints: 0,
     pvpPoints: 0,
     medals: 0,
     weeklyMedals: 0,
     weeklyTickets: 0,
+    rewardWeek: arenaWeekIndex(now),
     arenaLevel: 0,
     runes: [],
     defenseLoadout: null,
@@ -96,11 +100,11 @@ export function createNewSave(now: number, seed = 0): SaveData {
     team: { slots: [null, null, null, null, null, null], presets: [] },
     gacha: { pitySSR: 0, pity10: 0, history: [], pools: {}, newbieUsed: false },
     campaign: { clearedStage: 0, stageStars: {}, chapterProgress: 1 },
-    idle: { currentStage: 1, autoAdvance: true, totalIdleSeconds: 0 },
+    idle: { currentStage: 1, autoAdvance: true, totalIdleSeconds: 0, measuredAt: now, effectiveMs: 0, offlineElapsedMs: 0, activeUntil: now },
     codes: [],
     settings: { speed: 1, sfx: true, skipAnim: false },
     stats: { firstStartAt: now, totalPulls: 0, totalPower: 0 },
-    arena: emptyArena(),
+    arena: emptyArena(now),
     daily: {
       signInStreak: 0,
       lastSignInDay: 0,
@@ -124,7 +128,7 @@ export function normalizeSave(raw: unknown): SaveData {
     version: SAVE_VERSION,
     // 旧档没有写入时间戳：按 0 处理，保证「旧档首次写入」不会被判成外部更新
     savedAt: typeof save.savedAt === 'number' ? save.savedAt : 0,
-    // 旧档没有随机数状态：种子留 0（= 未设置），由表现层补平台随机种子。
+    // 旧档没有随机数状态：种子留 0（= 未设置），由服务端补密码学随机种子。
     // 这里**不能用常量种子兜底**——那会让所有旧档玩家共用同一条抽卡序列。
     rng: {
       seed: typeof save.rng?.seed === 'number' ? save.rng.seed : 0,
@@ -134,7 +138,13 @@ export function normalizeSave(raw: unknown): SaveData {
     team: { ...base.team, ...(save.team ?? {}) },
     gacha: { ...base.gacha, ...(save.gacha ?? {}) },
     campaign: { ...base.campaign, ...(save.campaign ?? {}) },
-    idle: { ...base.idle, ...(save.idle ?? {}) },
+    idle: {
+      ...base.idle, ...(save.idle ?? {}),
+      measuredAt: Number.isFinite(save.idle?.measuredAt) ? save.idle!.measuredAt : (save.lastTickAt ?? base.lastTickAt),
+      effectiveMs: Number.isFinite(save.idle?.effectiveMs) ? Math.max(0, save.idle!.effectiveMs!) : 0,
+      offlineElapsedMs: Number.isFinite(save.idle?.offlineElapsedMs) ? Math.max(0, save.idle!.offlineElapsedMs!) : 0,
+      activeUntil: Number.isFinite(save.idle?.activeUntil) ? save.idle!.activeUntil : (save.lastTickAt ?? base.lastTickAt),
+    },
     settings: { ...base.settings, ...(save.settings ?? {}) },
     stats: { ...base.stats, ...(save.stats ?? {}) },
     arena: { ...base.arena, ...(save.arena ?? {}) },
@@ -143,6 +153,25 @@ export function normalizeSave(raw: unknown): SaveData {
     relics: Array.isArray(save.relics) ? save.relics : [],
     equipped: save.equipped ?? {},
     codes: Array.isArray(save.codes) ? save.codes : [],
+  }
+
+  // 旧档缺周期时按最后存档活动时间归属，保留已有计数；后续载入不再改写。
+  if (!Number.isInteger(save.arena?.rewardWeek)) {
+    merged.arena.rewardWeek = arenaWeekIndex(save.savedAt || save.lastTickAt || save.createdAt || base.createdAt)
+  }
+  const defense = merged.arena.defenseLoadout
+  if (defense) {
+    merged.arena.defenseLoadout = {
+      ...defense,
+      relicSets: defense.heroes.map((_, i) => {
+        const entry: unknown = defense.relicSets?.[i]
+        const ids = Array.isArray(entry) ? entry : typeof entry === 'string' ? [entry] : []
+        // 历史单值最多确认一件；defId 只经配置索引转成 setId，绝不推测件数。
+        return ids.map((id) => typeof id === 'string'
+          ? RELIC_SETS.has(id) ? id : RELIC_DEFS.get(id)?.setId ?? null
+          : null)
+      }),
+    }
   }
 
   // 槽位长度补齐

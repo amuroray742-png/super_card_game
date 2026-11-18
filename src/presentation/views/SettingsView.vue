@@ -188,7 +188,7 @@ async function doReset() {
     <section class="panel">
       <div class="panel-title"><span>存档</span></div>
       <p class="tiny muted" style="margin: 0 0 8px">
-        存档串可用于备份当前进度：导出后在其他设备粘贴导入即可。
+        进度随账号在服务端同步，跨设备请登录同一账号。导出仅用于备份；旧档只允许无云档账号首次迁移，不能覆盖已有云端进度。
       </p>
       <div class="row" style="gap: 6px">
         <button class="btn btn-sm" style="flex: 1" :disabled="busy" @click="doExport">导出存档</button>
@@ -205,11 +205,11 @@ async function doReset() {
       ></textarea>
 
       <div class="row-between" style="margin: 12px 0 6px">
-        <span class="tiny muted">导入存档</span>
+        <span class="tiny muted">首次旧档迁移（仅尚无云档时可用）</span>
       </div>
       <textarea v-model="importText" class="save-area" rows="3" placeholder="粘贴存档串"></textarea>
-      <button class="btn btn-sm btn-block" style="margin-top: 6px" :disabled="busy" @click="doImport">
-        导入并覆盖当前进度
+      <button class="btn btn-sm btn-block" style="margin-top: 6px" :disabled="busy || store.loaded" @click="doImport">
+        {{ store.loaded ? '已有云档，不可覆盖' : '迁移旧档（仅一次）' }}
       </button>
     </section>
 

@@ -30,7 +30,96 @@ import { ARENA_CAPS, DEFAULT_ARENA_PROFILE } from '../../src/core/config/economy
 import { Rng } from '../../src/core/rng.ts'
 import { makeHero, maxedHero, nakedHero } from './helpers.ts'
 
+import { buildArenaSnapshot } from '../../src/core/systems/derive.ts'
+import { createNewSave, normalizeSave } from '../../src/core/save/schema.ts'
+import { equipRelic } from '../../src/core/systems/loadout.ts'
+import { createHeroState } from '../../src/core/systems/growth.ts'
+import { applyAction } from '../../src/core/systems/actions.ts'
+
 const ARENA_CTX = arenaContext(1)
+
+function arenaSave() {
+  const save = createNewSave(Date.parse('2026-11-08T15:59:59Z'), 19)
+  save.heroes.xiangyu = createHeroState('xiangyu', 0)
+  save.team.slots[0] = 'xiangyu'
+  return save
+}
+
+describe('竞技整改回归', () => {
+  it.each([2, 4, 6])('快照保留 %i 件套并以竞技系数生效', (pieces) => {
+    const save = arenaSave()
+    for (let i = 0; i < pieces; i++) {
+      const relic = generateRelic('set_zhanshen_1', new Rng(i + 1))
+      relic.uid = `test-${i}`
+      save.relics.push(relic)
+      equipRelic(save, 'xiangyu', i, relic.uid)
+    }
+    const snapshot = buildArenaSnapshot(save)
+    expect(snapshot.relicSets[0]).toEqual([
+      ...Array(pieces).fill('set_zhanshen'), ...Array(6 - pieces).fill(null),
+    ])
+    const base = buildArenaUnits(buildArenaLoadout({ slots: ['xiangyu'], heroes: save.heroes, relicSetsByHero: {}, runes: [], arenaLevel: 0 }), 'ally', ARENA_CTX)[0]
+    const unit = buildArenaUnits(snapshot, 'ally', ARENA_CTX)[0]
+    const bonus = pieces === 2 ? 0.08 : pieces === 4 ? 0.22 : 0.44
+    expect(unit.stats.atk / base.stats.atk - 1).toBeCloseTo(bonus * 0.7, 8)
+    const hash = arenaSnapshotHash(snapshot)
+    save.player.permBoost = 999
+    save.heroes.xiangyu.level = 240
+    save.relics.forEach((r) => { r.level = 60; r.subStats = [] })
+    expect(arenaSnapshotHash(buildArenaSnapshot(save))).toBe(hash)
+  })
+
+  it('旧快照只保留可确认的一件，不猜补套装件数', () => {
+    const save = arenaSave()
+    const old = buildArenaSnapshot(save)
+    ;(old.relicSets as unknown[])[0] = 'set_zhanshen'
+    save.arena.defenseLoadout = old
+    const normalized = normalizeSave(save).arena.defenseLoadout!
+    expect(normalized.relicSets[0]).toEqual(['set_zhanshen'])
+    expect(buildArenaUnits(normalized, 'ally', ARENA_CTX)[0].stats.atk).toBe(100)
+  })
+
+  it('双方各自生效羁绊，镜像双方初始血量对称', () => {
+    const loadout = buildArenaLoadout({ slots: ['huatuo', 'bianque', 'nangdengel'], heroes: {}, relicSetsByHero: {}, runes: [], arenaLevel: 0 })
+    const match = resolveArenaMatch({ challengeId: 'bond', attacker: loadout, defender: loadout, attackerId: 'a', attackerName: 'a', defenderId: 'b', defenderName: 'b', seed: 1 })
+    const allies = match.result.roster.filter((u) => u.side === 'ally')
+    const enemies = match.result.roster.filter((u) => u.side === 'enemy')
+    expect(enemies.map((u) => u.maxHp)).toEqual([1272, 1272, 1272])
+    expect(allies.map((u) => u.maxHp)).toEqual([1272, 1272, 1272])
+    const solo = buildArenaLoadout({ slots: ['huatuo'], heroes: {}, relicSetsByHero: {}, runes: [], arenaLevel: 0 })
+    const asymmetric = resolveArenaMatch({ challengeId: 'own-bond', attacker: solo, defender: loadout, attackerId: 'a', attackerName: 'a', defenderId: 'b', defenderName: 'b', seed: 1 })
+    expect(asymmetric.result.roster.filter((u) => u.side === 'ally').map((u) => u.maxHp)).toEqual([1200])
+    expect(asymmetric.result.roster.filter((u) => u.side === 'enemy').map((u) => u.maxHp)).toEqual([1272, 1272, 1272])
+  })
+
+  it('北京时间周一零点重置奖励，重复结算与重载不重复重置', () => {
+    const save = arenaSave()
+    const before = Date.parse('2026-11-08T15:59:59Z')
+    const settle = (now: number) => applyAction(save, { type: 'arena.settle' }, { now, rng: new Rng(19), randomSeed: () => 19 })
+    save.arena.weeklyMedals = 999
+    save.arena.weeklyTickets = 999
+    settle(before)
+    expect(save.arena.weeklyMedals).toBe(999)
+    settle(before + 1000)
+    expect(save.arena.weeklyMedals).toBeGreaterThan(0)
+    expect(save.arena.weeklyMedals).toBeLessThan(999)
+    expect(save.arena.weeklyTickets).toBeLessThanOrEqual(1)
+    const earned = save.arena.weeklyMedals
+    settle(before + 2000)
+    expect(save.arena.weeklyMedals).toBe(earned * 2)
+    expect(normalizeSave(save).arena.weeklyMedals).toBe(earned * 2)
+  })
+
+  it('旧档周标记只初始化一次，不因下次 normalize 洗掉计数', () => {
+    const save = arenaSave()
+    delete (save.arena as Partial<typeof save.arena>).rewardWeek
+    save.arena.weeklyMedals = 99
+    const first = normalizeSave(save)
+    expect(first.arena.rewardWeek).toEqual(expect.any(Number))
+    expect(first.arena.weeklyMedals).toBe(99)
+    expect(normalizeSave(first).arena.rewardWeek).toBe(first.arena.rewardWeek)
+  })
+})
 
 describe('1. 养成隔离', () => {
   it('PVE 养成相差 100 倍的两个账号，竞技归一化后战力差 < 15%', () => {

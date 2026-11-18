@@ -10,7 +10,7 @@ import { CHAPTERS, STAGES } from '../../core/config/stages.ts'
 import { ENEMY_INDEX, getEnemy } from '../../core/config/enemies.ts'
 import { DROP_TABLES } from '../../core/config/economy.ts'
 import { runBattle } from '../../core/systems/battle.ts'
-import { getBondMods } from '../../core/systems/team.ts'
+import { buildPveContext } from '../../core/systems/derive.ts'
 import { formatNumber, formatPower } from '../utils/format'
 import BattleCanvas from '../components/BattleCanvas.vue'
 import BattleResultPanel from '../components/BattleResultPanel.vue'
@@ -59,12 +59,7 @@ function previewBattle() {
     allies: store.team,
     enemies: list,
     enemyScale: stage.value?.enemyScale ?? 1,
-    ctx: {
-      mode: 'pve',
-      // 战斗种子取自 store 的持久化随机序列（铁律 #24）
-      seed: store.nextBattleSeed(),
-      teamMods: { bond: getBondMods(store.team) },
-    },
+    ctx: buildPveContext(store.save, store.nextBattleSeed()),
   })
   previewFinished.value = false
 }

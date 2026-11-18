@@ -227,5 +227,13 @@ test.describe('离线只读', () => {
     await page.locator('button', { hasText: '十连' }).first().click()
     await expect(page.getByText('离线模式，只能查看进度')).toBeVisible({ timeout: 10_000 })
     expect((await cachedSaveOf(page, session.user.id))?.stats?.totalPulls).toBe(10)
+
+    // 网络恢复后无需刷新：已 loaded 的游戏镜像也必须重新拉取权威档。
+    await page.evaluate((base) => localStorage.setItem('sgw.apiBase', base), E2E_API_BASE)
+    await page.getByTestId('reconnect').click()
+    await expect(page.locator('.offline-bar')).toHaveCount(0, { timeout: 15_000 })
+    await pullTen(page)
+    await expect.poll(async () => (await cachedSaveOf(page, session.user.id))?.stats?.totalPulls)
+      .toBe(20)
   })
 })

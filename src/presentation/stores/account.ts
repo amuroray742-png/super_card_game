@@ -112,17 +112,14 @@ export const useAccountStore = defineStore('account', () => {
 
   /** 幂等：多处调用只会真正恢复一次（离线时允许重试——网络可能已恢复） */
   async function ensureRestored(): Promise<void> {
-    if (status.value === 'unknown') {
+    if (status.value === 'unknown' || offline.value) {
       if (!restoreTask) {
         restoreTask = restore().finally(() => {
           restoreTask = null
         })
       }
       await restoreTask
-      return
     }
-    // 离线中：每次导航都试一次恢复（网络回来了就自动续上）
-    if (offline.value) await restore()
   }
 
   /** 登录 */

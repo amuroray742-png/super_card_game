@@ -9,7 +9,7 @@ import { STAGES } from '../../core/config/stages.ts'
 import { getEnemy } from '../../core/config/enemies.ts'
 import { DROP_TABLES } from '../../core/config/economy.ts'
 import { runBattle } from '../../core/systems/battle.ts'
-import { getBondMods, getTeamPower } from '../../core/systems/team.ts'
+import { buildPveContext } from '../../core/systems/derive.ts'
 import { getHeroSetMods } from '../../core/systems/relic.ts'
 import { getHeroPassiveMods } from '../../core/systems/growth.ts'
 import { formatNumber, formatPower } from '../utils/format'
@@ -55,13 +55,7 @@ function fight() {
     allies: store.team,
     enemies,
     enemyScale: stage.value.enemyScale,
-    ctx: {
-      mode: 'pve',
-      // 战斗种子取自 store 的持久化随机序列：
-      // 表现层不直接用 Math.random（铁律 #6 / #24），且刷新后不会重复同一场战斗
-      seed: store.nextBattleSeed(),
-      teamMods: { bond: getBondMods(store.team) },
-    },
+    ctx: buildPveContext(store.save, store.nextBattleSeed()),
   })
   battle.value = result
   showCanvas.value = true

@@ -22,6 +22,7 @@
  * - **协议失败**（负载不合法 / 未登录 / 限流）→ 4xx，错误体 `{ error }`。
  */
 import type { GameAction, GameActionType, ActionResultMap } from './actions.ts'
+import { SAVE_IMPORT } from '../config/save-import.ts'
 import type { GameErrorCode } from '../config/game-errors.ts'
 import type { OfflineSettlementResult } from './idle.ts'
 
@@ -116,6 +117,8 @@ export function parseGameAction(raw: unknown): GameAction | null {
       if (battles === null || battles < 1 || battles > 1000) return null
       return { type: 'idle.tick', battles }
     }
+    case 'idle.heartbeat':
+      return { type: 'idle.heartbeat' }
     case 'idle.claimOffline':
       return { type: 'idle.claimOffline' }
     case 'idle.setTarget': {
@@ -224,7 +227,7 @@ export function parseGameAction(raw: unknown): GameAction | null {
       return { type: 'save.reset' }
     case 'save.import': {
       const payload = str(raw.payload)
-      if (!payload) return null
+      if (!payload || payload.length > SAVE_IMPORT.MAX_ENCODED_CHARS) return null
       // legacy = 存量旧档迁移（服务端据此记账号标记，防止旧档被迁给第二个账号）
       return { type: 'save.import', payload, legacy: raw.legacy === true }
     }

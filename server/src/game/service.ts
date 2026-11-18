@@ -23,23 +23,21 @@ import type { SaveData } from '../../../src/core/model/types.ts'
 import { deserialize, serialize } from '../../../src/core/save/serialize.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
 import { Rng } from '../../../src/core/rng.ts'
-import { IDLE } from '../../../src/core/config/economy.ts'
 import { ACCOUNT, LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
 import { GAME_ERROR_CODES, GAME_ERROR_MESSAGES } from '../../../src/core/config/game-errors.ts'
 import {
   applyAction,
-  applyRewardBundle,
+  settleIdleLedger,
   syncRngState,
   type ActionResultMap,
   type GameAction,
   type GameActionType,
 } from '../../../src/core/systems/actions.ts'
-import { buildTeam } from '../../../src/core/systems/derive.ts'
-import { settleOffline, type OfflineSettlementResult } from '../../../src/core/systems/idle.ts'
+import type { OfflineSettlementResult } from '../../../src/core/systems/idle.ts'
 import type { ActionRequest, ActionResponse, SaveSnapshot } from '../../../src/core/systems/action-protocol.ts'
 import type { Db } from '../db.ts'
 import { UserLock } from './lock.ts'
-import { readActionLog, readSave, trimActionLogs, writeActionLog, writeFlag, writeSave } from './repo.ts'
+import { readActionLog, readFlag, readSave, trimActionLogs, writeActionLog, writeFlag, writeSave } from './repo.ts'
 
 /** 服务端随机种子（密码学随机源；**不得**用常量种子——所有玩家会抽到同一串） */
 export function serverSeed(): number {
@@ -154,10 +152,19 @@ export class GameService {
       }
     }
 
+    // 迁移资格先于 prepare：拒绝请求不得触发结算或覆盖。
+    // legacy 只是兼容旧客户端的提示，绝不是授权凭证。
+    if (isImport && (row || readFlag(this.db, userId, LEGACY_MIGRATED_FLAG))) {
+      return {
+        ok: false, actionId: request.actionId,
+        code: GAME_ERROR_CODES.IMPORT_FORBIDDEN,
+        message: GAME_ERROR_MESSAGES.IMPORT_FORBIDDEN,
+      }
+    }
     const save = row ? deserialize(row.payload) : createNewSave(now, serverSeed())
 
-    // ③ 入口检查：补随机种子 + 补算离线收益
-    const prepared = this.prepare(save, now)
+    // ③ 挂机动作自己消费账本，避免入口预结算吞掉其上限与返回结果。
+    const prepared = this.prepare(save, now, request.action.type !== 'idle.tick' && request.action.type !== 'idle.claimOffline' && request.action.type !== 'idle.heartbeat')
     let dirty = prepared.dirty
 
     // ④ 执行动作（规则全在 core 里）
@@ -213,7 +220,7 @@ export class GameService {
       writeActionLog(this.db, userId, request.actionId, JSON.stringify(stored), now)
       trimActionLogs(this.db, userId, ACCOUNT.ACTION_LOG_LIMIT)
       // 存量旧档迁移：记一笔账号标记（同一份旧档不会被迁给第二个账号）
-      if (isImport && request.action.type === 'save.import' && request.action.legacy) {
+      if (isImport) {
         writeFlag(this.db, userId, LEGACY_MIGRATED_FLAG, 1)
       }
       this.db.exec('COMMIT')
@@ -239,7 +246,7 @@ export class GameService {
    * 离线收益**不依赖后台常驻 tick**——每次进入游戏 / 每次动作都检查一次，
    * 玩家断网期间不损失挂机收益（服务端时间说了算）。
    */
-  private prepare(save: SaveData, now: number): PreparedSave {
+  private prepare(save: SaveData, now: number, settle = true): PreparedSave {
     let dirty = false
     let offline: OfflineSettlementResult | null = null
 
@@ -250,26 +257,12 @@ export class GameService {
       dirty = true
     }
 
-    const elapsed = Math.max(0, Math.floor((now - save.lastTickAt) / 1000))
-    if (elapsed < IDLE.OFFLINE_SETTLE_THRESHOLD_SEC) {
-      return { offline, dirty }
-    }
-
-    const team = buildTeam(save)
-    if (team.length === 0) {
-      // 没有编队就没有挂机收益；但仍然要把 lastTickAt 推上去，
-      // 否则每次入口都会重新算一遍空结算。
-      save.lastTickAt = now
-      return { offline, dirty: true }
-    }
-
+    if (!settle) return { offline, dirty }
+    const before = JSON.stringify([save.lastTickAt, save.idle])
     const settleRng = Rng.fromSnapshot(save.rng.seed, save.rng.counter)
-    const result = settleOffline(team, save.idle.currentStage, elapsed, settleRng.nextSeed())
-    applyRewardBundle(save, result.rewards, settleRng, now)
-    save.lastTickAt = now
+    offline = settleIdleLedger(save, { now, rng: settleRng, randomSeed: serverSeed })
     syncRngState(save, settleRng)
-    offline = result
-    dirty = true
+    dirty ||= JSON.stringify([save.lastTickAt, save.idle]) !== before
     return { offline, dirty }
   }
 }

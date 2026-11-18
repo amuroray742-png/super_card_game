@@ -14,6 +14,18 @@ import { vi } from 'vitest'
 import type { HTTPMethods } from 'fastify'
 import { buildApp, type AppBundle } from '../../../server/src/app.ts'
 
+import { serialize } from '../../../src/core/save/serialize.ts'
+import type { SaveData } from '../../../src/core/model/types.ts'
+import { writeSave } from '../../../server/src/game/repo.ts'
+
+let activeBundle: AppBundle | null = null
+
+/** 测试专用SQLite夹具，绝不经过生产导入/HTTP旁路。 */
+export function seedServerSave(userId: number, save: SaveData): void {
+  if (!activeBundle) throw new Error('No server harness')
+  writeSave(activeBundle.db, userId, serialize(save), save.savedAt, Date.now())
+}
+
 export interface ServerHarness {
   bundle: AppBundle
   /** 关闭后端并还原 fetch（可重复调用） */
@@ -30,6 +42,7 @@ export function startServerHarness(): ServerHarness {
     corsOrigins: ['http://127.0.0.1:4173'],
   })
 
+  activeBundle = bundle
   let closed = false
 
   vi.stubGlobal(
@@ -59,6 +72,7 @@ export function startServerHarness(): ServerHarness {
     close: async () => {
       if (closed) return
       closed = true
+      if (activeBundle === bundle) activeBundle = null
       vi.unstubAllGlobals()
       await bundle.close()
     },

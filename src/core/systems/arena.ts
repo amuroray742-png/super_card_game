@@ -82,21 +82,21 @@ export function buildArenaLoadout(input: {
   const heroes: (string | null)[] = []
   const stars: number[] = []
   const skills: number[][] = []
-  const relicSets: (string | null)[] = []
+  const relicSets: (string | null)[][] = []
 
   for (const heroId of input.slots.slice(0, 6)) {
     heroes.push(heroId)
     if (!heroId) {
       stars.push(1)
       skills.push([1, 1, 1])
-      relicSets.push(null)
+      relicSets.push([])
       continue
     }
     const state = input.heroes[heroId]
     stars.push(state?.star ?? 1)
     skills.push(state ? [...state.skillLevels] : [1, 1, 1])
     const sets = input.relicSetsByHero[heroId] ?? []
-    relicSets.push(sets.length > 0 ? sets[0] : null)
+    relicSets.push([...sets])
   }
 
   return {
@@ -154,7 +154,7 @@ export function buildArenaUnits(
       .flatMap((p) => p.mods)
 
     // 套装效果（只取套装 id，不含词条与强化等级）
-    const setMods = getSetModsBySetIds([loadout.relicSets[i]])
+    const setMods = getSetModsBySetIds(loadout.relicSets[i] ?? [])
 
     // 构造一个仅供竞技使用的最小运行时对象
     const runtime = {
@@ -218,40 +218,25 @@ export function resolveArenaMatch(input: {
   const ctx = arenaContext(input.seed)
 
   // 羁绊按各自阵容计算（各自独立，互不影响）
-  const attackerHeroes = input.attacker.heroes.map((id) =>
-    id ? HERO_INDEX.get(id) : undefined,
-  )
-  const bondMods = getBondMods(
-    attackerHeroes.map((def, i) =>
-      def
-        ? {
-            def,
-            state: {
-              id: def.id,
-              level: 1,
-              exp: 0,
-              star: input.attacker.stars[i] ?? 1,
-              skillLevels: input.attacker.skills[i] ?? [1, 1, 1],
-              shards: 0,
-              coreAwakened: false,
-              obtainedAt: 0,
-            },
-            relics: [],
-            slot: i,
-          }
-        : null,
-    ),
-  )
-
-  const ctxWithBonds: BattleContext = {
-    ...ctx,
-    teamMods: { bond: bondMods },
+  function contextFor(loadout: ArenaLoadout): BattleContext {
+    const bond = getBondMods(loadout.heroes.map((id, slot) => {
+      const def = id ? HERO_INDEX.get(id) : undefined
+      return def ? {
+        def,
+        state: { id: def.id, level: 1, exp: 0, star: loadout.stars[slot] ?? 1,
+          skillLevels: loadout.skills[slot] ?? [1, 1, 1], shards: 0, coreAwakened: false, obtainedAt: 0 },
+        relics: [],
+        slot,
+      } : null
+    }))
+    return { ...ctx, teamMods: { bond } }
   }
+  const attackerCtx = contextFor(input.attacker)
+  const defenderCtx = contextFor(input.defender)
+  const allies = buildArenaUnits(input.attacker, 'ally', attackerCtx)
+  const enemies = buildArenaUnits(input.defender, 'enemy', defenderCtx)
 
-  const allies = buildArenaUnits(input.attacker, 'ally', ctxWithBonds)
-  const enemies = buildArenaUnits(input.defender, 'enemy', ctx)
-
-  const result = simulateBattle(allies, enemies, ctxWithBonds, input.seed, input.attacker.runes)
+  const result = simulateBattle(allies, enemies, ctx, input.seed, input.attacker.runes)
 
   const pointsDelta = result.win ? tierPointsFor(1) : -Math.round(tierPointsFor(1) * 0.5)
 

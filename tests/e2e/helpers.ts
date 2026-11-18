@@ -1,4 +1,7 @@
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
+import { BATTLE } from '../../src/core/config/economy.ts'
+import type { ActionResponse } from '../../src/core/systems/action-protocol.ts'
+import type { IdleActionResult } from '../../src/core/systems/actions.ts'
 import { ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../src/core/config/account.ts'
 
 /**
@@ -160,8 +163,43 @@ export async function cachedSaveOf(page: Page, accountId: number | string): Prom
   }, key)
 }
 
+/**
+ * 等真实挂机时间后，通过玩家按钮领取一次服务端结算。
+ * 场次数只是领取上限；不改时钟、不注入收益，也不假定在线倍率。
+ * 每轮至少等一个基础场次，兼容在线 3x 与离线效率账本。
+ */
+export async function settleIdleThroughUi(page: Page, accountId: number, battles = 10): Promise<IdleActionResult> {
+  await page.waitForTimeout(BATTLE.SECONDS_PER_BATTLE * 1000)
+  const responsePromise = page.waitForResponse((response) => {
+    if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/action') return false
+    const request = response.request().postDataJSON()
+    return request?.action?.type === 'idle.tick' && request.action.battles === battles
+  })
+  await page.getByRole('button', { name: `推征 ${battles} 场`, exact: true }).click()
+  const response = await responsePromise
+  expect(response.ok(), '挂机请求应成功到达真实服务端').toBe(true)
+  const body = await response.json() as ActionResponse
+  expect(body.ok, body.message ?? '挂机动作失败').toBe(true)
+  expect(body.save, '成功动作应返回权威存档').toBeTruthy()
+  const snapshot = JSON.parse(body.save!.payload) as CachedSave
+  // 心跳会续租并写回更新的控制账本，不能要求整份 JSON 与旧响应精确相等。
+  // 没有其它玩家消费动作：资源不可比本次快照少，实例也必须全部保留。
+  await expect.poll(async () => {
+    const cached = await cachedSaveOf(page, accountId)
+    if (!cached || (cached.savedAt ?? 0) < body.save!.savedAt) return false
+    for (const [key, value] of Object.entries(snapshot.player ?? {})) {
+      if (typeof value === 'number' && ((cached.player as Record<string, number> | undefined)?.[key] ?? -1) < value) return false
+    }
+    return (snapshot.relics ?? []).every((relic) => cached.relics?.some((r) =>
+      r.uid === relic.uid && r.defId === relic.defId && r.level === relic.level))
+  }, { timeout: 10_000 }).toBe(true)
+  expect(body.result, '挂机应返回结算明细').toBeTruthy()
+  return body.result as IdleActionResult
+}
+
 /** 本地缓存里常用的一小片字段 */
 export interface CachedSave {
+  savedAt?: number
   stats?: { totalPulls: number }
   player?: {
     crystals: number

@@ -6,7 +6,8 @@
  *   恢复会话 → 载入该账号的存档 → 首启引导劫持。
  * 本组件只负责渲染，未登录时（登录页 / 公开合规页）走裸布局，不显示资源条与标签栏。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { IDLE } from '../core/config/economy.ts'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from './stores/game'
 import { useAccountStore } from './stores/account'
@@ -59,14 +60,33 @@ const offlineRewards = computed(() => {
   ].filter((x) => x.value > 0)
 })
 
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+function stopHeartbeat() {
+  if (heartbeatTimer !== null) clearInterval(heartbeatTimer)
+  heartbeatTimer = null
+}
+function syncHeartbeat() {
+  stopHeartbeat()
+  if (!booted.value || document.visibilityState !== 'visible' || !store.loaded || store.offline || account.offline || !account.isAuthenticated) return
+  void store.heartbeat()
+  heartbeatTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') void store.heartbeat()
+  }, IDLE.HEARTBEAT_INTERVAL_MS)
+}
+watch(() => [store.loaded, store.offline, account.offline, account.user?.id], syncHeartbeat)
+
 onMounted(() => {
   booted.value = true
+  syncHeartbeat()
   document.addEventListener('visibilitychange', flushOnHide)
+  window.addEventListener('online', recoverOnOnline)
   window.addEventListener('pagehide', flushOnHide)
 })
 
 onUnmounted(() => {
+  stopHeartbeat()
   document.removeEventListener('visibilitychange', flushOnHide)
+  window.removeEventListener('online', recoverOnOnline)
   window.removeEventListener('pagehide', flushOnHide)
 })
 
@@ -76,7 +96,12 @@ onUnmounted(() => {
  * 服务端权威后，进度在**每次动作**时就已落库（服务端），
  * 这里只是把最新镜像写进本地缓存，断网时也能看到最近进度。
  */
+function recoverOnOnline() {
+  if (store.offline || account.offline) void store.reconnect()
+}
+
 function flushOnHide() {
+  syncHeartbeat()
   if (document.visibilityState === 'hidden') void store.persist()
 }
 
@@ -134,6 +159,9 @@ function goBackBare() {
         <!-- 离线模式：服务端不可达，只能看不能改 -->
         <div v-if="store.offline" class="offline-bar">
           离线模式 · 连不上服务器，现在只能查看进度，操作需恢复连接
+          <button data-testid="reconnect" class="btn btn-sm" :disabled="store.reconnecting" @click="store.reconnect()">
+            {{ store.reconnecting ? '恢复中…' : '恢复连接' }}
+          </button>
         </div>
         <router-view v-slot="{ Component }">
           <component :is="Component" />

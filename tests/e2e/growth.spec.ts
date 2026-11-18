@@ -1,5 +1,8 @@
 import { test, expect, type Page } from '@playwright/test'
-import { cachedSaveOf, registerAccount, seedSession, skipGachaReveal, uniqueUsername } from './helpers'
+import { cachedSaveOf, registerAccount, seedSession, settleIdleThroughUi, skipGachaReveal, uniqueUsername } from './helpers'
+
+// 真实等待挂机预算；普通用例也不能再依赖连点瞬间领取十场。
+test.setTimeout(180_000)
 
 /**
  * 英灵养成端到端用例（属性面板 + 技能升级 + 喂经验扣经验池）。
@@ -97,17 +100,16 @@ function heroIdFromUrl(page: Page): string {
  * ⚠ 经验是**推征掉落**进池子的，玩家必须先打过一场才有经验可喂。
  *   推征遇到战败会中断（runIdle 遇败即停），所以这里允许「这一轮没涨」再重试。
  */
-async function farmExp(page: Page, accountId: number, target: number): Promise<number> {
+async function farmExp(page: Page, accountId: number, target: number, timeout = 150_000, battles = 1): Promise<number> {
   await page.goto('/#/expedition')
   await page.waitForLoadState('networkidle')
-  const btn = page.locator('button', { hasText: '推征 10 场' })
   let pool = await expPoolOf(page, accountId)
-  for (let i = 0; i < 8 && pool < target; i++) {
-    await btn.click()
-    // 推征结算落盘后经验池才会涨
-    await page.waitForTimeout(800)
+  const deadline = Date.now() + timeout
+  while (pool < target && Date.now() < deadline) {
+    await settleIdleThroughUi(page, accountId, battles)
     pool = await expPoolOf(page, accountId)
   }
+  expect(pool, `真实挂机经验池未达到 ${target}（实际 ${pool}）`).toBeGreaterThanOrEqual(target)
   return pool
 }
 
@@ -246,7 +248,6 @@ test.describe('英灵养成（属性面板 + 技能升级）', () => {
       if (await btn.isDisabled()) break
       await btn.click()
       await expect.poll(() => skillLevelOf(page), { timeout: 8_000 }).toBe(before + i + 1)
-      await page.waitForTimeout(250)
     }
 
     await expect(btn).toBeDisabled()
@@ -320,7 +321,7 @@ test.describe('喂经验扣玩家经验池', () => {
  */
 test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 Lv61）', () => {
   // ⚠ 这条用例要真实挂机刷经验，比其它用例慢得多
-  test.setTimeout(300_000)
+  test.setTimeout(1_800_000)
 
   test('喂到境界门槛后，消耗英灵印记突破到新境界，存量经验立即兑现', async ({ page }) => {
     const accountId = await bootLoggedIn(page)
@@ -340,17 +341,7 @@ test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 
     // 升到 Lv60 单人要 7874 经验；这里攒到 1.5 万，
     // 好让突破后有**足够的存量经验**兑现成等级（否则只跨 1 级看不出兑现）。
     const TARGET_POOL = 15_000
-    let pool = await expPoolOf(page, accountId)
-    for (let round = 0; round < 45 && pool < TARGET_POOL; round++) {
-      await page.goto('/#/expedition')
-      await page.waitForLoadState('networkidle')
-      const before = await expPoolOf(page, accountId)
-      await page.locator('button', { hasText: '推征 10 场' }).click()
-      // 结算落盘后才涨；遇战败会中断（runIdle 遇败即停），这一轮可能白跑
-      await page.waitForTimeout(900)
-      pool = await expPoolOf(page, accountId)
-      if (pool <= before) continue
-    }
+    const pool = await farmExp(page, accountId, TARGET_POOL, 1_650_000, 10)
     expect(pool, `经验池没攒到 ${TARGET_POOL}（实际 ${pool}）`).toBeGreaterThanOrEqual(TARGET_POOL)
 
     // ── 2) 全部喂给主角 → 撞到境界门槛 Lv60 ──

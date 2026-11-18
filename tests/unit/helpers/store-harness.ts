@@ -5,13 +5,13 @@
  * **真实后端**上（见 `server-harness.ts`）。这里提供两件常用的事：
  *
  * - `registerAndLoad`：注册 → 载入存档（服务端建档）
- * - `seedSave`：造一份存档并通过「导入存档」动作推到服务端
- *   （玩家主动导入是唯一能整份替换存档的入口，与真实玩法一致）
+ * - `seedSave`：直接种入真实临时SQLite夹具，再经权威拉档进入store
+ *   （测试造状态不借用生产迁移权限，不增加生产测试接口）
  */
 import { useAccountStore } from '../../../src/presentation/stores/account.ts'
 import { useGameStore } from '../../../src/presentation/stores/game.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
-import { exportSave } from '../../../src/core/save/serialize.ts'
+import { seedServerSave } from './server-harness.ts'
 import { createHeroState } from '../../../src/core/systems/growth.ts'
 import type { SaveData } from '../../../src/core/model/types.ts'
 
@@ -46,7 +46,9 @@ export async function seedSave(patch?: (save: SaveData) => void): Promise<SaveDa
   save.player.skillStones = 21_000
   save.player.relicStones = 500
   patch?.(save)
-  const ok = await store.importSaveText(exportSave(save))
-  if (!ok) throw new Error('导入存档失败')
+  const userId = useAccountStore().user?.id
+  if (!userId) throw new Error('Seed requires authenticated user')
+  seedServerSave(userId, save)
+  await store.load()
   return save
 }

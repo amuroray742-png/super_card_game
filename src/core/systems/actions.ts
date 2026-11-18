@@ -36,11 +36,11 @@ import type {
   TeamPreset,
 } from '../model/types.ts'
 import { GAME_ERROR_CODES, type GameErrorCode } from '../config/game-errors.ts'
-import { DAILY, LEVEL, REDEEM_CODES, BATTLE } from '../config/economy.ts'
+import { DAILY, LEVEL, REDEEM_CODES, BATTLE, IDLE } from '../config/economy.ts'
 import { STAGE_INDEX } from '../config/stages.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { getPool } from '../config/pools.ts'
-import { dayIndex } from '../time.ts'
+import { arenaWeekIndex, dayIndex } from '../time.ts'
 import { formatNumber } from '../utils/format.ts'
 import { Rng } from '../rng.ts'
 import {
@@ -77,7 +77,7 @@ import {
   resolvePayment,
   summarizePull,
 } from './gacha.ts'
-import { runIdle, settleOffline, type OfflineSettlementResult } from './idle.ts'
+import { runIdle, offlineEffectiveSeconds, type OfflineSettlementResult } from './idle.ts'
 import {
   arenaSnapshotHash,
   resolveArenaMatch,
@@ -85,8 +85,8 @@ import {
   type ArenaReward,
 } from './arena.ts'
 import { performRebirth, previewRebirth, type RebirthPreview } from './rebirth.ts'
-import { buildArenaSnapshot, buildHeroRuntime, buildTeam } from './derive.ts'
-import { importSave } from '../save/serialize.ts'
+import { buildArenaSnapshot, buildHeroRuntime, buildTeam, buildPveContext } from './derive.ts'
+import { validateImportedSave } from '../save/import-validation.ts'
 import { createNewSave, normalizeSave } from '../save/schema.ts'
 
 // ─────────────────────────── 动作负载 ───────────────────────────
@@ -100,6 +100,7 @@ import { createNewSave, normalizeSave } from '../save/schema.ts'
 export type GameAction =
   | { type: 'gacha.pull'; poolId: string; count: 1 | 10 }
   | { type: 'idle.tick'; battles: number }
+  | { type: 'idle.heartbeat' }
   | { type: 'idle.claimOffline' }
   | { type: 'idle.setTarget'; stageId: number }
   | { type: 'settings.update'; speed?: number; sfx?: boolean; skipAnim?: boolean }
@@ -182,6 +183,7 @@ export interface ArenaSettleResult {
 export interface ActionResultMap {
   'gacha.pull': PullActionResult
   'idle.tick': IdleActionResult
+  'idle.heartbeat': true
   'idle.claimOffline': OfflineSettlementResult | null
   'idle.setTarget': { stageId: number }
   'settings.update': true
@@ -419,56 +421,92 @@ function actionPull(
   )
 }
 
-/** 推进挂机 */
+function measureIdleLedger(save: SaveData, ctx: ActionContext): void {
+  settleIdleLedger(save, ctx, 0)
+}
+
+/** 共用时间账本。lastTickAt是未消费时间的起点，不是最后请求时间。 */
+export function settleIdleLedger(save: SaveData, ctx: ActionContext, upperLimit: number = IDLE.MAX_REPLAY_BATTLES): OfflineSettlementResult | null {
+  const from = save.idle.measuredAt ?? save.lastTickAt
+  if (ctx.now < from) return null
+  const elapsedMs = Math.max(0, ctx.now - from)
+  const capMs = IDLE.CAP_HOURS * 3600 * 1000
+  const team = buildTeam(save)
+  if (elapsedMs > 0) {
+    const onlineMs = Math.max(0, Math.min(ctx.now, save.idle.activeUntil ?? from) - from)
+    const offlineMs = elapsedMs - onlineMs
+    const oldOffline = onlineMs > 0 ? 0 : (save.idle.offlineElapsedMs ?? 0)
+    const effectiveOffline = (offlineEffectiveSeconds((oldOffline + offlineMs) / 1000)
+      - offlineEffectiveSeconds(oldOffline / 1000)) * 1000
+    save.idle.offlineElapsedMs = oldOffline + offlineMs
+    save.idle.effectiveMs = team.length === 0 ? 0 : Math.min(capMs,
+      (save.idle.effectiveMs ?? 0) + onlineMs * IDLE.ONLINE_MULTIPLIER + effectiveOffline)
+    save.idle.measuredAt = ctx.now
+  }
+  const budgetMs = save.idle.effectiveMs ?? 0
+  const battles = Math.min(Math.floor((budgetMs + 0.000001) / (BATTLE.SECONDS_PER_BATTLE * 1000)), upperLimit, IDLE.MAX_REPLAY_BATTLES)
+  if (team.length === 0) {
+    if (elapsedMs > 0) save.lastTickAt = ctx.now
+    return null
+  }
+  if (battles <= 0) return null
+  // 每场固定消耗同一条持久化序列；分十次领与一次领十场必须完全一致。
+  const pve = buildPveContext(save)
+  const run = { battles: 0, rewards: {} as RewardBundle, reachedStage: save.campaign.clearedStage,
+    lastClearedStage: null as number | null, nextTargetStage: Math.min(save.idle.currentStage, save.campaign.clearedStage + 1),
+    blockedAtStage: null as number | null, newRelics: [] as string[] }
+  for (let i = 0; i < battles; i++) {
+    const one = runIdle(team, run.nextTargetStage, 1, ctx.rng.nextSeed(), undefined, pve, save.idle.autoAdvance)
+    applyRewardBundle(save, one.rewards, ctx.rng, ctx.now)
+    for (const key of ['silver', 'exp', 'skillStones', 'relicStones', 'emblems'] as const) {
+      if (one.rewards[key] !== undefined) run.rewards[key] = (run.rewards[key] ?? 0) + one.rewards[key]!
+    }
+    if (one.rewards.relics) run.rewards.relics = [...(run.rewards.relics ?? []), ...one.rewards.relics]
+    run.battles += one.battles
+    run.lastClearedStage = one.lastClearedStage ?? run.lastClearedStage
+    run.reachedStage = run.lastClearedStage ?? run.reachedStage
+    run.nextTargetStage = one.nextTargetStage
+    run.newRelics.push(...one.newRelics)
+    run.blockedAtStage = one.blockedAtStage
+    if (one.blockedAtStage !== null) break
+  }
+  save.idle.currentStage = run.nextTargetStage
+  if (run.lastClearedStage !== null) save.campaign.clearedStage = Math.max(save.campaign.clearedStage, run.lastClearedStage)
+  // 战败消耗本次预算，避免同一段过去时间反复roll战斗结果；未消费的请求上限仍保留。
+  const consumed = run.blockedAtStage === null ? run.battles : Math.floor(budgetMs / (BATTLE.SECONDS_PER_BATTLE * 1000))
+  save.idle.effectiveMs = Math.max(0, budgetMs - consumed * BATTLE.SECONDS_PER_BATTLE * 1000)
+  // 兼容旧水位展示；实际计量由measuredAt + effectiveMs负责。
+  save.lastTickAt = Math.max(save.lastTickAt, (save.idle.measuredAt ?? ctx.now) - save.idle.effectiveMs)
+  save.idle.totalIdleSeconds += consumed * BATTLE.SECONDS_PER_BATTLE
+  return {
+    ...run, elapsedSeconds: elapsedMs / 1000, cappedSeconds: budgetMs / 1000, efficiency: 1,
+  }
+}
+
+/** 推进挂机：客户端场次数只是上限，不能创造时间。 */
 function actionIdleTick(
   save: SaveData,
   payload: Extract<GameAction, { type: 'idle.tick' }>,
   ctx: ActionContext,
 ): ActionOutcome<IdleActionResult> {
-  const team = buildTeam(save)
-  if (team.length === 0) {
-    return fail(GAME_ERROR_CODES.TEAM_EMPTY, '请先在阵位中编队')
+  if (!Number.isSafeInteger(payload.battles) || payload.battles <= 0) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '场次数必须是正整数')
   }
-  const battles = Math.max(1, Math.floor(payload.battles))
-
-  const seed = ctx.rng.nextSeed()
-  const run = runIdle(team, save.idle.currentStage, battles, seed)
-
-  applyRewardBundle(save, run.rewards, ctx.rng, ctx.now)
-
-  save.idle.currentStage = run.blockedAtStage !== null ? run.blockedAtStage : run.reachedStage
-  save.campaign.clearedStage = Math.max(save.campaign.clearedStage, run.reachedStage)
-  save.idle.totalIdleSeconds += battles * 6
-  save.lastTickAt = ctx.now
-
-  return ok<IdleActionResult>({
-    battles: run.battles,
-    rewards: run.rewards,
-    reachedStage: run.reachedStage,
-    blockedAtStage: run.blockedAtStage,
+  if (buildTeam(save).length === 0) return fail(GAME_ERROR_CODES.TEAM_EMPTY, '请先在阵位中编队')
+  const run = settleIdleLedger(save, ctx, payload.battles)
+  return ok<IdleActionResult>(run ?? {
+    battles: 0, rewards: {}, reachedStage: save.campaign.clearedStage, blockedAtStage: null,
   })
 }
 
-/** 离线结算 */
+/** 离线领取与在线共用同一个时间账本，不接受客户端倍率。 */
 function actionIdleClaimOffline(
   save: SaveData,
   _payload: Extract<GameAction, { type: 'idle.claimOffline' }>,
   ctx: ActionContext,
 ): ActionOutcome<OfflineSettlementResult | null> {
-  const team = buildTeam(save)
-  if (team.length === 0) {
-    return fail(GAME_ERROR_CODES.TEAM_EMPTY, '请先在阵位中编队')
-  }
-  const elapsed = Math.max(0, Math.floor((ctx.now - save.lastTickAt) / 1000))
-  if (elapsed < 60) {
-    // 没有可领取的离线收益（服务端入口已经补算过了）
-    return ok<null>(null)
-  }
-  const seed = ctx.rng.nextSeed()
-  const result = settleOffline(team, save.idle.currentStage, elapsed, seed)
-  applyRewardBundle(save, result.rewards, ctx.rng, ctx.now)
-  save.lastTickAt = ctx.now
-  return ok<OfflineSettlementResult>(result)
+  if (buildTeam(save).length === 0) return fail(GAME_ERROR_CODES.TEAM_EMPTY, '请先在阵位中编队')
+  return ok(settleIdleLedger(save, ctx))
 }
 
 /**
@@ -483,7 +521,7 @@ function actionIdleSetTarget(
   _ctx: ActionContext,
 ): ActionOutcome<{ stageId: number }> {
   const stageId = Math.floor(payload.stageId)
-  if (!Number.isFinite(stageId) || !STAGE_INDEX.has(stageId)) {
+  if (!Number.isSafeInteger(payload.stageId) || !STAGE_INDEX.has(stageId) || stageId > save.campaign.clearedStage + 1) {
     return fail(GAME_ERROR_CODES.NOT_FOUND, '关卡不存在')
   }
   save.idle.currentStage = stageId
@@ -747,6 +785,9 @@ function actionSetSlot(
   if (payload.heroId !== null && !save.heroes[payload.heroId]) {
     return silentFail(GAME_ERROR_CODES.NOT_FOUND)
   }
+  settleIdleLedger(save, _ctx)
+  // 超过单次回放上限的旧队积压不允许转交新队追领。
+  save.idle.effectiveMs = (save.idle.effectiveMs ?? 0) % (BATTLE.SECONDS_PER_BATTLE * 1000)
   const slots = save.team.slots
   if (payload.heroId) {
     const existing = slots.indexOf(payload.heroId)
@@ -782,6 +823,8 @@ function actionApplyPreset(
 ): ActionOutcome<true> {
   const preset = save.team.presets.find((p) => p.id === payload.presetId)
   if (!preset) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
+  settleIdleLedger(save, _ctx)
+  save.idle.effectiveMs = (save.idle.effectiveMs ?? 0) % (BATTLE.SECONDS_PER_BATTLE * 1000)
   save.team.slots = [...preset.slots]
   return ok<true>(true)
 }
@@ -807,6 +850,11 @@ function actionRebirth(
     return fail(GAME_ERROR_CODES.REBIRTH_LOCKED, preview.reason || '暂不可重启')
   }
   const result = performRebirth(save)
+  save.idle.measuredAt = _ctx.now
+  save.idle.effectiveMs = 0
+  save.idle.offlineElapsedMs = 0
+  save.idle.activeUntil = _ctx.now
+  save.lastTickAt = _ctx.now
   return ok<RebirthPreview>(
     result,
     `圣杯重启完成 · 永久加成 ${Math.round(result.nextPermBoost * 100)}%`,
@@ -847,6 +895,12 @@ function actionArenaSettle(
   a.snapshotHash = arenaSnapshotHash(loadout)
   a.defenseLoadout = loadout
 
+  const rewardWeek = arenaWeekIndex(ctx.now)
+  if (a.rewardWeek !== rewardWeek) {
+    a.rewardWeek = rewardWeek
+    a.weeklyMedals = 0
+    a.weeklyTickets = 0
+  }
   const { reward, weeklyMedals, weeklyTickets } = resolveArenaRewards(
     match.result.win,
     a.weeklyMedals ?? 0,
@@ -945,15 +999,20 @@ function actionReset(
 function actionImport(
   save: SaveData,
   payload: Extract<GameAction, { type: 'save.import' }>,
-  _ctx: ActionContext,
+  ctx: ActionContext,
 ): ActionOutcome<true> {
   let imported
   try {
-    imported = normalizeSave(importSave(payload.payload))
+    imported = validateImportedSave(payload.payload, ctx.now, ctx.randomSeed)
   } catch {
     return fail(GAME_ERROR_CODES.IMPORT_INVALID, '存档数据无效')
   }
   Object.assign(save, imported)
+  save.idle.measuredAt = ctx.now
+  save.idle.effectiveMs = 0
+  save.idle.offlineElapsedMs = 0
+  save.idle.activeUntil = ctx.now
+  save.lastTickAt = ctx.now
   return ok<true>(true, '存档已导入')
 }
 
@@ -975,6 +1034,14 @@ export type ActionHandler<K extends GameActionType> = (
 const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
   'gacha.pull': actionPull,
   'idle.tick': actionIdleTick,
+  'idle.heartbeat': (save, _payload, ctx) => {
+    // 只计量过去、不领奖；新租约严格从服务端now往未来生效。
+    measureIdleLedger(save, ctx)
+    if (ctx.now >= (save.idle.measuredAt ?? save.lastTickAt)) {
+      save.idle.activeUntil = ctx.now + IDLE.ACTIVE_LEASE_MS
+    }
+    return ok(true)
+  },
   'idle.claimOffline': actionIdleClaimOffline,
   'idle.setTarget': actionIdleSetTarget,
   'settings.update': actionSettingsUpdate,

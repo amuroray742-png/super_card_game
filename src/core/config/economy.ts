@@ -200,8 +200,10 @@ export const IDLE = {
   CAP_HOURS: 12,
   /** 8~12h 区间末端效率 */
   TAIL_RATE: 0.6,
-  /** 在线效率 = 离线效率 × 3 */
+  /** 仅服务端验证的未来活跃租约享受在线倍率。 */
   ONLINE_MULTIPLIER: 3,
+  ACTIVE_LEASE_MS: 15_000,
+  HEARTBEAT_INTERVAL_MS: 5_000,
   /** 离线回放的最大场次（防卡顿） */
   MAX_REPLAY_BATTLES: 2000,
   /**

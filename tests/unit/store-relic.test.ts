@@ -57,8 +57,12 @@ const { Rng } = await import('../../src/core/rng.ts')
 const RELIC_UPGRADE = relicUpgradeCost(1)!
 
 let harness: ServerHarness
+let now: number
+function advanceBattles(count: number) { now += count * 6_000 }
 
 beforeEach(async () => {
+  now = Date.now()
+  vi.spyOn(Date, 'now').mockImplementation(() => now)
   mem.clear()
   setActivePinia(createPinia())
   harness = startServerHarness()
@@ -66,6 +70,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await harness.close()
+  vi.restoreAllMocks()
 })
 
 /** 缓存槽位：登录后按账号 id 分槽位 */
@@ -84,6 +89,7 @@ describe('遗物获取链路', () => {
     await seedSave()
     const before = store.save.relics.length
 
+    advanceBattles(1)
     const result = await store.tickIdle(1)
     expect(result).not.toBeNull()
     // core 产出的遗物清单
@@ -97,6 +103,7 @@ describe('遗物获取链路', () => {
   it('入库的遗物实例结构完整（defId / uid / 等级齐全，能被强化与装备）', async () => {
     const store = useGameStore()
     await seedSave()
+    advanceBattles(2)
     await store.tickIdle(2)
 
     const relic = store.save.relics[0]
@@ -109,8 +116,10 @@ describe('遗物获取链路', () => {
   it('多场挂机：遗物逐场累加（不是只剩最后一场的）', async () => {
     const store = useGameStore()
     await seedSave()
+    advanceBattles(1)
     await store.tickIdle(1)
     const one = store.save.relics.length
+    advanceBattles(3)
     await store.tickIdle(3)
     expect(store.save.relics.length).toBe(one + 3)
   })
@@ -118,6 +127,7 @@ describe('遗物获取链路', () => {
   it('遗物也进了本地缓存（断网时还能看到最近进度）', async () => {
     const store = useGameStore()
     await seedSave()
+    advanceBattles(1)
     await store.tickIdle(1)
     const inSave = store.save.relics.length
     expect(inSave).toBeGreaterThan(0)
@@ -127,10 +137,8 @@ describe('遗物获取链路', () => {
 
   it('离线结算同样产出遗物（服务端按自己的时间补算）', async () => {
     const store = useGameStore()
-    // 造一份「离开两小时」的存档
-    await seedSave((save) => {
-      save.lastTickAt = Date.now() - 2 * 3600 * 1000
-    })
+    await seedSave()
+    advanceBattles(10)
 
     await store.claimOffline()
     expect(store.offlineReport).not.toBeNull()

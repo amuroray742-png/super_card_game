@@ -119,14 +119,17 @@ describe('服务端权威：本地缓存不是权威', () => {
 
 describe('服务端权威：失败即原子', () => {
   it('余额不足 → 动作失败，存档一字节未变', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now())
     const store = await registerAndLoad('saver')
     await store.pull('standard', 10)
     await store.pull('standard', 10)
 
+    // 固定服务端时钟，排除入口正常计量挂机时间；只检验失败动作原子性。
     const before = JSON.stringify(store.save)
     const res = await store.pull('standard', 10)
     expect(res).toBeNull()
     expect(JSON.stringify(store.save)).toBe(before)
+    vi.restoreAllMocks()
   })
 })
 

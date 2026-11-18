@@ -248,14 +248,19 @@ export const useGameStore = defineStore('game', () => {
       return null
     }
 
+    const epoch = generation
+    const owner = account.user?.id
+    const current = () => generation === epoch && account.user?.id === owner
     const actionId = newActionId()
     busy.value = true
     try {
       return await enqueue(async () => {
+        if (!current()) return null
         let response: ActionResponse
         try {
           response = await account.sendAction(actionId, action)
         } catch (err) {
+          if (!current()) return null
           if (isNetworkFailure(err)) {
             offline.value = true
             notify('无法连接服务器，已切换到离线模式', 'warn')
@@ -265,8 +270,10 @@ export const useGameStore = defineStore('game', () => {
           return null
         }
 
+        if (!current()) return null
         // 服务端回传的存档 = 权威版本（覆盖本地镜像）
         await applyServerSave(response.save)
+        if (!current()) return null
         if (response.offline) offlineReport.value = response.offline
 
         if (!response.ok) {
@@ -279,7 +286,7 @@ export const useGameStore = defineStore('game', () => {
         return response.result as ActionResultMap[T]
       })
     } finally {
-      busy.value = false
+      if (current()) busy.value = false
     }
   }
 
@@ -305,9 +312,49 @@ export const useGameStore = defineStore('game', () => {
    *   没有旧档就让服务端建一份新档；
    * - 服务端**连不上** → 离线模式：展示本地缓存，不能操作。
    */
+  let generation = 0
+  let reconnectTask: Promise<boolean> | null = null
+  const reconnecting = ref(false)
+
+  /** 不依赖loaded；恢复必须成功拉到权威存档才解锁动作。 */
+  function reconnect(): Promise<boolean> {
+    if (reconnectTask) return reconnectTask
+    const account = useAccountStore()
+    const id = account.user?.id
+    const epoch = generation
+    const current = () => generation === epoch && account.user?.id === id
+    reconnecting.value = true
+    const task = enqueue(async () => {
+      try {
+        if (!id || !current()) return false
+        if (!account.accessToken) await account.ensureRestored()
+        if (!current() || !account.isAuthenticated) return false
+        const cloud = await account.pullCloudSave()
+        if (!current() || !cloud) return false
+        await applyServerSave(cloud)
+        if (!current()) return false
+        if (cloud.offline) offlineReport.value = cloud.offline
+        account.offline = false
+        offline.value = false
+        loaded.value = true
+        return true
+      } catch (err) {
+        if (current()) { offline.value = true; notify(describeAccountError(err), 'warn') }
+        return false
+      }
+    })
+    reconnectTask = task
+    void task.finally(() => {
+      if (reconnectTask === task) { reconnectTask = null; reconnecting.value = false }
+    })
+    return task
+  }
+
   async function load() {
     const account = useAccountStore()
     const accountId = account.user?.id ?? null
+    const epoch = generation
+    const current = () => generation === epoch && account.user?.id === accountId
     slot.value = slotForAccount(accountId)
     offline.value = false
 
@@ -319,6 +366,7 @@ export const useGameStore = defineStore('game', () => {
       local = null
     }
 
+    if (!current()) return
     // 会话层已经判定离线（连不上服务器）→ 只读模式，直接用本地缓存
     if (account.offline) {
       offline.value = true
@@ -334,7 +382,9 @@ export const useGameStore = defineStore('game', () => {
     if (accountId != null) {
       try {
         cloud = await account.pullCloudSave()
+        if (!current()) return
       } catch (err) {
+        if (!current()) return
         if (isNetworkFailure(err)) {
           offline.value = true
         } else {
@@ -352,6 +402,7 @@ export const useGameStore = defineStore('game', () => {
       battleSpeed.value = server.settings.speed ?? 1
       if (cloud.offline) offlineReport.value = cloud.offline
       await persist()
+      if (!current()) return
       loaded.value = true
       return
     }
@@ -366,15 +417,28 @@ export const useGameStore = defineStore('game', () => {
 
     // 服务端还没有存档：先把存量旧档迁过去，没有就让服务端建一份
     const legacy = await takeLegacySave(accountId)
+    if (!current()) return
     if (legacy) {
       const imported = await runAction({ type: 'save.import', payload: legacy, legacy: true })
+      if (!current()) return
       if (!imported) {
-        // 导入失败（存档损坏等）→ 退回建新档
-        await runAction({ type: 'save.create' })
+        // 响应可能丢失：先独立拉档确认，绝不静默建档吞掉旧档。
+        try {
+          const confirmed = await account.pullCloudSave()
+          if (!current() || !confirmed) return
+          await applyServerSave(confirmed)
+          if (!current()) return
+          account.offline = false
+          offline.value = false
+        } catch { return }
       }
+      try { await storage.setFlag(ACCOUNT_STORAGE_KEYS.LEGACY_MIGRATED, true) }
+      catch { notify('云端迁移已完成，本地标记保存失败；旧档仍保留', 'warn') }
     } else {
-      await runAction({ type: 'save.create' })
+      const created = await runAction({ type: 'save.create' })
+      if (!created || !current()) return
     }
+    if (!current()) return
     loaded.value = true
   }
 
@@ -394,7 +458,6 @@ export const useGameStore = defineStore('game', () => {
       if (await storage.getFlag(legacyKey)) return null
       const legacy = await storage.load(ACCOUNT_STORAGE_KEYS.LEGACY_SAVE_SLOT)
       if (!legacy) return null
-      await storage.setFlag(legacyKey, true)
       return await storage.export(legacy)
     } catch {
       return null
@@ -408,6 +471,11 @@ export const useGameStore = defineStore('game', () => {
    * 路由守卫在未登录时会调用本方法。
    */
   function invalidate() {
+    generation++
+    reconnectTask = null
+    heartbeatTask = null
+    busy.value = false
+    reconnecting.value = false
     loaded.value = false
     guideSeen.value = false
     offline.value = false
@@ -460,6 +528,17 @@ export const useGameStore = defineStore('game', () => {
   })
 
   // ─────────────────────────── 挂机 ───────────────────────────
+
+  let heartbeatTask: Promise<true | null> | null = null
+  /** 可见性由App传达；store不读DOM。复用动作队列与账号世代检查。 */
+  function heartbeat(): Promise<true | null> {
+    if (!loaded.value || offline.value || !useAccountStore().isAuthenticated) return Promise.resolve(null)
+    if (heartbeatTask) return heartbeatTask
+    const task = runAction({ type: 'idle.heartbeat' })
+    heartbeatTask = task
+    void task.finally(() => { if (heartbeatTask === task) heartbeatTask = null })
+    return task
+  }
 
   /** 推进挂机：跑 battles 场，结算掉落（服务端执行） */
   async function tickIdle(battles = 1) {
@@ -737,10 +816,13 @@ export const useGameStore = defineStore('game', () => {
     arenaHash,
     // actions
     load,
+    reconnect,
+    reconnecting,
     invalidate,
     persist,
     reset,
     notify,
+    heartbeat,
     tickIdle,
     claimOffline,
     setIdleTarget,

@@ -528,8 +528,8 @@ export interface ArenaLoadout {
   stars: number[]
   /** 与 heroes 对齐的技能等级（3 个） */
   skills: number[][]
-  /** 6 槽遗物所属的套装 id（只取套装效果，不含词条与强化等级） */
-  relicSets: (string | null)[]
+  /** 与 heroes 对齐；每名英雄保留全部遗物槽的套装 id（重复项即件数） */
+  relicSets: (string | null)[][]
   /** 已装备的战术铭文（最多 3） */
   runes: string[]
   arenaLevel: number
@@ -609,6 +609,11 @@ export interface SaveData {
     currentStage: number
     autoAdvance: boolean
     totalIdleSeconds: number
+    /** 服务端已计量水位/有效预算；旧档缺失时惰性迁移。 */
+    measuredAt?: number
+    effectiveMs?: number
+    offlineElapsedMs?: number
+    activeUntil?: number
   }
   codes: string[]
   settings: { speed: number; sfx: boolean; skipAnim: boolean }
@@ -622,6 +627,8 @@ export interface SaveData {
     weeklyMedals: number
     /** 本周已兑换的竞技抽卡券（用于周上限封顶，跨会话累计） */
     weeklyTickets: number
+    /** 北京时间周一零点起的奖励周期编号 */
+    rewardWeek: number
     arenaLevel: number
     runes: string[]
     defenseLoadout: ArenaLoadout | null

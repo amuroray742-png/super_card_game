@@ -1,5 +1,8 @@
 import { test, expect, type Page } from '@playwright/test'
-import { cachedSaveOf, registerAccount, seedSession, skipGachaReveal, uniqueUsername } from './helpers'
+import { cachedSaveOf, registerAccount, seedSession, settleIdleThroughUi, skipGachaReveal, uniqueUsername } from './helpers'
+
+// 遗物必须用真实挂机时间收集，不能靠连点凭空产出。
+test.setTimeout(240_000)
 
 /**
  * 遗物获取途径端到端用例。
@@ -76,6 +79,18 @@ async function relicsOf(
   return (await cachedSaveOf(page, accountId))?.relics ?? []
 }
 
+/**
+ * 真实收集到目标件数才离开推征页；十场按钮不是「立即送十件」。
+ * 推荐用例至少备足十件，保留完整六槽断言，不靠一次随机掉落猜数量。
+ */
+async function collectRelics(page: Page, accountId: number, target = 10): Promise<void> {
+  const deadline = Date.now() + 180_000
+  while ((await relicsOf(page, accountId)).length < target && Date.now() < deadline) {
+    await settleIdleThroughUi(page, accountId)
+  }
+  expect((await relicsOf(page, accountId)).length, `真实挂机未收集到 ${target} 件遗物`).toBeGreaterThanOrEqual(target)
+}
+
 /** 读取某英灵当前已装备的遗物数量 */
 async function equippedCountOf(page: Page, accountId: number, heroId: string): Promise<number> {
   const equipped = (await cachedSaveOf(page, accountId))?.equipped ?? {}
@@ -108,10 +123,10 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
 
     await setupTeam(page)
 
-    // 推征 10 场
+    // 等真实时间预算，再从按钮领取；不假定点击十场就会打满十场。
     await page.goto('/#/expedition')
     await page.waitForLoadState('networkidle')
-    await page.getByRole('button', { name: '推征 10 场' }).click()
+    const settlement = await settleIdleThroughUi(page, accountId)
 
     // 结算提示里要报遗物数量（表现层只认 rewards 这一份口径）
     const toast = page.locator('.toast')
@@ -119,6 +134,7 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
     const toastText = await toast.innerText()
     const dropped = Number(/遗物\s*(\d+)/.exec(toastText)?.[1] ?? 0)
     expect(dropped).toBeGreaterThan(0)
+    expect(dropped).toBe(settlement.rewards.relics?.length ?? 0)
 
     // 仓库里真的有遗物了
     await page.goto('/#/forge')
@@ -138,10 +154,14 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
       expect(r.level).toBeGreaterThanOrEqual(1)
     }
 
-    // 刷新后不丢（落盘没丢）
+    // 刷新后旧实例不丢；载入可能补算新增掉落，因此不能固定总数。
     await page.reload()
     await page.waitForLoadState('networkidle')
-    await expect(page.locator('.relic-cell')).toHaveCount(dropped)
+    const reloaded = await relicsOf(page, accountId)
+    expect(reloaded.length).toBeGreaterThanOrEqual(saved.length)
+    for (const relic of saved) expect(reloaded).toContainEqual(relic)
+    await expect(page.locator('.relic-cell')).toHaveCount(reloaded.length)
+    await expect(page.getByText(`共 ${reloaded.length} 件`)).toBeVisible()
 
     // 遗物是**可用的实例**：点开能看到词条并能装备
     await page.locator('.relic-cell').first().click()
@@ -156,19 +176,14 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
     await page.goto('/#/expedition')
     await page.waitForLoadState('networkidle')
 
-    await page.getByRole('button', { name: '推征 1 场' }).click()
-    // ⚠ 服务端权威后，推征要走一次服务端往返：
-    //   不能只看「提示出现了」（上一次的提示可能还没消失），
-    //   得等仓库里的遗物真的多出来。
-    await expect
-      .poll(async () => (await relicsOf(page, accountId)).length, { timeout: 10_000 })
-      .toBeGreaterThan(0)
+    const first = await settleIdleThroughUi(page, accountId, 1)
+    expect(first.rewards.relics?.length ?? 0).toBeGreaterThan(0)
     const afterFirst = (await relicsOf(page, accountId)).length
+    expect(afterFirst).toBe(first.rewards.relics?.length)
 
-    await page.getByRole('button', { name: '推征 1 场' }).click()
-    await expect
-      .poll(async () => (await relicsOf(page, accountId)).length, { timeout: 10_000 })
-      .toBeGreaterThan(afterFirst)
+    const second = await settleIdleThroughUi(page, accountId, 1)
+    expect(second.rewards.relics?.length ?? 0).toBeGreaterThan(0)
+    expect((await relicsOf(page, accountId)).length).toBe(afterFirst + (second.rewards.relics?.length ?? 0))
   })
 })
 
@@ -187,7 +202,7 @@ test.describe('遗物图标', () => {
     // 推征产遗物
     await page.goto('/#/expedition')
     await page.waitForLoadState('networkidle')
-    await page.getByRole('button', { name: '推征 10 场' }).click()
+    await collectRelics(page, accountId)
     await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
 
     // 铸造页：每件遗物都有图标
@@ -231,7 +246,7 @@ test.describe('遗物强化', () => {
     // 推征产遗物
     await page.goto('/#/expedition')
     await page.waitForLoadState('networkidle')
-    await page.getByRole('button', { name: '推征 10 场' }).click()
+    await collectRelics(page, accountId)
     await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
 
     // 铸造页 → 点第一件遗物 → 详情面板里必须有强化按钮
@@ -284,7 +299,7 @@ test.describe('一键推荐装备与套装效果', () => {
     // 推征产遗物
     await page.goto('/#/expedition')
     await page.waitForLoadState('networkidle')
-    await page.getByRole('button', { name: '推征 10 场' }).click()
+    await collectRelics(page, accountId)
     await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
 
     // 进英灵详情页
@@ -330,7 +345,7 @@ test.describe('一键推荐装备与套装效果', () => {
 
     await page.goto('/#/expedition')
     await page.waitForLoadState('networkidle')
-    await page.getByRole('button', { name: '推征 10 场' }).click()
+    await collectRelics(page, accountId)
     await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
 
     await page.goto('/#/temple')

@@ -20,7 +20,18 @@ import type {
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { getEquippedRelics } from './loadout.ts'
 import { buildArenaLoadout } from './arena.ts'
-import { getTeamPower } from './team.ts'
+import { getBondMods, getTeamPower } from './team.ts'
+import type { BattleContext, StatMod } from '../model/types.ts'
+import { RELIC_DEFS } from './relic.ts'
+import '../config/relics.ts'
+
+/** 真实挂机、预览、战力共用的PVE上下文。竞技入口不得调用。 */
+export function buildPveContext(save: SaveData, seed = 1): BattleContext {
+  const progress: StatMod[] = (['hp', 'atk', 'def', 'spd'] as const).map(stat => ({
+    stat, value: save.player.permBoost, kind: 'pct', zone: 'progress',
+  }))
+  return { mode: 'pve', seed, teamMods: { bond: getBondMods(buildTeam(save)), progress } }
+}
 
 /** 存档 → 英灵状态表 */
 export function buildHeroIndex(save: SaveData): Map<string, HeroState> {
@@ -88,7 +99,7 @@ export function buildTeam(save: SaveData): HeroRuntime[] {
 
 /** 存档 → 编队战力（PVE 口径，与界面显示一致） */
 export function buildTeamPower(save: SaveData): number {
-  return getTeamPower(buildTeam(save), { mode: 'pve' })
+  return getTeamPower(buildTeam(save), buildPveContext(save))
 }
 
 /**
@@ -105,7 +116,7 @@ export function buildArenaSnapshot(save: SaveData): ArenaLoadout {
       .filter((id): id is string => !!id)
       .map((id) => [
         id,
-        (equipped.get(id) ?? []).map((r) => r?.defId ?? null),
+        (equipped.get(id) ?? []).map((r) => r ? RELIC_DEFS.get(r.defId)?.setId ?? null : null),
       ]),
   )
   return buildArenaLoadout({

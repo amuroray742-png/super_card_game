@@ -18,7 +18,9 @@ import { GameService } from '../../../server/src/game/service.ts'
 import { UserLock } from '../../../server/src/game/lock.ts'
 import { WindowLimiter } from '../../../server/src/rateLimit.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
-import { exportSave } from '../../../src/core/save/serialize.ts'
+import { writeSave, writeFlag } from '../../../server/src/game/repo.ts'
+import { LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
+import { serialize, exportSave } from '../../../src/core/save/serialize.ts'
 import { grantHero } from '../../../src/core/systems/actions.ts'
 import type { PullActionResult } from '../../../src/core/systems/actions.ts'
 import type { ActionResponse } from '../../../src/core/systems/action-protocol.ts'
@@ -270,11 +272,7 @@ describe('动作接口：离线补算与导入', () => {
     old.team.slots[1] = 'hanxin'
     old.lastTickAt = Date.now() - 2 * 3600 * 1000
 
-    const imported = await post(acc.accessToken, 'import-1', {
-      type: 'save.import',
-      payload: exportSave(old),
-    })
-    expect(imported.body.ok).toBe(true)
+    writeSave(bundle.db, acc.user.id, serialize(old), old.savedAt, Date.now())
 
     const save = await pullSave(acc.accessToken)
     expect(save?.offline).toBeTruthy()
@@ -286,23 +284,52 @@ describe('动作接口：离线补算与导入', () => {
     expect(again?.offline).toBeFalsy()
   })
 
-  it('导入存档覆盖服务端进度（存量档迁移路径）', async () => {
+  it('已有云档禁止导入，即使声明legacy也不授权', async () => {
     const acc = await withSave('alice')
+    const before = await pullSave(acc.accessToken)
+    const res = await post(acc.accessToken, 'blocked-import', {
+      type: 'save.import', legacy: true, payload: exportSave(createNewSave(Date.now(), 42)),
+    })
+    expect(res.body.code).toBe('IMPORT_FORBIDDEN')
+    expect((await pullSave(acc.accessToken))?.rng).toEqual(before?.rng)
+  })
+
+  it('无云档首次迁移，随机与时间由服务端重建', async () => {
+    const acc = await signUp('alice')
     const payload = exportSave(createNewSave(Date.now(), 42))
     const res = await post(acc.accessToken, 'import-2', { type: 'save.import', payload })
     expect(res.body.ok).toBe(true)
     const save = await pullSave(acc.accessToken)
-    expect(save?.rng.seed).toBe(42)
+    expect(save?.rng.seed).not.toBe(42)
+    expect(save?.rng.counter).toBe(0)
+    expect(save?.lastTickAt).toBeGreaterThan(Date.now() - 5000)
+    expect(bundle.db.prepare('SELECT * FROM user_flags WHERE user_id = ?').all(acc.user.id)).toHaveLength(1)
   })
 
-  it('导入非法存档 → ok:false IMPORT_INVALID，原进度不变', async () => {
-    const acc = await withSave('alice')
-    const before = await pullSave(acc.accessToken)
+  it('迁移标记阻止删云档后重新迁移', async () => {
+    const acc = await signUp('alice')
+    writeFlag(bundle.db, acc.user.id, LEGACY_MIGRATED_FLAG, 1)
+    const res = await post(acc.accessToken, 'again', { type: 'save.import', payload: exportSave(createNewSave(Date.now(), 42)) })
+    expect(res.body.code).toBe('IMPORT_FORBIDDEN')
+    expect(await pullSave(acc.accessToken)).toBeNull()
+  })
+
+  it('事务写标记失败时存档与动作日志一起回滚', async () => {
+    const acc = await signUp('alice')
+    bundle.db.exec("CREATE TRIGGER reject_migration BEFORE INSERT ON user_flags BEGIN SELECT RAISE(ABORT, 'reject'); END")
+    const res = await post(acc.accessToken, 'rollback', { type: 'save.import', payload: exportSave(createNewSave(Date.now(), 42)) })
+    expect(res.status).toBe(500)
+    expect(await pullSave(acc.accessToken)).toBeNull()
+    expect(bundle.db.prepare('SELECT * FROM action_log WHERE user_id = ?').all(acc.user.id)).toHaveLength(0)
+  })
+
+  it('导入非法存档 → ok:false IMPORT_INVALID，不建档不占资格', async () => {
+    const acc = await signUp('alice')
     const res = await post(acc.accessToken, 'import-3', { type: 'save.import', payload: 'not-base64!!' })
     expect(res.body.ok).toBe(false)
     expect(res.body.code).toBe('IMPORT_INVALID')
-    const after = await pullSave(acc.accessToken)
-    expect(after?.player.crystals).toBe(before?.player.crystals)
+    expect(await pullSave(acc.accessToken)).toBeNull()
+    expect(bundle.db.prepare('SELECT * FROM user_flags WHERE user_id = ?').all(acc.user.id)).toHaveLength(0)
   })
 })
 

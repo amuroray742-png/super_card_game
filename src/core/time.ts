@@ -48,3 +48,8 @@ export function seconds(ms: number): number {
 export function dayIndex(timestamp: number): number {
   return Math.floor(timestamp / 86_400_000)
 }
+
+/** 北京时间周一零点切周。1970-01-01 为周四，平移三天到周一。 */
+export function arenaWeekIndex(timestamp: number): number {
+  return Math.floor((timestamp + 8 * 3_600_000 + 3 * 86_400_000) / (7 * 86_400_000))
+}

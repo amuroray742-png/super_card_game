@@ -315,6 +315,7 @@ describe('动作层：成功路径', () => {
     seedTeam(save)
     save.player.silver = 0
     const { ctx } = makeCtx(save)
+    ctx.now += 12_000
 
     const res = applyAction(save, { type: 'idle.tick', battles: 2 }, ctx)
 
@@ -326,9 +327,9 @@ describe('动作层：成功路径', () => {
     expect(save.relics.length).toBe(res.result.rewards.relics?.length ?? 0)
   })
 
-  it('离线结算：不足 1 分钟不结算；超过则结算并入库', () => {
+  it('离线结算：不足一场不结算；超过则结算并入库', () => {
     seedTeam(save)
-    save.lastTickAt = NOW - 30_000
+    save.lastTickAt = NOW - 3_000
     const { ctx } = makeCtx(save)
     const tooSoon = applyAction(save, { type: 'idle.claimOffline' }, ctx)
     expect(tooSoon.ok).toBe(true)
