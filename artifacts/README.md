@@ -8,6 +8,8 @@
 | [art-style.md](art-style.md) | 英灵卡面的画风、生产和校验规范。 |
 | [roadmap.md](roadmap.md) | P1、P2 的执行顺序、交付物与验收条件。 |
 | [deploy.md](deploy.md) | 试玩部署手册：托管形态、持久化、备份恢复演练、回滚、HTTPS、兼容性实测、扩容边界。 |
+| [phase11-gate.md](phase11-gate.md) | Phase 11 决策闸门（roadmap P2-3）：判据、实测证据、缺口清单与复审触发条件。 |
+| [pvp-sampling.md](pvp-sampling.md) | 对局样本采集方案：样本口径、判据阈值、真实样本的采集点 / 开关 / 脱敏 / 留存期。 |
 | [baselines/](baselines/) | 实测基线：新号数值基线（`newplayer.json`）、浏览器兼容实测（`browser-compat.json`）、三队天梯标定（`ladder.json`）、竞技对局样本（`pvp-sample.json`）。 |
 | [2026-11-18 合并验收记录](acceptance-2026-11-18-886b7c8.md) | `main` 提交 `886b7c8` 的权威链路整改、测试修复与验证结果。 |
 
