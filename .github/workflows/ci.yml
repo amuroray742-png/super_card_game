@@ -1,0 +1,78 @@
+# 持续集成（roadmap P1-3「配置构建、项目检查和全量 E2E 的 CI」）。
+#
+# 三道闸门：
+#   check  —— 配置校验 + 禁用词扫描 + 单测 + 生产构建（vue-tsc 也在 build 里）
+#   e2e    —— 全量 Playwright（真实后端 + 真实 SQLite + 构建产物）
+#   docker —— 两个镜像都要能构建出来（部署件不会在 CI 里腐化）
+#
+# ⚠ E2E 的 webServer 自己会跑 `npm run build && npm run preview`，
+#   所以这里不再单独构建（省一次时间），但**必须**先装浏览器。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 项目检查（配置 / 禁用词 / 单测 / 构建）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  e2e:
+    name: 端到端（真实后端 + 构建产物）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # 单 worker 串行：E2E 里有「真实挂机时间」与「并发」语义的用例
+      - run: npx playwright test --workers=1
+      - name: 上传失败现场
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  docker:
+    name: 部署镜像构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: 构建 api 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api
+          push: false
+          tags: sgw-api:ci
+      - name: 构建 web 镜像（nginx + 前端）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: web
+          push: false
+          tags: sgw-web:ci

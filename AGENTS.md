@@ -382,6 +382,55 @@
     > 教训：3,000 件遗物时，心跳从 6 ms/次降到 1 ms/次（只读已装备件）；
     > 漏掉「不写遗物行」这一条，仓库会被一次心跳清空。
 
+34. **部署件必须厂商中立，且不携带数据**：
+    - 前端 API 地址用**相对路径 `/api`**（同源）→ 换域名 / 换托管**不必重新构建**；
+      绝对地址（`https://api.example.com`）会把部署绑死在某台机器上。
+    - **镜像不携带任何数据**：库与备份都只在命名卷里 → 代码回滚与数据回滚互相独立。
+    - 生产**必须**显式设置 `SGW_JWT_SECRET`：compose 用 `${SGW_JWT_SECRET:?...}` 直接拒绝启动，
+      服务端在 `NODE_ENV=production` 且密钥为默认值时也拒绝启动
+      （悄悄用开发密钥上线 = 重启后所有会话失效）。
+    - `.env` 由 Node 24 原生 `--env-file-if-exists` 加载（**不引入 dotenv**）。
+    - 运行时依赖只允许「现有依赖 + Node 标准库」→ **镜像源保持 `node:24`**
+      （服务端用 Node 内置 `node:sqlite`；换镜像源就可能退回需要编译的驱动，
+      部署机不一定有编译链）。
+    > 教训：前端 API 地址写死成绝对地址，等于每次换域名都要改代码 + 重新构建 + 重发镜像。
+
+35. **备份 / 恢复必须按 SQLite 的规矩来**：
+    - 备份用 `VACUUM INTO`（一致性单文件快照），**不得**直接复制 `.db`
+      （库开着 WAL，直接复制会漏掉还在 WAL 里没落盘的事务，复制中有写入还会得到撕裂的文件）。
+    - 恢复**必须停服**，并且**必须**删掉 `-wal` / `-shm` 伴生文件
+      （旧 WAL 里的事务帧会被重放回新库）；恢复前校验备份含 `users` / `saves`，
+      旧库另存 `.before-restore`。
+    - 恢复流程要有**演练记录**（跑一遍真链路并留下结论），不能只写文档就算完。
+    > 教训：2026-11 的本机演练同时验出了两件事——恢复点之后的账号必须被回滚（登录返回 401），
+    > 恢复点之前的数据必须完好（遗物件数与备份时一致）。
+
+36. **合规文案必须有唯一出处，界面只渲染**：
+    - 条款文字全部集中在 `src/content/compliance/index.ts`
+      （用户协议 / 隐私披露 / 客服 / 概率公示说明 / 适龄 / 史实）；
+      `ComplianceView` **不拼任何条款文字**。改条款只改 content 模块。
+    - 涉及概率 / 保底 / 印记折算的数值写成 `{key}` 占位符，界面用 core 的实时值填充
+      → 公示 = 实际（铁律 #2 / #4），不会文案写一套、代码算另一套。
+    - 运营联系方式走构建期 `VITE_CONTACT_EMAIL`；**未配置时显式提示「尚未配置」**，
+      不得留一个假地址糊弄玩家。
+    - 概率公示必须带**版本号与生效日期**（`RATES_PUBLICATION`），规则或概率一变就 +1。
+    - 禁用词表仍是唯一数据源（铁律 #9）：新增文案必须过 `npm run scan:forbidden`。
+    > 教训：条款散落在界面与文档里时，审问「你们实际收集什么数据」只能靠人回忆，
+    > 改一句文案要翻三个文件。
+
+37. **浏览器兼容性测量用「引擎 + 限速」近似，且必须走隔离通道**：
+    - Safari → Playwright **WebKit**（与 Safari / 微信 iOS 同内核）；
+      微信 Android → X5/Chromium 内核；低端 Android + 4G 首屏 →
+      Chromium + 4 倍 CPU 降速 + CDP 4G 限速（下行 1.6 Mbps / RTT 150 ms）。
+    - 限速只对 Chromium 可用（CDP）→ **WebKit 的数字只代表引擎兼容性，不能当弱网结论**；
+      真机（微信 iOS/Android、低端安卓机）仍要人工补测，清单见 `artifacts/deploy.md` §10.3。
+    - 测量脚本必须复用 `tools/capture/origin-guard.ts` 的 origin 守卫 + 隔离 context，
+      只访问 `127.0.0.1:<隔离端口>`（铁律 #13）。
+    - 每个配置**单独注册账号**：refresh token 是**一次性轮换**的，复用必然 401；
+      且先 `save.create` + 十连，否则测到的是「没有存档行的空壳首屏」（`GET /api/save` 404）。
+    > 教训：首轮实测里 3 个配置报 401/404，看起来像「兼容性有问题」，
+    > 实际是「refresh token 复用」与「新号没有存档」两个测量方法错误。
+
 ## 数值调参的既定流程
 
 数值改动**只改** `src/core/config/economy.ts`（以及对应的配置表），然后按序执行：
@@ -492,7 +541,14 @@ npm run perf:long-hang   # 长挂 / 大档压测（12h 离线 + 2h 心跳 + 内�
 npm run test:e2e         # Playwright 端到端（需先 npx playwright install chromium）
 npm run server:dev       # 后端开发模式（node --watch，默认 127.0.0.1:8787）
 npm run server:start     # 后端生产模式
+npm run db:backup        # 整库一致性快照（VACUUM INTO，见铁律 #35）
+npm run db:restore       # 整库恢复（必须停服，见铁律 #35）
 ```
+
+> **部署**：`artifacts/deploy.md` 是部署与运维的唯一入口
+> （托管形态、持久化、备份恢复演练、回滚、HTTPS、兼容性实测、扩容边界）。
+> 兼容性测量走截图工具的隔离通道：
+> `npx tsx tools/capture/screenshot.ts --compat --api <隔离后端> --url http://127.0.0.1:4188`。
 
 > **后端**：默认 `127.0.0.1:8787`，DB 落在 `server/data/app.db`（已被 .gitignore 忽略）。
 > 配置优先级：命令行参数 > 环境变量 > 默认值，完整清单见 `.env.example`。

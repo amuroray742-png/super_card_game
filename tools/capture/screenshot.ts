@@ -44,10 +44,14 @@
  * # 遗物场景（注册账号 → 十连 → 编队 → 推征产遗物 → 铸造页 + 英灵页）
  * npx tsx tools/capture/screenshot.ts --relic --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/relic.png
+ *
+ * # 浏览器兼容性测量（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏）
+ * npx tsx tools/capture/screenshot.ts --compat --route /login \
+ *   --url http://127.0.0.1:4188 --compat-out artifacts/baselines/browser-compat.json
  * ```
  */
-import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
+import { chromium, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { assertSafeOrigin, ISOLATED_PREVIEW_URL } from './origin-guard.ts'
 
@@ -68,11 +72,17 @@ interface Options {
   gachaReveal: boolean
   /** 遗物场景：登录 → 十连 → 编队 → 推征产遗物 → 铸造页 + 英灵页 */
   relic: boolean
+  /** 浏览器兼容性测量模式（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏） */
+  compat: boolean
+  /** 兼容性报告的输出路径（JSON） */
+  compatOut: string
   /** 隔离后端地址（观战场景要注册账号） */
   api: string
   /** 指定关卡 id（走关卡详情页的「战斗预览」；不填则走推征页的「观战」） */
   stage: string
   fullPage: boolean
+  /** 截图前把内部滚动容器滚到底（长页面用；容器是 .body，不是整页） */
+  scrollBottom: boolean
   waitMs: number
 }
 
@@ -91,9 +101,12 @@ function parseArgs(argv: string[]): Options {
     gachaTicket: argv.includes('--gacha-ticket'),
     gachaReveal: argv.includes('--gacha-reveal'),
     relic: argv.includes('--relic'),
+    compat: argv.includes('--compat'),
+    compatOut: get('--compat-out') ?? 'artifacts/baselines/browser-compat.json',
     api: get('--api') ?? '',
     stage: get('--stage') ?? '',
     fullPage: argv.includes('--full-page'),
+    scrollBottom: argv.includes('--scroll-bottom'),
     waitMs: Number(get('--wait') ?? 1200),
   }
 }
@@ -117,6 +130,7 @@ async function prepareIsolatedSave(page: Page, pull: boolean): Promise<void> {
 // ─────────────────────────── 观战场景 ───────────────────────────
 
 interface ShotSession {
+  accessToken: string
   refreshToken: string
   user: { id: number; username: string }
 }
@@ -421,9 +435,329 @@ async function runRelicScenario(
   return ''
 }
 
+// ─────────────────────────── 浏览器兼容性测量 ───────────────────────────
+
+/**
+ * 兼容性测量（roadmap P1-3「按设计基线实测 Safari、微信内置浏览器、低端 Android 及 4G 首屏」）。
+ *
+ * ## 为什么用「引擎 + 限速」而不是真机
+ *
+ * 真机（微信 iOS / 微信 Android / 低端安卓机）无法在 CI 里稳定复现，
+ * 但**渲染引擎**是可以复现的：
+ *
+ * - **Safari** → Playwright WebKit 就是 Safari 同源引擎（WKWebView 同内核）；
+ * - **微信内置浏览器** → iOS 版是 WKWebView（同 WebKit），Android 版是 X5/Chromium 内核；
+ * - **低端 Android + 4G 首屏** → Chromium + 4 倍 CPU 降速 + 4G 网络限速近似。
+ *
+ * 真机仍需人工补测（见 artifacts/deploy.md 的「真机补测清单」），
+ * 但**先在这里排掉引擎级问题**比每次找真机快得多。
+ *
+ * ## 硬约束
+ *
+ * 与截图场景共用同一套隔离机制：origin 守卫 + 全新 browser context（空 localStorage），
+ * 只允许访问隔离预览端口。
+ */
+
+interface CompatProfile {
+  name: string
+  /** 覆盖的目标机型 */
+  label: string
+  engine: 'chromium' | 'webkit'
+  ua: string
+  viewport: { width: number; height: number }
+  deviceScaleFactor: number
+  /** CPU 降速倍率（1 = 不降速） */
+  cpuThrottle: number
+  /** 网络限速 */
+  network: '4g' | 'none'
+}
+
+/** 微信内置浏览器 UA（Android 版：X5/Chromium 内核） */
+const WECHAT_UA =
+  'Mozilla/5.0 (Linux; Android 13; SM-G991B Build/TP1A.220624.014; wv) AppleWebKit/537.36 '
+  + '(KHTML, like Gecko) Version/4.0 Chrome/114.0.5735.196 Mobile Safari/537.36 '
+  + 'MicroMessenger/8.0.42.2460(0x28002A35) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64'
+
+/** iOS Safari UA（微信 iOS 版同内核） */
+const IOS_SAFARI_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 '
+  + '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+
+/** 低端安卓机 UA */
+const LOW_END_ANDROID_UA =
+  'Mozilla/5.0 (Linux; Android 10; RMX2001) AppleWebKit/537.36 (KHTML, like Gecko) '
+  + 'Chrome/114.0.0.0 Mobile Safari/537.36'
+
+const COMPAT_PROFILES: CompatProfile[] = [
+  {
+    name: 'chromium-4g-lowend',
+    label: '低端 Android（Chromium + 4 倍 CPU 降速 + 4G 限速）',
+    engine: 'chromium',
+    ua: LOW_END_ANDROID_UA,
+    viewport: { width: 360, height: 640 },
+    deviceScaleFactor: 3,
+    cpuThrottle: 4,
+    network: '4g',
+  },
+  {
+    name: 'chromium-wechat',
+    label: '微信内置浏览器（Android 版，X5/Chromium 内核 + 4G 限速）',
+    engine: 'chromium',
+    ua: WECHAT_UA,
+    viewport: { width: 393, height: 851 },
+    deviceScaleFactor: 3,
+    cpuThrottle: 2,
+    network: '4g',
+  },
+  {
+    name: 'webkit-ios',
+    label: 'Safari 引擎（iOS / 微信 iOS 版同内核）',
+    engine: 'webkit',
+    ua: IOS_SAFARI_UA,
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 3,
+    cpuThrottle: 1,
+    network: 'none',
+  },
+]
+
+interface CompatResult {
+  profile: string
+  label: string
+  phase: 'login' | 'home'
+  engine: string
+  skipped?: string
+  fcpMs?: number
+  lcpMs?: number
+  domContentLoadedMs?: number
+  loadMs?: number
+  transferredKB?: number
+  jsKB?: number
+  requestCount?: number
+  rendered?: boolean
+  errors: string[]
+}
+
+/** 4G 网络参数（CDP）：下行 1.6 Mbps / 上行 750 Kbps / RTT 150 ms */
+const FOUR_G = {
+  offline: false,
+  latency: 150,
+  downloadThroughput: (1.6 * 1024 * 1024) / 8,
+  uploadThroughput: (750 * 1024) / 8,
+}
+
+async function measureProfile(
+  profile: CompatProfile,
+  phase: 'login' | 'home',
+  target: string,
+  session: ShotSession | null,
+  apiBase: string,
+): Promise<CompatResult> {
+  const result: CompatResult = {
+    profile: profile.name,
+    label: profile.label,
+    phase,
+    engine: profile.engine,
+    errors: [],
+  }
+  const browserType = profile.engine === 'webkit' ? webkit : chromium
+  let browser: Browser | null = null
+  try {
+    browser = await browserType.launch()
+  } catch (err) {
+    result.skipped = `运行时不可用：${err instanceof Error ? err.message.split('\n')[0] : String(err)}`
+    return result
+  }
+
+  try {
+    const context = await browser.newContext({
+      viewport: profile.viewport,
+      deviceScaleFactor: profile.deviceScaleFactor,
+      isMobile: true,
+      hasTouch: true,
+      userAgent: profile.ua,
+    })
+    // 后端地址必须在导航前写入（否则会去打玩家自己的 8787）
+    await context.addInitScript(
+      ({ base, sess }: { base: string; sess: ShotSession | null }) => {
+        if (base) localStorage.setItem('sgw.apiBase', base)
+        if (sess && !localStorage.getItem('sgw.session')) {
+          localStorage.setItem('sgw.session', JSON.stringify(sess))
+        }
+      },
+      { base: apiBase, sess: phase === 'home' ? session : null },
+    )
+    // LCP 观察器要在导航前注册，否则会漏掉首屏最大内容绘制
+    await context.addInitScript(() => {
+      ;(window as unknown as { __lcp?: number }).__lcp = 0
+      try {
+        new PerformanceObserver((list) => {
+          const entries = list.getEntries()
+          const last = entries[entries.length - 1]
+          if (last) (window as unknown as { __lcp?: number }).__lcp = Math.round(last.startTime)
+        }).observe({ type: 'largest-contentful-paint', buffered: true })
+      } catch {
+        /* 引擎不支持 LCP：报告里留空即可 */
+      }
+    })
+    const page = await context.newPage()
+    page.on('pageerror', (e) => result.errors.push(`pageerror: ${e.message}`))
+    page.on('console', (m) => {
+      if (m.type() === 'error') result.errors.push(`console.error: ${m.text()}`)
+    })
+
+    // 限速只在 Chromium 上可用（CDP）
+    if (profile.engine === 'chromium') {
+      const cdp = await context.newCDPSession(page)
+      if (profile.cpuThrottle > 1) {
+        await cdp.send('Emulation.setCPUThrottlingRate', { rate: profile.cpuThrottle })
+      }
+      if (profile.network === '4g') {
+        await cdp.send('Network.enable')
+        await cdp.send('Network.emulateNetworkConditions', FOUR_G)
+      }
+    }
+
+    await page.goto(target, { waitUntil: 'load', timeout: 90_000 })
+    // 等首屏绘制稳定（限速下图片与字体是异步到的）
+    await page.waitForTimeout(1500)
+
+    const metrics = await page.evaluate(() => {
+      const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+      const paints = performance.getEntriesByType('paint')
+      const fcp = paints.find((p) => p.name === 'first-contentful-paint')
+      const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[]
+      const app = document.querySelector('#app')
+      return {
+        fcpMs: fcp ? Math.round(fcp.startTime) : null,
+        lcpMs: (window as unknown as { __lcp?: number }).__lcp ?? null,
+        domContentLoadedMs: nav ? Math.round(nav.domContentLoadedEventEnd) : null,
+        loadMs: nav ? Math.round(nav.loadEventEnd) : null,
+        transferredBytes: resources.reduce((sum, r) => sum + (r.transferSize || 0), 0),
+        jsBytes: resources
+          .filter((r) => /javascript|\.js(\?|$)/.test(r.name))
+          .reduce((sum, r) => sum + (r.transferSize || 0), 0),
+        requestCount: resources.length,
+        rendered: !!app && app.childElementCount > 0,
+        bodyText: (document.body.innerText || '').trim().length,
+      }
+    })
+
+    result.fcpMs = metrics.fcpMs ?? undefined
+    result.lcpMs = metrics.lcpMs ?? undefined
+    result.domContentLoadedMs = metrics.domContentLoadedMs ?? undefined
+    result.loadMs = metrics.loadMs ?? undefined
+    result.transferredKB = Math.round((metrics.transferredBytes / 1024) * 10) / 10
+    result.jsKB = Math.round((metrics.jsBytes / 1024) * 10) / 10
+    result.requestCount = metrics.requestCount
+    result.rendered = metrics.rendered && metrics.bodyText > 0
+    await context.close()
+  } catch (err) {
+    result.errors.push(`运行失败：${err instanceof Error ? err.message : String(err)}`)
+  } finally {
+    await browser.close()
+  }
+  return result
+}
+
+/**
+ * 造一个「已登录且有进度」的隔离账号。
+ *
+ * ⚠ 为什么要**每个测量单独造**：
+ *   refresh token 是**一次性轮换**的（用一次就作废），
+ *   同一个 token 给第二个 context 用必然 401。
+ *   所以每个配置都独立注册一次。
+ *
+ * ⚠ 为什么要先 `save.create` + 十连：
+ *   新注册账号**没有存档行**，`GET /api/save` 会返回 404（NO_SAVE）→
+ *   测到的首屏是「空壳」。补上存档与英灵才是真实首屏。
+ */
+async function prepareCompatSession(api: string): Promise<ShotSession> {
+  const session = await registerSession(api)
+  const base = api.replace(/\/$/, '')
+  const act = async (actionId: string, action: unknown) => {
+    await fetch(`${base}/api/action`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${session.accessToken}`,
+      },
+      body: JSON.stringify({ actionId, action }),
+    })
+  }
+  await act('compat-create', { type: 'save.create' })
+  await act('compat-pull', { type: 'gacha.pull', poolId: 'standard', count: 10 })
+  return session
+}
+
+async function runCompatScenario(opts: Options): Promise<void> {
+  if (!opts.api) {
+    throw new Error(
+      '兼容性测量需要 --api <隔离后端地址>：\n'
+      + '  · 登录后首页要真实拉一次云档，否则测的是「空壳首屏」；\n'
+      + '  · 不注入后端地址的话，前端会去打玩家自己的 8787 端口。',
+    )
+  }
+  const apiBase = opts.api.replace(/\/$/, '')
+  const results: CompatResult[] = []
+  for (const profile of COMPAT_PROFILES) {
+    for (const phase of ['login', 'home'] as const) {
+      const route = phase === 'login' ? '/login' : opts.route
+      const target = `${opts.url.replace(/\/$/, '')}/#${route}`
+      console.log(`[compat] 测量中：${profile.label} · ${phase === 'login' ? '登录页' : '登录后首页'}`)
+      // 每个配置单独造账号（refresh token 一次性轮换，不能复用）
+      const session = phase === 'home' ? await prepareCompatSession(opts.api) : null
+      const r = await measureProfile(profile, phase, target, session, apiBase)
+      results.push(r)
+      if (r.skipped) console.log(`[compat]   跳过：${r.skipped}`)
+      else {
+        console.log(
+          `[compat]   FCP ${r.fcpMs}ms · LCP ${r.lcpMs}ms · load ${r.loadMs}ms · `
+            + `传输 ${r.transferredKB}KB（JS ${r.jsKB}KB / ${r.requestCount} 请求）· `
+            + `渲染 ${r.rendered ? '正常' : '异常'} · 错误 ${r.errors.length}`,
+        )
+      }
+    }
+  }
+
+  const outPath = resolve(process.cwd(), opts.compatOut)
+  mkdirSync(dirname(outPath), { recursive: true })
+  writeFileSync(
+    outPath,
+    JSON.stringify(
+      {
+        measuredAt: new Date().toISOString(),
+        target: opts.url,
+        note:
+          'Chromium 走 CDP 限速（4 倍 CPU / 4G）；WebKit 无 CDP，**未限速**，'
+          + '其数值仅代表引擎兼容性、不代表弱网表现；真机（微信 iOS/Android、低端安卓机）仍需人工补测',
+        profiles: results,
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+  console.log(`[compat] 报告已保存：${outPath}`)
+
+  const failed = results.filter((r) => !r.skipped && (!r.rendered || r.errors.length > 0))
+  if (failed.length > 0) {
+    console.error(`[compat] ${failed.length} 个配置未通过（渲染异常或存在脚本错误）`)
+    for (const f of failed) {
+      console.error(`[compat]   ${f.profile}/${f.phase}：${f.errors.slice(0, 3).join(' | ')}`)
+    }
+    process.exitCode = 1
+  }
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   assertSafeOrigin(opts.url)
+  // 兼容性测量是独立模式：自己开 context、自己量指标，不走截图流程
+  if (opts.compat) {
+    await runCompatScenario(opts)
+    return
+  }
   if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic) && !opts.api) {
     throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物场景需要 --api <隔离后端地址>（用于注册临时账号）')
   }
@@ -462,6 +796,16 @@ async function main(): Promise<void> {
       if (opts.pull) {
         await prepareIsolatedSave(page, true)
       }
+    }
+
+    // 长页面：内容在**内部滚动容器**（.body）里，整页滚动拍不到下半部分
+    if (opts.scrollBottom) {
+      await page.evaluate(() => {
+        const body = document.querySelector('.body') as HTMLElement | null
+        if (body) body.scrollTop = body.scrollHeight
+        window.scrollTo(0, document.body.scrollHeight)
+      })
+      await page.waitForTimeout(400)
     }
 
     if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic) {

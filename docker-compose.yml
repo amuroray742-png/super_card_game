@@ -1,0 +1,65 @@
+# 厂商中立的试玩部署编排（roadmap P1-3）。
+#
+# 形态：**单实例 + SQLite 持久化卷 + 反向代理**。
+#   - api —— 游戏服务端（Fastify + node:sqlite），数据落在命名卷 `sgw-data`；
+#   - web —— nginx，托管前端静态资源并把 /api 反代到 api 容器。
+#
+# 为什么是单实例：
+#   存档写入口在服务端、按账号串行（铁律 #11），SQLite 又不支持多进程并发写；
+#   试玩阶段单实例足够，且**备份 = 复制一个文件**，恢复演练成本极低。
+#   将来要横向扩容，得先把 SQLite 换成真正的数据库（见 artifacts/deploy.md）。
+#
+# 用法：
+#   1) cp .env.example .env，至少改掉 SGW_JWT_SECRET
+#   2) docker compose up -d --build
+#   3) 打开 http://<host>/
+#
+# 运维命令：
+#   docker compose logs -f api
+#   docker compose exec api node tools/db-backup.mjs           # 备份（库与备份都在 sgw-data 卷里）
+#   docker compose exec api node tools/db-restore.mjs --list   # 看有哪些备份
+#   docker compose stop api                                   # 恢复前必须停服（否则 WAL 会写回旧库）
+#   docker compose run --rm --no-deps api node tools/db-restore.mjs --from /data/backups/app-20261118-120000.db
+#   docker compose start api
+#   docker compose down && docker compose up -d                # 重启（回滚也是同一套）
+
+name: super-holy-grail-war
+
+services:
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      SGW_HOST: 0.0.0.0
+      SGW_PORT: "8787"
+      SGW_DB_PATH: /data/app.db
+      # 未设置密钥时**直接拒绝启动**（compose 的 `:?` 语法），
+      # 而不是悄悄用开发密钥上线（会话会在重启后全部失效）。
+      SGW_JWT_SECRET: ${SGW_JWT_SECRET:?请先在 .env 里设置 SGW_JWT_SECRET}
+      SGW_ACCESS_TOKEN_TTL: ${SGW_ACCESS_TOKEN_TTL:-900}
+      SGW_REFRESH_TOKEN_TTL: ${SGW_REFRESH_TOKEN_TTL:-2592000}
+      SGW_CORS_ORIGINS: ${SGW_CORS_ORIGINS:-}
+    volumes:
+      - sgw-data:/data
+    expose:
+      - "8787"
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        # 同源相对地址 → 换域名不必重新构建
+        VITE_API_BASE: /api
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${SGW_HTTP_PORT:-80}:80"
+
+volumes:
+  sgw-data:
