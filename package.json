@@ -17,6 +17,7 @@
     "balance:battle": "tsx tools/balance/battle-sim.ts",
     "balance:report": "tsx tools/balance/report.ts",
     "balance:rates": "tsx tools/balance/tenpull-rates.ts",
+    "balance:newplayer": "tsx tools/balance/newplayer.ts",
     "validate:config": "tsx tools/validate-config.ts",
     "scan:forbidden": "tsx tools/scan-forbidden-words.ts",
     "art:placeholder": "tsx tools/placeholder/generate.ts",

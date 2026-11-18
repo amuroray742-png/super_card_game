@@ -1,0 +1,1917 @@
+{
+  "generatedAt": "2026-11-18T10:23:20.127Z",
+  "seedBase": 20260105,
+  "seedCount": 3,
+  "dayHours": 8,
+  "chunkHours": 1,
+  "accounts": [
+    {
+      "seed": 20260105,
+      "pull": {
+        "rarity": {
+          "SSR": 1,
+          "SR": 0,
+          "R": 3,
+          "N": 6
+        },
+        "crystalsUsed": 3000,
+        "ticketsUsed": 0,
+        "guaranteed": true,
+        "crystalsLeft": 0,
+        "ticketsLeft": 10
+      },
+      "profiles": [
+        {
+          "label": "P1 全 SSR（上限）",
+          "composition": "SSR/R/R/R/N/N",
+          "roster": [
+            {
+              "id": "xiangyu",
+              "name": "项羽",
+              "rarity": "SSR"
+            },
+            {
+              "id": "fanli",
+              "name": "范蠡",
+              "rarity": "R"
+            },
+            {
+              "id": "shenkuo",
+              "name": "沈括",
+              "rarity": "R"
+            },
+            {
+              "id": "yuchigong",
+              "name": "尉迟恭",
+              "rarity": "R"
+            },
+            {
+              "id": "wentianxiang",
+              "name": "文天祥",
+              "rarity": "N"
+            },
+            {
+              "id": "xuxiake",
+              "name": "徐霞客",
+              "rarity": "N"
+            }
+          ],
+          "power": 18358443.960350882,
+          "levels": {
+            "xiangyu": 240,
+            "fanli": 240,
+            "shenkuo": 240,
+            "yuchigong": 240,
+            "wentianxiang": 240,
+            "xuxiake": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 19,
+              "level": 62,
+              "power": 67806.54214512443,
+              "silver": 240,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 106,
+              "power": 219028.59879550006,
+              "silver": 58,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1512890.4144805826,
+              "silver": 1545559,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 11185495.148358446,
+              "silver": 33468708,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 276,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 458960093,
+              "exp": 1225611836,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 859484590,
+              "exp": 2451773547,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 1260946185,
+              "exp": 3691382617,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 1657610517,
+              "exp": 4912721046,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1657610517,
+            "exp": 4912721046,
+            "skillStones": 45845,
+            "relicStones": 104938,
+            "emblems": 31450,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 396664332,
+            "exp": 1221338429,
+            "skillStones": 9323,
+            "relicStones": 20267,
+            "emblems": 5843,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004310525137828116,
+          "expPerBattle": 2035564
+        },
+        {
+          "label": "P2 SSR+SR 混编",
+          "composition": "SSR/R/R/R/N/N",
+          "roster": [
+            {
+              "id": "xiangyu",
+              "name": "项羽",
+              "rarity": "SSR"
+            },
+            {
+              "id": "fanli",
+              "name": "范蠡",
+              "rarity": "R"
+            },
+            {
+              "id": "shenkuo",
+              "name": "沈括",
+              "rarity": "R"
+            },
+            {
+              "id": "yuchigong",
+              "name": "尉迟恭",
+              "rarity": "R"
+            },
+            {
+              "id": "wentianxiang",
+              "name": "文天祥",
+              "rarity": "N"
+            },
+            {
+              "id": "xuxiake",
+              "name": "徐霞客",
+              "rarity": "N"
+            }
+          ],
+          "power": 18358443.960350882,
+          "levels": {
+            "xiangyu": 240,
+            "fanli": 240,
+            "shenkuo": 240,
+            "yuchigong": 240,
+            "wentianxiang": 240,
+            "xuxiake": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 19,
+              "level": 62,
+              "power": 67806.54214512443,
+              "silver": 240,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 106,
+              "power": 219028.59879550006,
+              "silver": 58,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1512890.4144805826,
+              "silver": 1545559,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 11185495.148358446,
+              "silver": 33468708,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 276,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 458960093,
+              "exp": 1225611836,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 859484590,
+              "exp": 2451773547,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 1260946185,
+              "exp": 3691382617,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 1657610517,
+              "exp": 4912721046,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1657610517,
+            "exp": 4912721046,
+            "skillStones": 45845,
+            "relicStones": 104938,
+            "emblems": 31450,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 396664332,
+            "exp": 1221338429,
+            "skillStones": 9323,
+            "relicStones": 20267,
+            "emblems": 5843,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004310525137828116,
+          "expPerBattle": 2035564
+        },
+        {
+          "label": "P3 SSR 主导",
+          "composition": "SSR/R/R/R/N/N",
+          "roster": [
+            {
+              "id": "xiangyu",
+              "name": "项羽",
+              "rarity": "SSR"
+            },
+            {
+              "id": "fanli",
+              "name": "范蠡",
+              "rarity": "R"
+            },
+            {
+              "id": "shenkuo",
+              "name": "沈括",
+              "rarity": "R"
+            },
+            {
+              "id": "yuchigong",
+              "name": "尉迟恭",
+              "rarity": "R"
+            },
+            {
+              "id": "wentianxiang",
+              "name": "文天祥",
+              "rarity": "N"
+            },
+            {
+              "id": "xuxiake",
+              "name": "徐霞客",
+              "rarity": "N"
+            }
+          ],
+          "power": 18358443.960350882,
+          "levels": {
+            "xiangyu": 240,
+            "fanli": 240,
+            "shenkuo": 240,
+            "yuchigong": 240,
+            "wentianxiang": 240,
+            "xuxiake": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 19,
+              "level": 62,
+              "power": 67806.54214512443,
+              "silver": 240,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 106,
+              "power": 219028.59879550006,
+              "silver": 58,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1512890.4144805826,
+              "silver": 1545559,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 11185495.148358446,
+              "silver": 33468708,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 276,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 458960093,
+              "exp": 1225611836,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 859484590,
+              "exp": 2451773547,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 1260946185,
+              "exp": 3691382617,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18358443.960350882,
+              "silver": 1657610517,
+              "exp": 4912721046,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1657610517,
+            "exp": 4912721046,
+            "skillStones": 45845,
+            "relicStones": 104938,
+            "emblems": 31450,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 396664332,
+            "exp": 1221338429,
+            "skillStones": 9323,
+            "relicStones": 20267,
+            "emblems": 5843,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004310525137828116,
+          "expPerBattle": 2035564
+        },
+        {
+          "label": "P4 1SSR+N（下限）",
+          "composition": "SSR/R/R/N/N/N",
+          "roster": [
+            {
+              "id": "xiangyu",
+              "name": "项羽",
+              "rarity": "SSR"
+            },
+            {
+              "id": "fanli",
+              "name": "范蠡",
+              "rarity": "R"
+            },
+            {
+              "id": "shenkuo",
+              "name": "沈括",
+              "rarity": "R"
+            },
+            {
+              "id": "wentianxiang",
+              "name": "文天祥",
+              "rarity": "N"
+            },
+            {
+              "id": "xuxiake",
+              "name": "徐霞客",
+              "rarity": "N"
+            },
+            {
+              "id": "fuhao",
+              "name": "妇好",
+              "rarity": "N"
+            }
+          ],
+          "power": 17826290.507238053,
+          "levels": {
+            "xiangyu": 240,
+            "fanli": 240,
+            "shenkuo": 240,
+            "wentianxiang": 240,
+            "xuxiake": 240,
+            "fuhao": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 18,
+              "level": 62,
+              "power": 66056.41496821507,
+              "silver": 240,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 106,
+              "power": 212431.36699637573,
+              "silver": 382,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1482155.2138365912,
+              "silver": 1522681,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 10864894.36141553,
+              "silver": 33387253,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 276,
+              "level": 240,
+              "power": 17826290.507238053,
+              "silver": 457943584,
+              "exp": 1222819957,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17826290.507238053,
+              "silver": 854891361,
+              "exp": 2443887888,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17826290.507238053,
+              "silver": 1254220220,
+              "exp": 3665557142,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17826290.507238053,
+              "silver": 1654480497,
+              "exp": 4902424460,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1654480497,
+            "exp": 4902424460,
+            "skillStones": 45732,
+            "relicStones": 104855,
+            "emblems": 31209,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 400260277,
+            "exp": 1236867318,
+            "skillStones": 9221,
+            "relicStones": 20088,
+            "emblems": 5563,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004256406425640555,
+          "expPerBattle": 2061446
+        }
+      ],
+      "gachaIncome": {
+        "fromIdle": false,
+        "signInPerCycle": 4700,
+        "signInPerDay": 671.4285714285714,
+        "daysForNextTenPull": 5
+      }
+    },
+    {
+      "seed": 20260106,
+      "pull": {
+        "rarity": {
+          "SSR": 1,
+          "SR": 1,
+          "R": 2,
+          "N": 6
+        },
+        "crystalsUsed": 3000,
+        "ticketsUsed": 0,
+        "guaranteed": true,
+        "crystalsLeft": 0,
+        "ticketsLeft": 10
+      },
+      "profiles": [
+        {
+          "label": "P1 全 SSR（上限）",
+          "composition": "SSR/SR/R/R/N/N",
+          "roster": [
+            {
+              "id": "xiangyu",
+              "name": "项羽",
+              "rarity": "SSR"
+            },
+            {
+              "id": "bianque",
+              "name": "扁鹊",
+              "rarity": "SR"
+            },
+            {
+              "id": "mayuan",
+              "name": "马援",
+              "rarity": "R"
+            },
+            {
+              "id": "guoziyi",
+              "name": "郭子仪",
+              "rarity": "R"
+            },
+            {
+              "id": "wentianxiang",
+              "name": "文天祥",
+              "rarity": "N"
+            },
+            {
+              "id": "banzhao",
+              "name": "班昭",
+              "rarity": "N"
+            }
+          ],
+          "power": 18526011.00751377,
+          "levels": {
+            "xiangyu": 240,
+            "bianque": 240,
+            "mayuan": 240,
+            "guoziyi": 240,
+            "wentianxiang": 240,
+            "banzhao": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 20,
+              "level": 62,
+              "power": 69091.2154125846,
+              "silver": 354,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 106,
+              "power": 221723.93848309302,
+              "silver": 109,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1540370.0011025807,
+              "silver": 1497246,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 11346302.071205106,
+              "silver": 33017991,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 277,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 451378930,
+              "exp": 1233446313,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 853381937,
+              "exp": 2468037436,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 1255346199,
+              "exp": 3710224456,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 1661418789,
+              "exp": 4939219255,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1661418789,
+            "exp": 4939219255,
+            "skillStones": 45738,
+            "relicStones": 105115,
+            "emblems": 30545,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 406072590,
+            "exp": 1228994799,
+            "skillStones": 9090,
+            "relicStones": 20064,
+            "emblems": 5736,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004283671504780713,
+          "expPerBattle": 2048325
+        },
+        {
+          "label": "P2 SSR+SR 混编",
+          "composition": "SSR/SR/R/R/N/N",
+          "roster": [
+            {
+              "id": "xiangyu",
+              "name": "项羽",
+              "rarity": "SSR"
+            },
+            {
+              "id": "bianque",
+              "name": "扁鹊",
+              "rarity": "SR"
+            },
+            {
+              "id": "mayuan",
+              "name": "马援",
+              "rarity": "R"
+            },
+            {
+              "id": "guoziyi",
+              "name": "郭子仪",
+              "rarity": "R"
+            },
+            {
+              "id": "wentianxiang",
+              "name": "文天祥",
+              "rarity": "N"
+            },
+            {
+              "id": "banzhao",
+              "name": "班昭",
+              "rarity": "N"
+            }
+          ],
+          "power": 18526011.00751377,
+          "levels": {
+            "xiangyu": 240,
+            "bianque": 240,
+            "mayuan": 240,
+            "guoziyi": 240,
+            "wentianxiang": 240,
+            "banzhao": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 20,
+              "level": 62,
+              "power": 69091.2154125846,
+              "silver": 354,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 106,
+              "power": 221723.93848309302,
+              "silver": 109,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1540370.0011025807,
+              "silver": 1497246,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 11346302.071205106,
+              "silver": 33017991,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 277,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 451378930,
+              "exp": 1233446313,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 853381937,
+              "exp": 2468037436,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 1255346199,
+              "exp": 3710224456,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 1661418789,
+              "exp": 4939219255,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1661418789,
+            "exp": 4939219255,
+            "skillStones": 45738,
+            "relicStones": 105115,
+            "emblems": 30545,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 406072590,
+            "exp": 1228994799,
+            "skillStones": 9090,
+            "relicStones": 20064,
+            "emblems": 5736,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004283671504780713,
+          "expPerBattle": 2048325
+        },
+        {
+          "label": "P3 SSR 主导",
+          "composition": "SSR/SR/R/R/N/N",
+          "roster": [
+            {
+              "id": "xiangyu",
+              "name": "项羽",
+              "rarity": "SSR"
+            },
+            {
+              "id": "bianque",
+              "name": "扁鹊",
+              "rarity": "SR"
+            },
+            {
+              "id": "mayuan",
+              "name": "马援",
+              "rarity": "R"
+            },
+            {
+              "id": "guoziyi",
+              "name": "郭子仪",
+              "rarity": "R"
+            },
+            {
+              "id": "wentianxiang",
+              "name": "文天祥",
+              "rarity": "N"
+            },
+            {
+              "id": "banzhao",
+              "name": "班昭",
+              "rarity": "N"
+            }
+          ],
+          "power": 18526011.00751377,
+          "levels": {
+            "xiangyu": 240,
+            "bianque": 240,
+            "mayuan": 240,
+            "guoziyi": 240,
+            "wentianxiang": 240,
+            "banzhao": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 20,
+              "level": 62,
+              "power": 69091.2154125846,
+              "silver": 354,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 106,
+              "power": 221723.93848309302,
+              "silver": 109,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1540370.0011025807,
+              "silver": 1497246,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 11346302.071205106,
+              "silver": 33017991,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 277,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 451378930,
+              "exp": 1233446313,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 853381937,
+              "exp": 2468037436,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 1255346199,
+              "exp": 3710224456,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 18526011.00751377,
+              "silver": 1661418789,
+              "exp": 4939219255,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1661418789,
+            "exp": 4939219255,
+            "skillStones": 45738,
+            "relicStones": 105115,
+            "emblems": 30545,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 406072590,
+            "exp": 1228994799,
+            "skillStones": 9090,
+            "relicStones": 20064,
+            "emblems": 5736,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004283671504780713,
+          "expPerBattle": 2048325
+        },
+        {
+          "label": "P4 1SSR+N（下限）",
+          "composition": "SSR/R/R/N/N/N",
+          "roster": [
+            {
+              "id": "xiangyu",
+              "name": "项羽",
+              "rarity": "SSR"
+            },
+            {
+              "id": "mayuan",
+              "name": "马援",
+              "rarity": "R"
+            },
+            {
+              "id": "guoziyi",
+              "name": "郭子仪",
+              "rarity": "R"
+            },
+            {
+              "id": "wentianxiang",
+              "name": "文天祥",
+              "rarity": "N"
+            },
+            {
+              "id": "banzhao",
+              "name": "班昭",
+              "rarity": "N"
+            },
+            {
+              "id": "wangzhaojun",
+              "name": "王昭君",
+              "rarity": "N"
+            }
+          ],
+          "power": 17129527.872824915,
+          "levels": {
+            "xiangyu": 240,
+            "mayuan": 240,
+            "guoziyi": 240,
+            "wentianxiang": 240,
+            "banzhao": 240,
+            "wangzhaojun": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 19,
+              "level": 62,
+              "power": 64335.432653220014,
+              "silver": 354,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 106,
+              "power": 206175.37744749474,
+              "silver": 152,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1427111.1578390156,
+              "silver": 1490996,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 10438645.393874105,
+              "silver": 33202546,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 275,
+              "level": 240,
+              "power": 17129527.872824915,
+              "silver": 451028742,
+              "exp": 1231390520,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17129527.872824915,
+              "silver": 857039916,
+              "exp": 2459126502,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17129527.872824915,
+              "silver": 1259387989,
+              "exp": 3702314037,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17129527.872824915,
+              "silver": 1665433558,
+              "exp": 4930441854,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1665433558,
+            "exp": 4930441854,
+            "skillStones": 45850,
+            "relicStones": 104972,
+            "emblems": 30666,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 406045569,
+            "exp": 1228127817,
+            "skillStones": 9106,
+            "relicStones": 20068,
+            "emblems": 5720,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.0042866955109445255,
+          "expPerBattle": 2046880
+        }
+      ],
+      "gachaIncome": {
+        "fromIdle": false,
+        "signInPerCycle": 4700,
+        "signInPerDay": 671.4285714285714,
+        "daysForNextTenPull": 5
+      }
+    },
+    {
+      "seed": 20260107,
+      "pull": {
+        "rarity": {
+          "SSR": 1,
+          "SR": 0,
+          "R": 2,
+          "N": 7
+        },
+        "crystalsUsed": 3000,
+        "ticketsUsed": 0,
+        "guaranteed": false,
+        "crystalsLeft": 0,
+        "ticketsLeft": 10
+      },
+      "profiles": [
+        {
+          "label": "P1 全 SSR（上限）",
+          "composition": "SSR/R/R/N/N/N",
+          "roster": [
+            {
+              "id": "hannibal",
+              "name": "汉尼拔",
+              "rarity": "SSR"
+            },
+            {
+              "id": "zhangheng",
+              "name": "张衡",
+              "rarity": "R"
+            },
+            {
+              "id": "direnjie",
+              "name": "狄仁杰",
+              "rarity": "R"
+            },
+            {
+              "id": "wangzhaojun",
+              "name": "王昭君",
+              "rarity": "N"
+            },
+            {
+              "id": "xianfuren",
+              "name": "冼夫人",
+              "rarity": "N"
+            },
+            {
+              "id": "zhenghe",
+              "name": "郑和",
+              "rarity": "N"
+            }
+          ],
+          "power": 17636357.01987704,
+          "levels": {
+            "hannibal": 240,
+            "zhangheng": 240,
+            "direnjie": 240,
+            "wangzhaojun": 240,
+            "xianfuren": 240,
+            "zhenghe": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 19,
+              "level": 62,
+              "power": 65011.99442765716,
+              "silver": 405,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 105,
+              "power": 205807.7609364281,
+              "silver": 5,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1440445.746658765,
+              "silver": 1478541,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 10930200.810384355,
+              "silver": 32633774,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 276,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 454218051,
+              "exp": 1216018825,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 859853554,
+              "exp": 2447100300,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 1261882121,
+              "exp": 3675130421,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 1648436235,
+              "exp": 4901052375,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1648436235,
+            "exp": 4901052375,
+            "skillStones": 45893,
+            "relicStones": 104487,
+            "emblems": 30992,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 386554114,
+            "exp": 1225921954,
+            "skillStones": 9194,
+            "relicStones": 20060,
+            "emblems": 5633,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004294408777673298,
+          "expPerBattle": 2043203
+        },
+        {
+          "label": "P2 SSR+SR 混编",
+          "composition": "SSR/R/R/N/N/N",
+          "roster": [
+            {
+              "id": "hannibal",
+              "name": "汉尼拔",
+              "rarity": "SSR"
+            },
+            {
+              "id": "zhangheng",
+              "name": "张衡",
+              "rarity": "R"
+            },
+            {
+              "id": "direnjie",
+              "name": "狄仁杰",
+              "rarity": "R"
+            },
+            {
+              "id": "wangzhaojun",
+              "name": "王昭君",
+              "rarity": "N"
+            },
+            {
+              "id": "xianfuren",
+              "name": "冼夫人",
+              "rarity": "N"
+            },
+            {
+              "id": "zhenghe",
+              "name": "郑和",
+              "rarity": "N"
+            }
+          ],
+          "power": 17636357.01987704,
+          "levels": {
+            "hannibal": 240,
+            "zhangheng": 240,
+            "direnjie": 240,
+            "wangzhaojun": 240,
+            "xianfuren": 240,
+            "zhenghe": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 19,
+              "level": 62,
+              "power": 65011.99442765716,
+              "silver": 405,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 105,
+              "power": 205807.7609364281,
+              "silver": 5,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1440445.746658765,
+              "silver": 1478541,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 10930200.810384355,
+              "silver": 32633774,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 276,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 454218051,
+              "exp": 1216018825,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 859853554,
+              "exp": 2447100300,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 1261882121,
+              "exp": 3675130421,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 1648436235,
+              "exp": 4901052375,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1648436235,
+            "exp": 4901052375,
+            "skillStones": 45893,
+            "relicStones": 104487,
+            "emblems": 30992,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 386554114,
+            "exp": 1225921954,
+            "skillStones": 9194,
+            "relicStones": 20060,
+            "emblems": 5633,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004294408777673298,
+          "expPerBattle": 2043203
+        },
+        {
+          "label": "P3 SSR 主导",
+          "composition": "SSR/R/R/N/N/N",
+          "roster": [
+            {
+              "id": "hannibal",
+              "name": "汉尼拔",
+              "rarity": "SSR"
+            },
+            {
+              "id": "zhangheng",
+              "name": "张衡",
+              "rarity": "R"
+            },
+            {
+              "id": "direnjie",
+              "name": "狄仁杰",
+              "rarity": "R"
+            },
+            {
+              "id": "wangzhaojun",
+              "name": "王昭君",
+              "rarity": "N"
+            },
+            {
+              "id": "xianfuren",
+              "name": "冼夫人",
+              "rarity": "N"
+            },
+            {
+              "id": "zhenghe",
+              "name": "郑和",
+              "rarity": "N"
+            }
+          ],
+          "power": 17636357.01987704,
+          "levels": {
+            "hannibal": 240,
+            "zhangheng": 240,
+            "direnjie": 240,
+            "wangzhaojun": 240,
+            "xianfuren": 240,
+            "zhenghe": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 19,
+              "level": 62,
+              "power": 65011.99442765716,
+              "silver": 405,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 105,
+              "power": 205807.7609364281,
+              "silver": 5,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1440445.746658765,
+              "silver": 1478541,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 10930200.810384355,
+              "silver": 32633774,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 276,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 454218051,
+              "exp": 1216018825,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 859853554,
+              "exp": 2447100300,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 1261882121,
+              "exp": 3675130421,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 1648436235,
+              "exp": 4901052375,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1648436235,
+            "exp": 4901052375,
+            "skillStones": 45893,
+            "relicStones": 104487,
+            "emblems": 30992,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 386554114,
+            "exp": 1225921954,
+            "skillStones": 9194,
+            "relicStones": 20060,
+            "emblems": 5633,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004294408777673298,
+          "expPerBattle": 2043203
+        },
+        {
+          "label": "P4 1SSR+N（下限）",
+          "composition": "SSR/R/R/N/N/N",
+          "roster": [
+            {
+              "id": "hannibal",
+              "name": "汉尼拔",
+              "rarity": "SSR"
+            },
+            {
+              "id": "zhangheng",
+              "name": "张衡",
+              "rarity": "R"
+            },
+            {
+              "id": "direnjie",
+              "name": "狄仁杰",
+              "rarity": "R"
+            },
+            {
+              "id": "wangzhaojun",
+              "name": "王昭君",
+              "rarity": "N"
+            },
+            {
+              "id": "xianfuren",
+              "name": "冼夫人",
+              "rarity": "N"
+            },
+            {
+              "id": "zhenghe",
+              "name": "郑和",
+              "rarity": "N"
+            }
+          ],
+          "power": 17636357.01987704,
+          "levels": {
+            "hannibal": 240,
+            "zhangheng": 240,
+            "direnjie": 240,
+            "wangzhaojun": 240,
+            "xianfuren": 240,
+            "zhenghe": 240
+          },
+          "clearedStage": 278,
+          "blockedAtStage": 279,
+          "endOfDayFailStage": null,
+          "bossStage": 31,
+          "bossWinRate": 1,
+          "bossAvgRounds": 1,
+          "firstRealmBreakHour": 1,
+          "curve": [
+            {
+              "hour": 1,
+              "clearedStage": 19,
+              "level": 62,
+              "power": 65011.99442765716,
+              "silver": 405,
+              "exp": 0,
+              "relics": 600
+            },
+            {
+              "hour": 2,
+              "clearedStage": 92,
+              "level": 105,
+              "power": 205807.7609364281,
+              "silver": 5,
+              "exp": 0,
+              "relics": 1152
+            },
+            {
+              "hour": 3,
+              "clearedStage": 154,
+              "level": 162,
+              "power": 1440445.746658765,
+              "silver": 1478541,
+              "exp": 0,
+              "relics": 1703
+            },
+            {
+              "hour": 4,
+              "clearedStage": 216,
+              "level": 223,
+              "power": 10930200.810384355,
+              "silver": 32633774,
+              "exp": 0,
+              "relics": 2254
+            },
+            {
+              "hour": 5,
+              "clearedStage": 276,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 454218051,
+              "exp": 1216018825,
+              "relics": 2854
+            },
+            {
+              "hour": 6,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 859853554,
+              "exp": 2447100300,
+              "relics": 3000
+            },
+            {
+              "hour": 7,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 1261882121,
+              "exp": 3675130421,
+              "relics": 3000
+            },
+            {
+              "hour": 8,
+              "clearedStage": 278,
+              "level": 240,
+              "power": 17636357.01987704,
+              "silver": 1648436235,
+              "exp": 4901052375,
+              "relics": 3000
+            }
+          ],
+          "resources": {
+            "silver": 1648436235,
+            "exp": 4901052375,
+            "skillStones": 45893,
+            "relicStones": 104487,
+            "emblems": 30992,
+            "crystals": 0,
+            "tickets": 10
+          },
+          "relics": 3000,
+          "gaps": {
+            "expToNextLevel": 877435,
+            "skillStonesShort": 0,
+            "relicStonesShort": 0,
+            "emblemShort": 0,
+            "powerShort": 0
+          },
+          "perHour": {
+            "silver": 386554114,
+            "exp": 1225921954,
+            "skillStones": 9194,
+            "relicStones": 20060,
+            "emblems": 5633,
+            "relics": 0
+          },
+          "farmToNextLevelHours": 0.004294408777673298,
+          "expPerBattle": 2043203
+        }
+      ],
+      "gachaIncome": {
+        "fromIdle": false,
+        "signInPerCycle": 4700,
+        "signInPerDay": 671.4285714285714,
+        "daysForNextTenPull": 5
+      }
+    }
+  ]
+}

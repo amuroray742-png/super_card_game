@@ -390,12 +390,18 @@
 npm run balance          # 难度曲线 vs 养成曲线：检查 310 关单调递增、满养成可通关
 npm run balance:battle   # 实战战斗模拟：逐章 BOSS 通关率（召唤开/关对照）+ 实战卡关点
 npm run balance:report   # 投放回收表：五类资源回收率必须全部 ≥ 1
+npm run balance:newplayer # 新号基线：真实新手资源下的首抽 / 首日成长 / 卡点 / 十连节奏
 npm run validate:config  # 配置自洽性
 npm test                 # 单测（含十项 PvP 隔离断言）
 ```
 
 任何调参都要同时满足三个不变量：**关卡门槛单调递增**、**满养成可通关末关且有 1.5× 以上余量**、
 **竞技归一化后战力差 < 15%**。
+
+> ⚠ 调参**之前**先跑 `npm run balance:newplayer`：前三个脚本看的都是**满养成**队伍，
+>   「新号第一天能走到哪」只有它能回答。2026-11 的基线显示新号 5 小时就顶到等级上限、
+>   站在第 10 章（详见 [plan.md §12.7](artifacts/plan.md#127-新号数值基线roadmap-p1-2)），
+>   说明「满养成可通关」这条不变量**并不蕴含**节奏合理。
 
 > ⚠ `npm run balance` 比的是**战力数字**（`computePower` vs `powerRequired`），**不跑战斗**。
 > 「满养成可通关末关」这条不变量必须用 `npm run balance:battle`（真实跑战斗）复核。
@@ -475,6 +481,7 @@ npm run balance          # 数值模拟：难度曲线 vs 养成曲线
 npm run balance:battle   # 实战战斗模拟：逐章 BOSS 通关率 + 实战卡关点
 npm run balance:report   # 投放回收表
 npm run balance:rates    # 十连综合概率（精确 DP）取数
+npm run balance:newplayer # 新号数值基线：首抽 → 第一天养成 → 破境界 → 首个 BOSS → 下次十连
 npm run validate:config  # 配置完整性校验（id 唯一、引用存在、数值区间）
 npm run scan:forbidden   # 禁用词扫描（含 server/）
 npm run art:placeholder  # 生成占位头像
