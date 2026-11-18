@@ -22,7 +22,7 @@
  */
 import type { GameAction, GameActionType, ActionResultMap } from './actions.ts'
 import { SAVE_IMPORT } from '../config/save-import.ts'
-import { RELIC } from '../config/economy.ts'
+import { LADDER, RELIC } from '../config/economy.ts'
 import type { GameErrorCode } from '../config/game-errors.ts'
 import type { Rarity } from '../model/types.ts'
 import type { OfflineSettlementResult } from './idle.ts'
@@ -107,6 +107,32 @@ function uidList(raw: unknown): string[] | null {
     const uid = str(item)
     if (!uid || uid.length > 64) return null
     out.push(uid)
+  }
+  return out
+}
+
+/**
+ * 三队天梯的阵容负载（协议层量纲校验）。
+ *
+ * 形状固定：3 队 × 6 槽，每槽是「英灵 id 或 null」。
+ * 「英灵是否存在 / 是否已拥有」由 core 的动作层判定——协议层只管形状与长度。
+ */
+function ladderSquads(raw: unknown): (string | null)[][] | null {
+  if (!Array.isArray(raw) || raw.length !== LADDER.SQUAD_COUNT) return null
+  const out: (string | null)[][] = []
+  for (const row of raw) {
+    if (!Array.isArray(row) || row.length !== LADDER.SQUAD_SIZE) return null
+    const slots: (string | null)[] = []
+    for (const slot of row) {
+      if (slot === null) {
+        slots.push(null)
+        continue
+      }
+      const id = str(slot)
+      if (!id || id.length > 64) return null
+      slots.push(id)
+    }
+    out.push(slots)
   }
   return out
 }
@@ -276,6 +302,15 @@ export function parseGameAction(raw: unknown): GameAction | null {
       return { type: 'rebirth.do' }
     case 'arena.settle':
       return { type: 'arena.settle' }
+    case 'arena.ladderSaveSquads': {
+      const squads = ladderSquads(raw.squads)
+      if (!squads) return null
+      return { type: 'arena.ladderSaveSquads', squads }
+    }
+    case 'arena.ladderChallenge':
+      return { type: 'arena.ladderChallenge' }
+    case 'arena.ladderClaimReturn':
+      return { type: 'arena.ladderClaimReturn' }
     case 'daily.signIn':
       return { type: 'daily.signIn' }
     case 'daily.claimTask': {

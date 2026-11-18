@@ -15,7 +15,7 @@ const router = useRouter()
 
 const preview = computed(() => store.rebirthPreview)
 
-/** 我的段位（与竞技场页同一口径） */
+/** 我的段位（天梯段位分口径，与竞技场页同一来源） */
 const myTier = computed(() => tierForPoints(store.save.arena.tierPoints ?? 0))
 
 /** 重启二次确认 */
@@ -53,6 +53,14 @@ async function redeem() {
       </div>
       <button class="btn btn-sm btn-block" data-testid="arena-entry" @click="router.push('/arena')">
         竞技场 · 镜像试炼<span class="tiny muted" style="margin-left: 6px">{{ myTier }}</span>
+      </button>
+      <button
+        class="btn btn-sm btn-block"
+        style="margin-top: 6px"
+        data-testid="ladder-entry"
+        @click="router.push('/ladder')"
+      >
+        演武场 · 三队天梯<span class="tiny muted" style="margin-left: 6px">{{ myTier }}</span>
       </button>
       <button class="btn btn-sm btn-block" style="margin-top: 6px" data-testid="codex-entry" @click="router.push('/codex')">
         图鉴 · 英灵与遗物

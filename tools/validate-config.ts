@@ -39,6 +39,8 @@ import {
 } from '../src/core/config/economy.ts'
 import { rarityProbabilities } from '../src/core/systems/gachaRates.ts'
 import { DAILY_TASKS, TASKS, WEEKLY_TASKS } from '../src/core/config/tasks.ts'
+import { LADDER, LADDER_RETURN_REWARDS, LADDER_SEASON_REWARDS } from '../src/core/config/economy.ts'
+import { LADDER_TIERS } from '../src/core/config/ladder.ts'
 import type { Rarity } from '../src/core/model/types.ts'
 
 // 加载注册型配置
@@ -476,6 +478,109 @@ for (const key of ['relicStones', 'skillStones'] as const) {
       'D/BAL',
       `任务日投放 ${key} = ${taskDailyBudget[key].toFixed(1)}，`
         + `达每小时挂机产出（${hourlyIncome[key].toFixed(0)}）的 ${(ratio * 100).toFixed(1)}%，超过 2% 上限`,
+    )
+  }
+}
+
+// ─────────────────────────── G. 三队天梯（P2-2） ───────────────────────────
+//
+// roadmap P2-2 的验收要求：覆盖首次参与、结算、下赛季重置，以及
+// **积分和奖励隔离**。这里的静态检查守住后两条的「配置侧」：
+//
+//   1. 奖励隔离：天梯产出与赛季奖励**不含**任何 PVE 资源；
+//   2. 回流口径：回流奖励只含养成材料 + 竞技勋章，**不含**圣杯结晶 / 抽卡券；
+//   3. 投放预算：回流日均投放 ≤ 每小时挂机产出的 2%（与任务同一把尺）；
+//   4. 敌方合规：梯队里的敌人**全部是灵体 / 妖异 / 器械造物**，不是历史人物。
+if (LADDER.SQUAD_COUNT !== 3) err('C/NUM', '三队天梯必须是 3 支队伍')
+if (LADDER.SQUAD_SIZE !== 6) err('C/NUM', '三队天梯每队必须是 6 人')
+if (LADDER.SEASON_WEEKS <= 0) err('C/NUM', '赛季长度必须为正')
+if (LADDER.SEASON_CARRY_PCT < 0 || LADDER.SEASON_CARRY_PCT > 1) {
+  err('C/NUM', '赛季保留比例必须在 0~1 之间')
+}
+if (LADDER.RETURN_COOLDOWN_DAYS < LADDER.RETURN_MIN_OFFLINE_DAYS) {
+  err('C/NUM', '回流冷却天数不得小于回流判定天数')
+}
+
+// 梯队表：层数与段位一致、每队 6 个敌人、敌人必须存在且不是 BOSS
+if (LADDER_TIERS.length !== TIERS.length) {
+  err('B/REF', `梯队层数 ${LADDER_TIERS.length} 与段位数 ${TIERS.length} 不一致`)
+}
+if (LADDER.SCALE_ANCHORS.length !== LADDER_TIERS.length) {
+  err('B/REF', `缩放锚点数 ${LADDER.SCALE_ANCHORS.length} 与梯队层数 ${LADDER_TIERS.length} 不一致`)
+}
+const ladderSquadIds = new Set<string>()
+for (const tier of LADDER_TIERS) {
+  if (tier.squads.length !== LADDER.SQUAD_COUNT) {
+    err('C/NUM', `梯队层 ${tier.index} 有 ${tier.squads.length} 个梯队，应为 ${LADDER.SQUAD_COUNT} 个`)
+  }
+  for (const squad of tier.squads) {
+    if (ladderSquadIds.has(squad.id)) err('B/REF', `梯队 id 重复：${squad.id}`)
+    ladderSquadIds.add(squad.id)
+    if (squad.enemyIds.length !== LADDER.SQUAD_SIZE) {
+      err('C/NUM', `梯队 ${squad.id} 有 ${squad.enemyIds.length} 个敌人，应为 ${LADDER.SQUAD_SIZE} 个`)
+    }
+    for (const enemyId of squad.enemyIds) {
+      const enemy = ENEMY_INDEX.get(enemyId)
+      if (!enemy) {
+        err('B/REF', `梯队 ${squad.id} 引用了不存在的敌人 ${enemyId}`)
+        continue
+      }
+      // 合规：敌人一律为非历史人物（灵体 / 妖异 / 幻想体 / 器械造物）
+      if (enemy.bossMechanic) {
+        err('E/ECONOMY', `梯队 ${squad.id} 用了 BOSS ${enemyId}：天梯梯队只用普通灵体`)
+      }
+    }
+  }
+  const row = LADDER.SCALE_ANCHORS[tier.index]
+  if (!row || row.length !== LADDER.SQUAD_COUNT) {
+    err('C/NUM', `梯队层 ${tier.index} 的缩放锚点数量应为 ${LADDER.SQUAD_COUNT}`)
+    continue
+  }
+  for (const scale of row) {
+    if (!(scale > 0)) err('C/NUM', `梯队层 ${tier.index} 的缩放锚点必须为正`)
+  }
+}
+
+// 赛季奖励：只允许竞技专属资源（minPoints 是分档门槛，不是资源）
+const LADDER_REWARD_KEYS = new Set(['medals', 'arenaMaterials', 'titleTier', 'minPoints'])
+for (const spec of LADDER_SEASON_REWARDS) {
+  for (const key of Object.keys(spec)) {
+    if (!LADDER_REWARD_KEYS.has(key)) {
+      err('E/ECONOMY', `赛季奖励含不允许的资源「${key}」：只允许勋章 / 竞技材料 / 称号`)
+    }
+  }
+}
+
+// 回流奖励：只允许养成材料 + 竞技勋章；**禁止**圣杯结晶 / 抽卡券（minDays 是档位门槛）
+const ALLOWED_RETURN_REWARDS = new Set(['skillStones', 'relicStones', 'medals', 'minDays'])
+for (const spec of LADDER_RETURN_REWARDS) {
+  for (const key of Object.keys(spec)) {
+    if (!ALLOWED_RETURN_REWARDS.has(key)) {
+      err(
+        'E/ECONOMY',
+        `回流奖励含不允许的资源「${key}」：只允许术式结晶 / 遗物强化石 / 竞技勋章`
+          + '（发圣杯结晶会冲击抽卡间隔，发银两 / 经验会冲击养成回收）',
+      )
+    }
+  }
+  if (spec.minDays < LADDER.RETURN_MIN_OFFLINE_DAYS) {
+    err('C/NUM', `回流档位 ${spec.minDays} 天低于判定阈值 ${LADDER.RETURN_MIN_OFFLINE_DAYS} 天`)
+  }
+}
+
+// 回流投放预算：日均 ≤ 每小时挂机产出的 2%（与任务同一把尺）
+const returnTop = LADDER_RETURN_REWARDS[0]
+const returnDailyBudget = {
+  relicStones: returnTop.relicStones / LADDER.RETURN_COOLDOWN_DAYS,
+  skillStones: returnTop.skillStones / LADDER.RETURN_COOLDOWN_DAYS,
+}
+for (const key of ['relicStones', 'skillStones'] as const) {
+  const ratio = returnDailyBudget[key] / hourlyIncome[key]
+  if (ratio > 0.02) {
+    err(
+      'D/BAL',
+      `回流日均投放 ${key} = ${returnDailyBudget[key].toFixed(1)}，`
+        + `达每小时挂机产出（${hourlyIncome[key].toFixed(0)}）的 ${(ratio * 100).toFixed(2)}%，超过 2% 上限`,
     )
   }
 }

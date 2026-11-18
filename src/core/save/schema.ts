@@ -7,9 +7,10 @@ import type { SaveData } from '../model/types.ts'
 import { START_RESOURCES } from '../config/economy.ts'
 import { arenaWeekIndex } from '../time.ts'
 import { makeRelicUid, parseLegacyRelicUid, RELIC_DEFS, RELIC_SETS } from '../systems/relic.ts'
+import { emptyLadderSquads } from '../config/ladder.ts'
 import '../config/relics.ts'
 
-export const SAVE_VERSION = 8
+export const SAVE_VERSION = 9
 
 export type Migration = (save: SaveData) => SaveData
 
@@ -105,6 +106,41 @@ export const MIGRATIONS: Record<number, Migration> = {
     }
     return save
   },
+  // v8 → v9：新增 PVE 长线挑战 · 三队天梯（§9.1 / roadmap P2-2）
+  //
+  // 新增 `arena.ladder`（三队阵容 / 赛季 / 回流）与 `arena.arenaMaterials`、
+  // `arena.weeklyMaterials`（竞技专属材料此前只出现在结算结果里，从未入库）。
+  //
+  // 迁移策略：
+  // - 三队阵容**留空**（旧档没有编过队，不能凭空生成）；
+  // - 赛季初始化为「未初始化」（season = 0），首次动作时按当前周自动开赛季；
+  // - `lastActiveAt` 置 0 = 「从未活跃」→ 不被判成回流（避免老玩家一上线就领回流奖励）。
+  8: (save) => {
+    save.arena = {
+      ...emptyArena(save.savedAt || save.lastTickAt || save.createdAt || 0),
+      ...save.arena,
+      arenaMaterials: save.arena?.arenaMaterials ?? 0,
+      weeklyMaterials: save.arena?.weeklyMaterials ?? 0,
+      ladder: emptyLadder(),
+    }
+    return save
+  },
+}
+
+/** 空的天梯状态 */
+export function emptyLadder(): SaveData['arena']['ladder'] {
+  return {
+    squads: emptyLadderSquads(),
+    lastSettledWeek: null,
+    seasonPoints: 0,
+    season: 0,
+    seasonStartWeek: 0,
+    seasonTitles: [],
+    lastActiveAt: 0,
+    lastReturnAt: 0,
+    returnPending: false,
+    returnDays: 0,
+  }
 }
 
 export function emptyArena(now = 0): SaveData['arena'] {
@@ -112,13 +148,16 @@ export function emptyArena(now = 0): SaveData['arena'] {
     tierPoints: 0,
     pvpPoints: 0,
     medals: 0,
+    arenaMaterials: 0,
     weeklyMedals: 0,
+    weeklyMaterials: 0,
     weeklyTickets: 0,
     rewardWeek: arenaWeekIndex(now),
     arenaLevel: 0,
     runes: [],
     defenseLoadout: null,
     snapshotHash: null,
+    ladder: emptyLadder(),
   }
 }
 
@@ -174,6 +213,42 @@ export function createNewSave(now: number, seed = 0): SaveData {
 }
 
 /**
+ * 天梯状态兜底：逐字段补齐，形状永远是「3 队 × 6 槽」。
+ *
+ * ⚠ 旧档的 `ladder` 整个不存在（v8 及以前）→ 走 `emptyLadder()`。
+ */
+function normalizeLadder(raw: Partial<SaveData['arena']['ladder']> | undefined): SaveData['arena']['ladder'] {
+  const base = emptyLadder()
+  if (!raw) return base
+  const squads = raw.squads
+  const normalized: (string | null)[][] = emptyLadderSquads()
+  if (Array.isArray(squads)) {
+    for (let s = 0; s < normalized.length; s++) {
+      const row = squads[s]
+      if (!Array.isArray(row)) continue
+      for (let i = 0; i < normalized[s].length; i++) {
+        const id = row[i]
+        normalized[s][i] = typeof id === 'string' && id.length > 0 ? id : null
+      }
+    }
+  }
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : fallback
+  return {
+    squads: normalized,
+    lastSettledWeek: Number.isInteger(raw.lastSettledWeek) ? (raw.lastSettledWeek as number) : null,
+    seasonPoints: Math.max(0, num(raw.seasonPoints, 0)),
+    season: Math.max(0, Math.floor(num(raw.season, 0))),
+    seasonStartWeek: Math.floor(num(raw.seasonStartWeek, 0)),
+    seasonTitles: Array.isArray(raw.seasonTitles) ? raw.seasonTitles.filter((t) => typeof t === 'string') : [],
+    lastActiveAt: num(raw.lastActiveAt, 0),
+    lastReturnAt: num(raw.lastReturnAt, 0),
+    returnPending: raw.returnPending === true,
+    returnDays: Math.max(0, num(raw.returnDays, 0)),
+  }
+}
+
+/**
  * 规范化存档：补齐缺失字段，保证旧档 / 损坏档也能安全加载。
  */
 export function normalizeSave(raw: unknown): SaveData {
@@ -206,7 +281,13 @@ export function normalizeSave(raw: unknown): SaveData {
     },
     settings: { ...base.settings, ...(save.settings ?? {}) },
     stats: { ...base.stats, ...(save.stats ?? {}) },
-    arena: { ...base.arena, ...(save.arena ?? {}) },
+    arena: {
+      ...base.arena,
+      ...(save.arena ?? {}),
+      arenaMaterials: Number.isFinite(save.arena?.arenaMaterials) ? save.arena!.arenaMaterials : 0,
+      weeklyMaterials: Number.isFinite(save.arena?.weeklyMaterials) ? save.arena!.weeklyMaterials : 0,
+      ladder: normalizeLadder(save.arena?.ladder),
+    },
     daily: {
       ...base.daily,
       ...(save.daily ?? {}),

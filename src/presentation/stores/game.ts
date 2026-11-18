@@ -55,10 +55,11 @@ import {
 import { ratesForPool as computePoolRates } from '../../core/systems/gacha.ts'
 import { previewRebirth, performRebirth } from '../../core/systems/rebirth.ts'
 import { arenaSnapshotHash, resolveArenaMatch, arenaContext, resolveArenaRewards, type ArenaReward } from '../../core/systems/arena.ts'
+import { ladderTierIndex as ladderTierIndexOf, ladderTierName } from '../../core/systems/ladder.ts'
+import { arenaWeekIndex, dayIndex } from '../../core/time.ts'
 import { DAILY, IDLE, LEVEL, REDEEM_CODES, RELIC } from '../../core/config/economy.ts'
 import { ACCOUNT, ACCOUNT_STORAGE_KEYS, ACCOUNT_ERROR_CODES, accountSlotKey } from '../../core/config/account.ts'
 import { GAME_ERROR_MESSAGES } from '../../core/config/game-errors.ts'
-import { dayIndex } from '../../core/time.ts'
 import { useAccountStore } from './account.ts'
 import { describeAccountError } from './account.ts'
 import { AccountError } from '../../platform/account.ts'
@@ -955,6 +956,49 @@ export const useGameStore = defineStore('game', () => {
     return reward
   }
 
+  // ─────────────────────────── 三队天梯（PVE 长线挑战） ───────────────────────────
+
+  /** 天梯的三队阵容（存档镜像） */
+  const ladderSquads = computed(() => save.value.arena.ladder.squads)
+
+  /** 当前天梯段位名 */
+  const ladderTier = computed(() => ladderTierName(save.value.arena.tierPoints ?? 0))
+
+  /** 当前梯队层（决定这一轮会遇到哪三层敌方梯队） */
+  const ladderTierIndex = computed(() => ladderTierIndexOf(save.value.arena.tierPoints ?? 0))
+
+  /** 本周是否已经挑战过 */
+  const ladderSettledThisWeek = computed(
+    () => save.value.arena.ladder.lastSettledWeek === arenaWeekIndex(clock.now()),
+  )
+
+  /** 是否有待领取的回流奖励 */
+  const returnPending = computed(() => save.value.arena.ladder.returnPending === true)
+
+  /**
+   * 保存演武场阵容。
+   *
+   * 校验在服务端（core 动作层）：英灵必须已拥有、同队不能重复。
+   * 客户端**不改** `save.arena.ladder.squads`——那是服务端回传的权威镜像。
+   */
+  async function saveLadderSquads(squads: (string | null)[][]) {
+    return runAction({ type: 'arena.ladderSaveSquads', squads }, true)
+  }
+
+  /**
+   * 发起一轮天梯挑战（3 队 × 3 梯队）。
+   *
+   * 战斗与结算在服务端**一次完成**（原子），这里只回显结果。
+   */
+  async function runLadderChallenge() {
+    return runAction({ type: 'arena.ladderChallenge' }, true)
+  }
+
+  /** 领取回流奖励 */
+  async function claimReturnReward() {
+    return runAction({ type: 'arena.ladderClaimReturn' }, true)
+  }
+
   // ─────────────────────────── 每日 / 兑换码 / 存档 ───────────────────────────
 
   /** 每日签到：按 core 配置发放奖励并推进连续签到天数 */
@@ -1096,6 +1140,14 @@ export const useGameStore = defineStore('game', () => {
     doRebirth,
     runArenaMatch,
     settleArena,
+    ladderSquads,
+    ladderTier,
+    ladderTierIndex,
+    ladderSettledThisWeek,
+    returnPending,
+    saveLadderSquads,
+    runLadderChallenge,
+    claimReturnReward,
     signInDaily,
     claimTask,
     now,

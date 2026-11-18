@@ -26,7 +26,7 @@ import { getHeroSetMods, getRelicMods } from '../../src/core/systems/relic.ts'
 // 加载遗物配置（内部会注册到遗物索引）
 import '../../src/core/config/relics.ts'
 import { getBondMods } from '../../src/core/systems/team.ts'
-import { ARENA_CAPS, DEFAULT_ARENA_PROFILE } from '../../src/core/config/economy.ts'
+import { ARENA_CAPS, ARENA_TEMPLATES, DEFAULT_ARENA_PROFILE } from '../../src/core/config/economy.ts'
 import { Rng } from '../../src/core/rng.ts'
 import { makeTestRelic, makeHero, maxedHero, nakedHero } from './helpers.ts'
 
@@ -76,7 +76,8 @@ describe('竞技整改回归', () => {
     save.arena.defenseLoadout = old
     const normalized = normalizeSave(save).arena.defenseLoadout!
     expect(normalized.relicSets[0]).toEqual(['set_zhanshen'])
-    expect(buildArenaUnits(normalized, 'ally', ARENA_CTX)[0].stats.atk).toBe(100)
+    // 取模板值而不是写死数字：竞技模板调过一次（见 economy.ts 的实施修正）
+    expect(buildArenaUnits(normalized, 'ally', ARENA_CTX)[0].stats.atk).toBe(ARENA_TEMPLATES['猛将'].atk)
   })
 
   it('双方各自生效羁绊，镜像双方初始血量对称', () => {
@@ -84,12 +85,14 @@ describe('竞技整改回归', () => {
     const match = resolveArenaMatch({ challengeId: 'bond', attacker: loadout, defender: loadout, attackerId: 'a', attackerName: 'a', defenderId: 'b', defenderName: 'b', seed: 1 })
     const allies = match.result.roster.filter((u) => u.side === 'ally')
     const enemies = match.result.roster.filter((u) => u.side === 'enemy')
-    expect(enemies.map((u) => u.maxHp)).toEqual([1272, 1272, 1272])
-    expect(allies.map((u) => u.maxHp)).toEqual([1272, 1272, 1272])
+    // 3 名医者 → 羁绊「仁心济世」全队生命 +10%，竞技下 ×0.6 → +6%
+    const healerHp = ARENA_TEMPLATES['医者'].hp * (1 + 0.1 * ARENA_CAPS.BOND_SCALE)
+    expect(enemies.map((u) => u.maxHp)).toEqual([healerHp, healerHp, healerHp])
+    expect(allies.map((u) => u.maxHp)).toEqual([healerHp, healerHp, healerHp])
     const solo = buildArenaLoadout({ slots: ['huatuo'], heroes: {}, relicSetsByHero: {}, runes: [], arenaLevel: 0 })
     const asymmetric = resolveArenaMatch({ challengeId: 'own-bond', attacker: solo, defender: loadout, attackerId: 'a', attackerName: 'a', defenderId: 'b', defenderName: 'b', seed: 1 })
-    expect(asymmetric.result.roster.filter((u) => u.side === 'ally').map((u) => u.maxHp)).toEqual([1200])
-    expect(asymmetric.result.roster.filter((u) => u.side === 'enemy').map((u) => u.maxHp)).toEqual([1272, 1272, 1272])
+    expect(asymmetric.result.roster.filter((u) => u.side === 'ally').map((u) => u.maxHp)).toEqual([ARENA_TEMPLATES['医者'].hp])
+    expect(asymmetric.result.roster.filter((u) => u.side === 'enemy').map((u) => u.maxHp)).toEqual([healerHp, healerHp, healerHp])
   })
 
   it('北京时间周一零点重置奖励，重复结算与重载不重复重置', () => {
@@ -421,5 +424,73 @@ describe('10. 段位独立', () => {
     // 结算只产出 pointsDelta，不涉及段位分之间的换算
     expect(typeof match.pointsDelta).toBe('number')
     expect(match.pointsDelta).not.toBeNaN()
+  })
+})
+
+/**
+ * 竞技对局的**可分性**与**对称性**（Phase 11 决策闸门实测挖出的回归）。
+ *
+ * ⚠ 历史坑：
+ *   1. 归一化模板偏「肉」，3 人以上的队伍**打不满 30 回合** → 双方都还活着 →
+ *      战斗循环按回合上限退出 → `win` 停在默认值 → **进攻方恒判负**；
+ *      实测 3 人队 100% 打满、进攻方胜率 0%，玩家天天「挑战失败」。
+ *   2. 同速时 `a_` 恒定排在 `e_` 前 → 进攻方**永远先手** →
+ *      镜像对局进攻方胜率 76~93%，违反 §6.9「双方对称」。
+ */
+describe('11. 竞技对局可分胜负且双方对称', () => {
+  const TEAM = ['xiangyu', 'hanxin', 'zhugeliang', 'libai', 'sunwu', 'jeannedarc']
+
+  function mirrorLoadout() {
+    return buildArenaLoadout({
+      slots: [...TEAM],
+      heroes: {},
+      relicSetsByHero: {},
+      runes: [],
+      arenaLevel: 0,
+    })
+  }
+
+  function playMirror(trials: number) {
+    const loadout = mirrorLoadout()
+    let wins = 0
+    let allyFirst = 0
+    let tiebreaks = 0
+    let maxRounds = 0
+    for (let seed = 1; seed <= trials; seed++) {
+      const match = resolveArenaMatch({
+        challengeId: `m-${seed}`,
+        attacker: loadout,
+        defender: loadout,
+        attackerId: 'a',
+        attackerName: 'A',
+        defenderId: 'b',
+        defenderName: 'B',
+        seed,
+      })
+      if (match.result.win) wins++
+      if (match.result.initiativeSide === 'ally') allyFirst++
+      if (match.tiebreak === 'hp-ratio') tiebreaks++
+      if (match.result.rounds > maxRounds) maxRounds = match.result.rounds
+    }
+    return { winRate: wins / trials, allyFirstRate: allyFirst / trials, tiebreakRate: tiebreaks / trials, maxRounds }
+  }
+
+  it('6 人镜像对局不再恒判负（回合上限不再默认判负）', () => {
+    const { winRate } = playMirror(60)
+    // 恒判负 / 恒判胜都是回归：镜像必须是五五开
+    expect(winRate).toBeGreaterThan(0.2)
+    expect(winRate).toBeLessThan(0.8)
+  })
+
+  it('镜像对局能在回合上限内打完，几乎不需要「按剩余血量判定」兜底', () => {
+    const { tiebreakRate, maxRounds } = playMirror(60)
+    expect(tiebreakRate).toBeLessThan(0.1)
+    expect(maxRounds).toBeLessThanOrEqual(ARENA_CAPS.MAX_ROUNDS)
+  })
+
+  it('先手权双方各 50%（§6.9 双方对称）', () => {
+    const { allyFirstRate } = playMirror(120)
+    expect(allyFirstRate).toBeGreaterThan(0.35)
+    expect(allyFirstRate).toBeLessThan(0.65)
   })
 })

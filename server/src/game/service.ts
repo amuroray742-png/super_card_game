@@ -41,6 +41,7 @@ import {
   type GameActionType,
 } from '../../../src/core/systems/actions.ts'
 import type { OfflineSettlementResult } from '../../../src/core/systems/idle.ts'
+import { rollLadderPeriods } from '../../../src/core/systems/ladder.ts'
 import { computeRelicAdvice } from '../../../src/core/systems/actions.ts'
 import type { RelicAdvice } from '../../../src/core/systems/relic-advice.ts'
 import type { ActionRequest, ActionResponse, SaveSnapshot } from '../../../src/core/systems/action-protocol.ts'
@@ -321,7 +322,18 @@ export class GameService {
 
     // ⑤ 失败：动作没改存档（core 保证先校验后修改），但离线收益要落库
     if (!outcome.ok) {
-      if (prepared.dirty) {
+      /**
+       * ⚠ **导入失败不得留下空存档**。
+       *
+       * 导入是唯一「账号还没有存档也允许执行」的动作 → 失败时手里捏着一份
+       * 刚 `createNewSave` 出来的空档。若把它落库，账号就「有存档了」，
+       * `save.create` 会被拒、`save.import` 也会被 `IMPORT_FORBIDDEN` 拦下——
+       * 玩家真正的旧档从此**再也迁不过来**（静默丢档）。
+       *
+       * 空档没有离线收益可保，所以这里直接不写。
+       */
+      const failedImportWithoutSave = isImport && !row
+      if (prepared.dirty && !failedImportWithoutSave) {
         save.savedAt = now
         this.writeSaveAndRelics(userId, save, relicBefore, now, { syncRelics: !isHeartbeat })
       }
@@ -401,6 +413,15 @@ export class GameService {
       save.rng.counter = 0
       dirty = true
     }
+
+    // 天梯周期滚动（周 / 赛季 / 回流判定）。
+    //
+    // ⚠ 规则在 core（`core/systems/ladder.ts`），服务端只负责**调用**——
+    //   赛季结算与回流判定若在服务端另写一份，必然与 core 分叉（铁律 #4 / #29）。
+    // ⚠ 必须放在 `settle` 早退之前：心跳也要刷新「上次活跃时间」，
+    //   否则一个挂着页面三天不点任何按钮的玩家会被误判成回流。
+    const rolled = rollLadderPeriods(save, now)
+    dirty ||= rolled.changed
 
     if (!settle) return { offline, dirty }
     const before = JSON.stringify([save.lastTickAt, save.idle])

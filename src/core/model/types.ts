@@ -427,6 +427,24 @@ export interface BattleResult {
   log: BattleLogEntry[]
   damageById: Record<string, number>
   healById: Record<string, number>
+  /**
+   * 每个单位的**剩余血量**（按单位 id）。
+   *
+   * ⚠ `survivors` 只含**我方**存活单位（历史口径），
+   *   要判断「对方还剩多少血」只能看这里——
+   *   回合上限用尽时（双方都没被打空）胜负要按剩余血量比例判，
+   *   没有这个字段就只能靠默认值，那会把「打不完」直接算成「输」。
+   */
+  hpById: Record<string, number>
+  /**
+   * 本场**先手方**（同速时先行动的一方）。
+   *
+   * - PVE：我方恒定先手 → 恒为 `'ally'`；
+   * - 竞技：按对局种子**掷签**决定（§6.9 双方对称）→ 双方各 50%。
+   *
+   * 公平性判据要量「先手到底值多少」，必须能拿到这一项。
+   */
+  initiativeSide: 'ally' | 'enemy'
   mvpId: string | null
   survivors: string[]
   /**
@@ -542,6 +560,16 @@ export interface ArenaMatch {
   opponentLoadout: ArenaLoadout
   result: BattleResult
   pointsDelta: number
+  /**
+   * 回合上限用尽时的判定方式。
+   *
+   * - `'hp-ratio'`：双方都没被打空，按**剩余血量比例**判胜（竞技场专属规则）；
+   * - 不存在：正常分出胜负。
+   *
+   * 界面要写清这条规则——玩家看到「打满回合」却分出胜负时，
+   * 得知道是靠什么分的（AGENTS.md 铁律 #27：规则必须在玩家眼前）。
+   */
+  tiebreak?: 'hp-ratio'
 }
 
 // ─────────────────────────── 存档 ───────────────────────────
@@ -635,8 +663,12 @@ export interface SaveData {
     tierPoints: number
     pvpPoints: number
     medals: number
+    /** 竞技专属材料（仅用于竞技铭文；不回流 PVE 经济） */
+    arenaMaterials: number
     /** 本周已获得的竞技勋章（用于周上限封顶，跨会话累计） */
     weeklyMedals: number
+    /** 本周已获得的竞技专属材料（与勋章共用周预算口径，跨会话累计） */
+    weeklyMaterials: number
     /** 本周已兑换的竞技抽卡券（用于周上限封顶，跨会话累计） */
     weeklyTickets: number
     /** 北京时间周一零点起的奖励周期编号 */
@@ -645,6 +677,8 @@ export interface SaveData {
     runes: string[]
     defenseLoadout: ArenaLoadout | null
     snapshotHash: string | null
+    /** PVE 长线挑战 · 三队天梯（§9.1） */
+    ladder: LadderState
   }
   daily: DailyState
 }
@@ -668,4 +702,77 @@ export interface DailyState {
   taskDay: number
   /** 任务计数所属的自然周（北京时间）；与本周不同 → 周目标重置 */
   taskWeek: number
+}
+
+// ─────────────────────────── PVE 长线挑战 · 三队天梯 ───────────────────────────
+
+/**
+ * 天梯状态（存档）。
+ *
+ * ⚠ 段位分本体存在 `arena.tierPoints`（PVE 天梯段位分，与 `arena.pvpPoints`
+ *   独立换算，见 plan.md §9.2）；这里只放**天梯专属**的状态。
+ */
+export interface LadderState {
+  /** 三队阵容：3 队 × 6 槽（存英灵 id，null = 空槽） */
+  squads: (string | null)[][]
+  /**
+   * 本周已结算的周编号（北京时间周一零点）。
+   *
+   * `null` = 还没结算过（**不用 -1**：存档导入的数值校验要求非负）。
+   */
+  lastSettledWeek: number | null
+  /** 本赛季内累计的段位分（赛季结算时按档位发奖后清零） */
+  seasonPoints: number
+  /** 当前赛季号（1 起；0 = 尚未初始化） */
+  season: number
+  /** 当前赛季的起始周编号 */
+  seasonStartWeek: number
+  /** 已获得的赛季称号 id */
+  seasonTitles: string[]
+  /** 上次活跃时间（毫秒）；用于回流判定 */
+  lastActiveAt: number
+  /** 上次领取回流奖励的时间（毫秒） */
+  lastReturnAt: number
+  /** 回流奖励待领（服务端判定后置位，领取时清零） */
+  returnPending: boolean
+  /** 本次回流的离线天数（0 = 非回流） */
+  returnDays: number
+}
+
+/** 天梯产出（**只允许竞技专属资源**） */
+export interface LadderReward {
+  /** 竞技勋章（竞技专属） */
+  medals: number
+  /** 竞技专属材料（仅用于竞技铭文） */
+  arenaMaterials: number
+}
+
+/** 一支队伍挑战一个梯队的结果 */
+export interface LadderSquadResult {
+  /** 队伍序号（0-2） */
+  index: number
+  /** 敌方梯队 id */
+  enemySquadId: string
+  /** 敌方梯队名 */
+  enemySquadName: string
+  /** 是否胜利 */
+  win: boolean
+  /** 战斗结果（回放与战报都取自这里） */
+  result: BattleResult
+}
+
+/** 一轮（3 队）的挑战结果 */
+export interface LadderRoundResult {
+  /** 梯队层号 */
+  tierIndex: number
+  /** 梯队层名 */
+  tierName: string
+  /** 三支队伍的结果 */
+  squads: LadderSquadResult[]
+  /** 胜场数（0-3） */
+  wins: number
+  /** 本轮获得的段位分 */
+  points: number
+  /** 本轮产出 */
+  reward: LadderReward
 }

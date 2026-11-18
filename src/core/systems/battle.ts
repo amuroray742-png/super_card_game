@@ -21,7 +21,7 @@ import type {
   StatusEffect,
   StatKey,
 } from '../model/types.ts'
-import { BATTLE, ELEMENT_BEATS, SKILL } from '../config/economy.ts'
+import { ARENA_CAPS, BATTLE, ELEMENT_BEATS, SKILL } from '../config/economy.ts'
 import { Rng } from '../rng.ts'
 import { clamp, deriveStats, elementFactor, resolveStats } from './stats.ts'
 import { getHeroPassiveMods } from './growth.ts'
@@ -150,6 +150,19 @@ export function simulateBattle(
   const rng = new Rng(seed)
   const log: BattleLogEntry[] = []
 
+  // 竞技模式：**先手权按对局种子掷一次签**，双方各 50%。
+  //
+  // ⚠ 为什么必须掷签：竞技单位 id 是 `a_<英灵>` / `e_<英灵>`，同速时 `a_` 恒定排在 `e_` 前
+  //   → 进攻方**永远先手**。这违反 §6.9「双方对称：同一竞技池、同一模板值、同一铭文槽上限」：
+  //   实测镜像对局进攻方胜率 76~93%，真实 PvP 里等于「先攻必胜」，
+  //   爬梯会退化成「谁先打谁赢」，段位分衡量的就不再是战术水平。
+  //
+  // ⚠ 为什么不用「按回合奇偶交替」：那样胜负会取决于**最后一回合的奇偶**，
+  //   实测同一套阵容在不同参数下进攻方胜率在 0.5%~87.5% 之间乱跳（是奇偶，不是实力）。
+  //
+  // PVE 不掷签：我方固定先手是主线「打不过就回去刷」的预期手感。
+  const allyFirstOnTie = ctx.mode === 'arena' ? rng.next() < 0.5 : true
+
   if (runes && runes.length > 0) {
     for (const unit of allies) unit.runes = runes
   }
@@ -167,7 +180,10 @@ export function simulateBattle(
   let round = 0
   let win = false
 
-  while (round < BATTLE.MAX_ROUNDS) {
+  // 竞技场用更宽的回合上限：归一化数值偏「肉」，主线的 30 回合打不完（详见 ARENA_CAPS.MAX_ROUNDS）
+  const maxRounds = ctx.mode === 'arena' ? ARENA_CAPS.MAX_ROUNDS : BATTLE.MAX_ROUNDS
+
+  while (round < maxRounds) {
     round++
     push({
       round,
@@ -179,9 +195,15 @@ export function simulateBattle(
     })
 
     // 行动顺序：按速度降序（同速按 id 稳定排序，保证可复现）
+    //
+    // ⚠ 竞技模式同速时的先后手由**掷签**决定（见上方 `allyFirstOnTie`）：
+    //   进攻方 id 前缀 `a_` 恒定小于 `e_`，不掷签就是「先攻必胜」（违反 §6.9 双方对称）。
+    const tieBreak = allyFirstOnTie
+      ? (x: BattleUnit, y: BattleUnit) => x.id.localeCompare(y.id)
+      : (x: BattleUnit, y: BattleUnit) => y.id.localeCompare(x.id)
     const order = all
       .filter((u) => u.alive)
-      .sort((a, b) => effectiveStats(b).spd - effectiveStats(a).spd || a.id.localeCompare(b.id))
+      .sort((a, b) => effectiveStats(b).spd - effectiveStats(a).spd || tieBreak(a, b))
 
     for (const unit of order) {
       if (!unit.alive) continue
@@ -299,12 +321,19 @@ export function simulateBattle(
   const damageEntries = Object.entries(damageById).sort((a, b) => b[1] - a[1])
   const mvpId = damageEntries.length > 0 ? damageEntries[0][0] : null
 
+  // 每个单位的剩余血量（双方都有）——
+  // `survivors` 只含我方，对方剩多少血只能从这里看。
+  const hpById: Record<string, number> = {}
+  for (const unit of all) hpById[unit.id] = Math.max(0, Math.round(unit.hp))
+
   return {
     win,
     rounds: round,
     log,
     damageById,
     healById,
+    hpById,
+    initiativeSide: allyFirstOnTie ? 'ally' : 'enemy',
     mvpId,
     survivors: all.filter((u) => u.side === 'ally' && u.alive).map((u) => u.id),
     roster: buildRoster(allies, all),

@@ -41,6 +41,7 @@ export const router = createRouter({
     { path: '/gacha/:poolId', name: 'gacha-pool', component: () => import('./views/GachaView.vue') },
     { path: '/arena', name: 'arena', component: () => import('./views/ArenaView.vue') },
     { path: '/arena/rank', name: 'arena-rank', component: () => import('./views/ArenaRankView.vue') },
+    { path: '/ladder', name: 'ladder', component: () => import('./views/LadderView.vue') },
     { path: '/codex', name: 'codex', component: () => import('./views/CodexView.vue') },
     { path: '/compliance', name: 'compliance', component: () => import('./views/ComplianceView.vue'), meta: { public: true } },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },

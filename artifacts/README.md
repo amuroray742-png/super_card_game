@@ -8,7 +8,7 @@
 | [art-style.md](art-style.md) | 英灵卡面的画风、生产和校验规范。 |
 | [roadmap.md](roadmap.md) | P1、P2 的执行顺序、交付物与验收条件。 |
 | [deploy.md](deploy.md) | 试玩部署手册：托管形态、持久化、备份恢复演练、回滚、HTTPS、兼容性实测、扩容边界。 |
-| [baselines/](baselines/) | 实测基线：新号数值基线（`newplayer.json`）、浏览器兼容实测（`browser-compat.json`）。 |
+| [baselines/](baselines/) | 实测基线：新号数值基线（`newplayer.json`）、浏览器兼容实测（`browser-compat.json`）、三队天梯标定（`ladder.json`）、竞技对局样本（`pvp-sample.json`）。 |
 | [2026-11-18 合并验收记录](acceptance-2026-11-18-886b7c8.md) | `main` 提交 `886b7c8` 的权威链路整改、测试修复与验证结果。 |
 
 `plan.md` 是**不可变快照式基线**：实施过程中发现方案与实现不一致时，先在 `plan.md`

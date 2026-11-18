@@ -13,7 +13,7 @@
  *   2. 满养成消耗明细
  *   3. 投放 / 消耗 = 回收倍数（>1 说明主线养得起，<1 说明需要额外来源）
  */
-import { DROP_TABLES, LEVEL, REALMS, SKILL, RELIC, STAR, STAGE, BATTLE, DAILY } from '../../src/core/config/economy.ts'
+import { DROP_TABLES, LEVEL, REALMS, SKILL, RELIC, STAR, STAGE, BATTLE, DAILY, LADDER, LADDER_RETURN_REWARDS } from '../../src/core/config/economy.ts'
 import { STAGES } from '../../src/core/config/stages.ts'
 import { totalExpToReach, starUpCost } from '../../src/core/systems/growth.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
@@ -337,6 +337,45 @@ for (const [name, supply, daily, need] of dailyRows) {
 console.log(
   '\n  注：日常投放按**首周 7 天**计（主线投放是一次性的，日常投放每天都有）；'
   + '天数为 D 时，「回收倍数(后)」随 D 线性上升。',
+)
+
+// ─────────────────────────── 5. 回流投放（P2-2） ───────────────────────────
+//
+// roadmap P2-2 的验收要求：回流奖励不能冲击抽卡间隔与养成资源回收。
+// 回流是**低频事件**（每 30 天最多一次），所以按「日均」摊开算，
+// 再用与日常任务**同一把尺**（日投放 ≤ 每小时挂机产出的 2%）比。
+
+const returnTop = LADDER_RETURN_REWARDS[0]
+const returnPerDay = {
+  relicStones: returnTop.relicStones / LADDER.RETURN_COOLDOWN_DAYS,
+  skillStones: returnTop.skillStones / LADDER.RETURN_COOLDOWN_DAYS,
+}
+
+console.log('\n【回流投放】三队天梯 · 回流奖励（roadmap P2-2）\n')
+console.log('  档位'.padEnd(14) + '离线天数'.padEnd(12) + '术式结晶'.padEnd(12) + '强化石'.padEnd(12) + '竞技勋章')
+console.log('  ' + '-'.repeat(64))
+for (const spec of LADDER_RETURN_REWARDS) {
+  console.log(
+    `  ${`${spec.minDays} 天以上`.padEnd(12)}${String(spec.minDays).padStart(8)}  `
+    + `${String(spec.skillStones).padStart(10)} ${String(spec.relicStones).padStart(10)} ${String(spec.medals).padStart(10)}`,
+  )
+}
+console.log(
+  `\n  每小时挂机产出（第 1 章 × ${battlesPerHour} 场）：`
+  + ` 强化石 ${hourlyIncome.relicStones.toFixed(0)} · 术式结晶 ${hourlyIncome.skillStones.toFixed(0)}`,
+)
+console.log(
+  `  回流日均投放（按 ${LADDER.RETURN_COOLDOWN_DAYS} 天冷却摊）：`
+  + ` 强化石 ${returnPerDay.relicStones.toFixed(1)} · 术式结晶 ${returnPerDay.skillStones.toFixed(1)}`,
+)
+console.log(
+  `  回流日均占比：强化石 ${((returnPerDay.relicStones / hourlyIncome.relicStones) * 100).toFixed(2)}%`
+  + ` · 术式结晶 ${((returnPerDay.skillStones / hourlyIncome.skillStones) * 100).toFixed(2)}%`
+  + '（分母是**一小时**的挂机产出，与日常任务同一把尺）',
+)
+console.log(
+  '  红线核对：回流奖励里的圣杯结晶 = 0、抽卡券 = 0（不冲击抽卡间隔）；'
+  + '竞技勋章是竞技专属资源，不回流养成经济',
 )
 
 console.log('\n' + '='.repeat(84))

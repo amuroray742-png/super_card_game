@@ -8,7 +8,7 @@
  * 两者交叉点 = 卡关点，是数值调参的核心依据。
  */
 import { STAGES } from '../../src/core/config/stages.ts'
-import { STAGE } from '../../src/core/config/economy.ts'
+import { ARENA_CAPS, ARENA_TEMPLATES, STAGE } from '../../src/core/config/economy.ts'
 import { computePower, resolveStats } from '../../src/core/systems/stats.ts'
 import { getHeroPassiveMods } from '../../src/core/systems/growth.ts'
 import { getHeroSetMods } from '../../src/core/systems/relic.ts'
@@ -174,17 +174,14 @@ const maxed = buildTeam(240, 6, 20, 60)
 
 const arenaProfile = {
   runeSlots: 3,
-  passiveScale: 0.6,
-  skillScale: 0.3,
-  setScale: 0.7,
-  bondScale: 0.6,
-  templates: {
-    猛将: { atk: 100, def: 50, hp: 1000, spd: 100, crit: 0.05, cdmg: 0.5 },
-    统帅: { atk: 70, def: 60, hp: 1300, spd: 110, crit: 0.05, cdmg: 0.5 },
-    谋士: { atk: 85, def: 45, hp: 950, spd: 130, crit: 0.05, cdmg: 0.5 },
-    医者: { atk: 60, def: 50, hp: 1200, spd: 115, crit: 0.05, cdmg: 0.5 },
-    器者: { atk: 90, def: 45, hp: 1000, spd: 120, crit: 0.05, cdmg: 0.5 },
-  },
+  passiveScale: ARENA_CAPS.PASSIVE_SCALE,
+  skillScale: ARENA_CAPS.SKILL_SCALE,
+  setScale: ARENA_CAPS.SET_SCALE,
+  bondScale: ARENA_CAPS.BOND_SCALE,
+  // ⚠ 模板必须**引用** core 的那一份，不能在这里另抄一份：
+  //   抄一份就等于有第二套竞技模板，改了配置这里还在用旧值，
+  //   隔离阈值就成了「对着旧模板测新模板」（铁律 #4 单一数据源）。
+  templates: ARENA_TEMPLATES,
 }
 
 function arenaTeamPower(team: HeroRuntime[]): number {

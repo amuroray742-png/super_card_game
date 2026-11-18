@@ -1,0 +1,114 @@
+{
+  "generatedAt": "2026-11-18T12:25:11.313Z",
+  "trials": 240,
+  "thresholds": {
+    "NORMALIZED_POWER_GAP": 0.15,
+    "WIN_RATE_BIAS": 0.05,
+    "FIRST_MOVE_BIAS": 0.05,
+    "MIN_SAMPLES": 200
+  },
+  "arenaTemplates": {
+    "猛将": {
+      "atk": 160,
+      "def": 75,
+      "hp": 650,
+      "spd": 100,
+      "crit": 0.05,
+      "cdmg": 0.5
+    },
+    "统帅": {
+      "atk": 112,
+      "def": 90,
+      "hp": 845,
+      "spd": 110,
+      "crit": 0.05,
+      "cdmg": 0.5
+    },
+    "谋士": {
+      "atk": 136,
+      "def": 68,
+      "hp": 618,
+      "spd": 130,
+      "crit": 0.05,
+      "cdmg": 0.5
+    },
+    "医者": {
+      "atk": 96,
+      "def": 75,
+      "hp": 780,
+      "spd": 115,
+      "crit": 0.05,
+      "cdmg": 0.5
+    },
+    "器者": {
+      "atk": 144,
+      "def": 68,
+      "hp": 650,
+      "spd": 120,
+      "crit": 0.05,
+      "cdmg": 0.5
+    }
+  },
+  "e1": {
+    "pvePowerHigh": 14844820,
+    "pvePowerLow": 6072,
+    "pveGap": 0.9995909624300506,
+    "arenaMaxGap": 0,
+    "attackerWinRate": 0.45,
+    "firstMoveWinRate": 0.8833333333333333,
+    "secondMoveWinRate": 0.1166666666666667,
+    "avgRounds": 26.095833333333335,
+    "checks": [
+      {
+        "id": "sample-size",
+        "label": "样本量",
+        "value": 240,
+        "threshold": 200,
+        "comparison": ">=",
+        "passed": true,
+        "detail": "样本量 240，达到决策所需下限"
+      },
+      {
+        "id": "normalized-power-gap",
+        "label": "归一化后战力差",
+        "value": 0,
+        "threshold": 0.15,
+        "comparison": "<=",
+        "passed": true,
+        "detail": "最大战力差 0.00%，在 15% 隔离阈值内"
+      },
+      {
+        "id": "win-rate-bias",
+        "label": "进攻方胜率偏差",
+        "value": 0.04999999999999999,
+        "threshold": 0.05,
+        "comparison": "<=",
+        "passed": true,
+        "detail": "进攻方胜率 45.00%，偏差 5.00pp"
+      },
+      {
+        "id": "first-move-bias",
+        "label": "先手偏差",
+        "value": 0.7666666666666666,
+        "threshold": 0.05,
+        "comparison": "<=",
+        "passed": false,
+        "detail": "先手方胜率 88.33%，后手方胜率 11.67%，差 76.67pp"
+      }
+    ],
+    "passed": false
+  },
+  "e2": {
+    "arenaPowerA": 4718,
+    "arenaPowerB": 4827,
+    "aWinRateWhenAttacking": 0.0375,
+    "bWinRateWhenAttacking": 0.9791666666666666,
+    "powerGap": 0.022541119767153773
+  },
+  "e3": {
+    "arenaPowerVeteran": 4758,
+    "arenaPowerRookie": 4597,
+    "powerGap": 0.033853236567404625,
+    "veteranWinRate": 1
+  }
+}

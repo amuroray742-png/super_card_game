@@ -105,7 +105,7 @@ function heroIdFromUrl(page: Page): string {
  * ⚠ 经验是**推征掉落**进池子的，玩家必须先打过一场才有经验可喂。
  *   推征遇到战败会中断（runIdle 遇败即停），所以这里允许「这一轮没涨」再重试。
  */
-async function farmExp(page: Page, accountId: number, target: number, timeout = 150_000): Promise<number> {
+async function farmExp(page: Page, accountId: number, target: number, timeout = 420_000): Promise<number> {
   await page.goto('/#/expedition')
   await page.waitForLoadState('networkidle')
   let pool = await expPoolOf(page, accountId)
@@ -279,6 +279,12 @@ test.describe('英灵养成（属性面板 + 技能升级）', () => {
 })
 
 test.describe('喂经验扣玩家经验池', () => {
+  // ⚠ 这三条用例的**准备阶段**要真实挂机刷经验（每场 6 秒，攒到 1.2 千要十几轮），
+  //   文件级的 180 秒预算在机器有负载时会被准备阶段吃光，
+  //   失败点落在「点进英灵详情」而不是被测的「喂经验扣池子」断言上。
+  //   与下方「境界突破链路」同口径：慢用例单独放宽预算，**断言一条不改**。
+  test.setTimeout(600_000)
+
   test('喂经验会从经验池扣款，经验池是唯一来源', async ({ page }) => {
     const accountId = await bootLoggedIn(page)
     await pullHeroes(page)

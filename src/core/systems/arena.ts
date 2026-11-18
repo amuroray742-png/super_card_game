@@ -13,6 +13,7 @@ import type {
   ArenaLoadout,
   ArenaMatch,
   BattleContext,
+  BattleResult,
   BattleUnit,
   HeroState,
   Rarity,
@@ -202,6 +203,46 @@ export function arenaContext(seed: number): BattleContext {
 // ─────────────────────────── 对局 ───────────────────────────
 
 /**
+ * 一侧的**剩余血量比例**（已损失的血量按比例扣掉）。
+ *
+ * ⚠ `BattleResult.survivors` 只含**我方**存活单位（历史口径），
+ *   对方剩多少血只能看 `hpById`。
+ */
+function sideHpRatio(result: BattleResult, side: 'ally' | 'enemy'): number {
+  const units = result.roster.filter((u) => u.side === side)
+  if (units.length === 0) return 0
+  const total = units.reduce((sum, u) => sum + u.maxHp, 0)
+  if (total <= 0) return 0
+  const left = units.reduce((sum, u) => sum + (result.hpById[u.id] ?? 0), 0)
+  return left / total
+}
+
+/**
+ * 回合上限用尽时的判定：按**剩余血量比例**判胜。
+ *
+ * ⚠ 历史坑（Phase 11 决策闸门实测挖出）：
+ *   竞技场是**归一化**数值：模板血量高、伤害低，3 人以上的队伍**打不满 30 回合**
+ *   （医者还有治疗拖住）→ 双方都还活着 → 战斗循环按回合上限退出 →
+ *   `win` 停在默认值 false → **进攻方（玩家）被判负**。
+ *   实测：3 人队 100% 打满上限、进攻方胜率 0%；满编 6 人队胜率 1.7%。
+ *   玩家看到的是「天天挑战失败」，勋章只给 3 枚（胜利是 12 枚）、永远拿不到抽卡券。
+ *
+ * 判据**只在竞技场生效**：PVE 的「回合用尽 = 挑战失败」是对的（打不过就该回去刷），
+ * 那里不动。
+ */
+function adjudicateTimeout(result: BattleResult): BattleResult {
+  const alive = (side: 'ally' | 'enemy') =>
+    result.roster.some((u) => u.side === side && (result.hpById[u.id] ?? 0) > 0)
+  // 只有「双方都还有活人」才是回合上限用尽；
+  // 一方被打空是**真分出胜负**（`win` 已经是对的），不能再判一次。
+  if (result.win || !alive('ally') || !alive('enemy')) return result
+
+  const mine = sideHpRatio(result, 'ally')
+  const theirs = sideHpRatio(result, 'enemy')
+  return { ...result, win: mine > theirs }
+}
+
+/**
  * 解析一场竞技对局。
  * 双方使用**同一套竞技池**（系统统一开放全部英灵），属性全部归一化。
  */
@@ -236,7 +277,8 @@ export function resolveArenaMatch(input: {
   const allies = buildArenaUnits(input.attacker, 'ally', attackerCtx)
   const enemies = buildArenaUnits(input.defender, 'enemy', defenderCtx)
 
-  const result = simulateBattle(allies, enemies, ctx, input.seed, input.attacker.runes)
+  const raw = simulateBattle(allies, enemies, ctx, input.seed, input.attacker.runes)
+  const result = adjudicateTimeout(raw)
 
   const pointsDelta = result.win ? tierPointsFor(1) : -Math.round(tierPointsFor(1) * 0.5)
 
@@ -247,6 +289,8 @@ export function resolveArenaMatch(input: {
     opponentLoadout: input.defender,
     result,
     pointsDelta,
+    /** 回合上限用尽、按剩余血量比例判胜（界面要写清这条规则） */
+    tiebreak: result.win !== raw.win ? 'hp-ratio' : undefined,
   }
 }
 
@@ -290,26 +334,44 @@ export interface ArenaReward {
 export const ARENA_WEEKLY_CAP = {
   medals: ARENA.MEDAL_WEEKLY_CAP,
   tickets: ARENA.TICKET_WEEKLY_CAP,
+  materials: ARENA.MATERIAL_WEEKLY_CAP,
 }
 
 /**
  * 结算竞技奖励（周上限保护）。
+ *
+ * ⚠ 勋章 / 竞技材料的周上限与**三队天梯共用同一份预算**
+ *   （`arena.weeklyMedals` / `arena.weeklyMaterials`）——
+ *   两个模式各发一份却各算各的上限，玩家一周能拿到的就是上限的两倍。
+ *
  * @param weeklyMedals 本周已获得的勋章
  * @param weeklyTickets 本周已获得的抽卡券
+ * @param weeklyMaterials 本周已获得的竞技专属材料
  */
 export function resolveArenaRewards(
   win: boolean,
   weeklyMedals: number,
   weeklyTickets: number,
-): { reward: ArenaReward; weeklyMedals: number; weeklyTickets: number } {
+  weeklyMaterials = 0,
+): {
+  reward: ArenaReward
+  weeklyMedals: number
+  weeklyTickets: number
+  weeklyMaterials: number
+} {
   const baseMedals = win ? 12 : 3
   const medals = Math.min(baseMedals, Math.max(0, ARENA_WEEKLY_CAP.medals - weeklyMedals))
   const tickets =
     win && weeklyTickets < ARENA_WEEKLY_CAP.tickets ? 1 : 0
+  const arenaMaterials = Math.min(
+    win ? 2 : 0,
+    Math.max(0, ARENA_WEEKLY_CAP.materials - weeklyMaterials),
+  )
   return {
-    reward: { medals, arenaMaterials: win ? 2 : 0, tickets },
+    reward: { medals, arenaMaterials, tickets },
     weeklyMedals: weeklyMedals + medals,
     weeklyTickets: weeklyTickets + tickets,
+    weeklyMaterials: weeklyMaterials + arenaMaterials,
   }
 }
 

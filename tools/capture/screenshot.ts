@@ -49,6 +49,10 @@
  * npx tsx tools/capture/screenshot.ts --daily --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/daily.png
  *
+ * # 演武场场景（注册账号 → 十连 → 演武场页：三队编成 / 敌方梯队 / 挑战）
+ * npx tsx tools/capture/screenshot.ts --ladder --api http://127.0.0.1:8791 \
+ *   --url http://127.0.0.1:4188 --out artifacts/art-preview/ladder.png
+ *
  * # 浏览器兼容性测量（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏）
  * npx tsx tools/capture/screenshot.ts --compat --route /login \
  *   --url http://127.0.0.1:4188 --compat-out artifacts/baselines/browser-compat.json
@@ -78,6 +82,8 @@ interface Options {
   relic: boolean
   /** 每日任务场景：登录 → 十连 → 每日页（签到 / 每日任务 / 周目标） */
   daily: boolean
+  /** 演武场场景：登录 → 十连 → 演武场页（三队编成 / 敌方梯队 / 挑战） */
+  ladder: boolean
   /** 浏览器兼容性测量模式（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏） */
   compat: boolean
   /** 兼容性报告的输出路径（JSON） */
@@ -108,6 +114,7 @@ function parseArgs(argv: string[]): Options {
     gachaReveal: argv.includes('--gacha-reveal'),
     relic: argv.includes('--relic'),
     daily: argv.includes('--daily'),
+    ladder: argv.includes('--ladder'),
     compat: argv.includes('--compat'),
     compatOut: get('--compat-out') ?? 'artifacts/baselines/browser-compat.json',
     api: get('--api') ?? '',
@@ -776,6 +783,32 @@ async function runDailyScenario(
   return ''
 }
 
+/**
+ * 演武场场景：登录 → 十连 → 演武场页。
+ *
+ * 截图用于验收「三队天梯看得懂、够得着」：
+ * 玩法口径、三队编成、敌方梯队、段位与挑战按钮都要在同一屏里。
+ */
+async function runLadderScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  const base = await setupAccount(context, page, opts)
+  await page.goto(`${base}/#/ladder`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(600)
+  // 内容在内部滚动容器里：先按需求滚到顶 / 底，再截图
+  await page.evaluate((toBottom) => {
+    const body = document.querySelector('.body') as HTMLElement | null
+    if (body) body.scrollTop = toBottom ? body.scrollHeight : 0
+    window.scrollTo(0, toBottom ? document.body.scrollHeight : 0)
+  }, opts.scrollBottom)
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: outPath, fullPage: opts.fullPage })
+  return ''
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   assertSafeOrigin(opts.url)
@@ -784,8 +817,8 @@ async function main(): Promise<void> {
     await runCompatScenario(opts)
     return
   }
-  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic || opts.daily) && !opts.api) {
-    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物 / 每日任务场景需要 --api <隔离后端地址>（用于注册临时账号）')
+  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic || opts.daily || opts.ladder) && !opts.api) {
+    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物 / 每日任务 / 演武场场景需要 --api <隔离后端地址>（用于注册临时账号）')
   }
 
   const target = `${opts.url.replace(/\/$/, '')}/#${opts.route}`
@@ -813,6 +846,8 @@ async function main(): Promise<void> {
       await runRelicScenario(context, page, opts, outPath)
     } else if (opts.daily) {
       await runDailyScenario(context, page, opts, outPath)
+    } else if (opts.ladder) {
+      await runLadderScenario(context, page, opts, outPath)
     } else if (opts.gachaTicket) {
       await runGachaTicketScenario(context, page, opts, outPath)
     } else if (opts.gachaReveal) {
@@ -836,7 +871,7 @@ async function main(): Promise<void> {
       await page.waitForTimeout(400)
     }
 
-    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic && !opts.daily) {
+    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic && !opts.daily && !opts.ladder) {
       await page.screenshot({ path: outPath, fullPage: opts.fullPage })
     }
     if (resultPath) {

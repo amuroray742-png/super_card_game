@@ -29,6 +29,7 @@
 import type {
   ArenaMatch,
   ArenaLoadout,
+  LadderRoundResult,
   Rarity,
   RelicInstance,
   RewardBundle,
@@ -93,6 +94,16 @@ import {
   resolveArenaRewards,
   type ArenaReward,
 } from './arena.ts'
+import {
+  buildLadderSquads,
+  resolveLadderRound,
+  resolveLadderRewards,
+  resolveReturnReward,
+  rollLadderPeriods,
+  validateSquad,
+  type SeasonSettlement,
+} from './ladder.ts'
+import { LADDER } from '../config/economy.ts'
 import { performRebirth, previewRebirth, type RebirthPreview } from './rebirth.ts'
 import { buildArenaSnapshot, buildHeroRuntime, buildTeam, buildPveContext } from './derive.ts'
 import { validateImportedSave } from '../save/import-validation.ts'
@@ -131,6 +142,9 @@ export type GameAction =
   | { type: 'team.removePreset'; presetId: string }
   | { type: 'rebirth.do' }
   | { type: 'arena.settle' }
+  | { type: 'arena.ladderSaveSquads'; squads: (string | null)[][] }
+  | { type: 'arena.ladderChallenge' }
+  | { type: 'arena.ladderClaimReturn' }
   | { type: 'daily.signIn' }
   | { type: 'daily.claimTask'; taskId: string }
   | { type: 'code.redeem'; code: string }
@@ -220,6 +234,22 @@ export interface ArenaSettleResult {
   reward: ArenaReward
 }
 
+/** 三队天梯 · 一轮挑战的结果 */
+export interface LadderChallengeResult extends LadderRoundResult {
+  /** 本次触发的赛季结算（跨了多个赛季就逐个返回） */
+  settlements: SeasonSettlement[]
+}
+
+/** 三队天梯 · 回流奖励领取结果 */
+export interface LadderReturnResult {
+  /** 养成材料（走 `rewards` 入库，铁律 #26） */
+  rewards: RewardBundle
+  /** 竞技勋章（竞技专属资源，直接记在 `arena.medals`） */
+  medals: number
+  /** 本次回流的离线天数 */
+  days: number
+}
+
 export interface ActionResultMap {
   'gacha.pull': PullActionResult
   'idle.tick': IdleActionResult
@@ -245,6 +275,9 @@ export interface ActionResultMap {
   'team.removePreset': true
   'rebirth.do': RebirthPreview
   'arena.settle': ArenaSettleResult
+  'arena.ladderSaveSquads': true
+  'arena.ladderChallenge': LadderChallengeResult
+  'arena.ladderClaimReturn': LadderReturnResult
   'daily.signIn': RewardBundle
   'daily.claimTask': RewardBundle
   'code.redeem': RewardBundle
@@ -1177,10 +1210,15 @@ function actionRebirth(
 }
 
 /**
- * 竞技场结算。
+ * 竞技场结算（镜像试炼）。
  *
  * 对手沿用**镜像试炼**语义（对手 = 攻方自己的阵容快照），
  * 只把「生成 + 结算」整体搬到服务端，玩法不变。
+ *
+ * ⚠ 段位分归属：本动作**只写 `pvpPoints`**（归一化对战分），
+ *   `tierPoints`（PVE 天梯段位分）由**三队天梯**独占。
+ *   §9.2：9.1 衡量「养成强度」、9.2 衡量「战术水平」，两者不互相换算——
+ *   两个模式各写同一个段位分，段位就变成两个模式混在一起的东西。
  */
 function actionArenaSettle(
   save: SaveData,
@@ -1205,7 +1243,7 @@ function actionArenaSettle(
   })
 
   const a = save.arena
-  a.tierPoints = Math.max(0, (a.tierPoints ?? 0) + match.pointsDelta)
+  // 对战分只归 PvP 口径；天梯段位分由 `arena.ladderChallenge` 写
   a.pvpPoints = (a.pvpPoints ?? 0) + (match.result.win ? 20 : 5)
   a.snapshotHash = arenaSnapshotHash(loadout)
   a.defenseLoadout = loadout
@@ -1214,20 +1252,149 @@ function actionArenaSettle(
   if (a.rewardWeek !== rewardWeek) {
     a.rewardWeek = rewardWeek
     a.weeklyMedals = 0
+    a.weeklyMaterials = 0
     a.weeklyTickets = 0
   }
-  const { reward, weeklyMedals, weeklyTickets } = resolveArenaRewards(
+  const { reward, weeklyMedals, weeklyTickets, weeklyMaterials } = resolveArenaRewards(
     match.result.win,
     a.weeklyMedals ?? 0,
     a.weeklyTickets ?? 0,
+    a.weeklyMaterials ?? 0,
   )
   a.medals = (a.medals ?? 0) + reward.medals
+  a.arenaMaterials = (a.arenaMaterials ?? 0) + reward.arenaMaterials
   a.weeklyMedals = weeklyMedals
+  a.weeklyMaterials = weeklyMaterials
   a.weeklyTickets = weeklyTickets
   // 兑换券进入玩家背包（竞技专属产出，不回流 PVE 经济）
   if (reward.tickets) save.player.tickets += reward.tickets
 
   return ok<ArenaSettleResult>({ match, reward })
+}
+
+// ─────────────────────────── 三队天梯（PVE 长线挑战） ───────────────────────────
+
+/**
+ * 保存演武场阵容（3 队 × 6 槽）。
+ *
+ * ⚠ 先校验后修改：任一队不合法就整份拒绝，存档一字节未变。
+ */
+function actionLadderSaveSquads(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'arena.ladderSaveSquads' }>,
+  _ctx: ActionContext,
+): ActionOutcome<true> {
+  const squads = payload.squads
+  if (!Array.isArray(squads) || squads.length !== LADDER.SQUAD_COUNT) {
+    return fail(GAME_ERROR_CODES.LADDER_INVALID_LINEUP, `阵容不合法：需要 ${LADDER.SQUAD_COUNT} 支队伍`)
+  }
+  for (const row of squads) {
+    const err = validateSquad(save, row)
+    if (err) return fail(GAME_ERROR_CODES.LADDER_INVALID_LINEUP, `阵容不合法：${err}`)
+  }
+  save.arena.ladder.squads = squads.map((row) => [...row])
+  return ok(true, '演武场阵容已保存')
+}
+
+/**
+ * 发起一轮天梯挑战（3 队 × 3 梯队）。
+ *
+ * ⚠ **每周一轮**（北京时间周一零点切换）：本周已结算过就拒绝。
+ * ⚠ **PVE 完整数值**（§9.1）：本模式走 `resolveStats(mode:'pve')`，
+ *   等级 / 遗物强化 / 羁绊 / 永久加成全部生效。
+ * ⚠ **产出隔离**（§6.11）：只发竞技勋章与竞技材料，不回流 PVE 经济。
+ */
+function actionLadderChallenge(
+  save: SaveData,
+  _payload: Extract<GameAction, { type: 'arena.ladderChallenge' }>,
+  ctx: ActionContext,
+): ActionOutcome<LadderChallengeResult> {
+  const ladder = save.arena.ladder
+  const week = arenaWeekIndex(ctx.now)
+
+  // ① 先校验（失败即原子：此刻存档一个字节都没变）
+  if (ladder.lastSettledWeek === week) {
+    return fail(GAME_ERROR_CODES.LADDER_ALREADY_SETTLED, '本周的天梯已经挑战过了')
+  }
+  const squads = buildLadderSquads(save)
+  if (squads.every((s) => s.length === 0)) {
+    return fail(GAME_ERROR_CODES.LADDER_NO_SQUAD, '请先在演武场编队')
+  }
+
+  // ② 周期滚动（赛季结算 / 回流判定）——校验通过之后才改存档
+  const rolled = rollLadderPeriods(save, ctx.now)
+
+  // ③ 跑战斗（随机序列只在校验通过后消耗）
+  const round = resolveLadderRound(save, () => ctx.rng.nextSeed())
+
+  // ④ 入账
+  save.arena.tierPoints = (save.arena.tierPoints ?? 0) + round.points
+  ladder.seasonPoints = (ladder.seasonPoints ?? 0) + round.points
+  ladder.lastSettledWeek = week
+
+  const { reward, weeklyMedals, weeklyMaterials } = resolveLadderRewards(
+    round.wins,
+    save.arena.weeklyMedals ?? 0,
+    save.arena.weeklyMaterials ?? 0,
+  )
+  save.arena.weeklyMedals = weeklyMedals
+  save.arena.weeklyMaterials = weeklyMaterials
+  save.arena.medals = (save.arena.medals ?? 0) + reward.medals
+  save.arena.arenaMaterials = (save.arena.arenaMaterials ?? 0) + reward.arenaMaterials
+  round.reward = reward
+
+  const settlementNote = rolled.settlements.length
+    ? ` · 赛季 ${rolled.settlements[rolled.settlements.length - 1].season} 已结算`
+    : ''
+  return ok<LadderChallengeResult>(
+    { ...round, settlements: rolled.settlements },
+    `天梯挑战结束 · ${round.wins}/3 胜 · 段位分 +${round.points} · 勋章 +${reward.medals}${settlementNote}`,
+  )
+}
+
+/**
+ * 领取回流奖励。
+ *
+ * ⚠ 回流奖励属于**留存经济**（不是竞技产出）：
+ *   - 养成材料走 `rewards` 入库（铁律 #26）；
+ *   - 竞技勋章是竞技专属资源，直接记在 `arena.medals`；
+ *   - **不含**圣杯结晶 / 抽卡券 → 不冲击抽卡间隔（与铁律 #38 同一把尺）。
+ */
+function actionLadderClaimReturn(
+  save: SaveData,
+  _payload: Extract<GameAction, { type: 'arena.ladderClaimReturn' }>,
+  ctx: ActionContext,
+): ActionOutcome<LadderReturnResult> {
+  const ladder = save.arena.ladder
+  if (!ladder.returnPending) {
+    return fail(GAME_ERROR_CODES.RETURN_NOT_AVAILABLE, '当前没有可领取的回流奖励')
+  }
+  const days = ladder.returnDays ?? 0
+  const reward = resolveReturnReward(days)
+  if (!reward) {
+    return fail(GAME_ERROR_CODES.RETURN_NOT_AVAILABLE, '当前没有可领取的回流奖励')
+  }
+
+  // 入库（先改再清标记，失败即原子：这一步不会失败）
+  applyRewardBundle(
+    save,
+    { skillStones: reward.skillStones, relicStones: reward.relicStones },
+    ctx.rng,
+    ctx.now,
+  )
+  save.arena.medals = (save.arena.medals ?? 0) + reward.medals
+  ladder.returnPending = false
+  ladder.returnDays = 0
+  ladder.lastReturnAt = ctx.now
+
+  return ok<LadderReturnResult>(
+    {
+      rewards: { skillStones: reward.skillStones, relicStones: reward.relicStones },
+      medals: reward.medals,
+      days,
+    },
+    `回流奖励已领取（离线 ${days} 天）· 术式结晶 +${reward.skillStones} · 强化石 +${reward.relicStones} · 勋章 +${reward.medals}`,
+  )
 }
 
 /** 每日签到 */
@@ -1419,6 +1586,9 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
   'team.removePreset': actionRemovePreset,
   'rebirth.do': actionRebirth,
   'arena.settle': actionArenaSettle,
+  'arena.ladderSaveSquads': actionLadderSaveSquads,
+  'arena.ladderChallenge': actionLadderChallenge,
+  'arena.ladderClaimReturn': actionLadderClaimReturn,
   'daily.signIn': actionSignIn,
   'daily.claimTask': actionClaimTask,
   'code.redeem': actionRedeemCode,

@@ -1,0 +1,219 @@
+{
+  "generatedAt": "2026-11-18T11:46:35.492Z",
+  "trials": 120,
+  "targetRates": [
+    0.9,
+    0.65,
+    0.4
+  ],
+  "scaleAnchors": [
+    [
+      8.1,
+      7.33,
+      6.51
+    ],
+    [
+      13.05,
+      12.84,
+      12.27
+    ],
+    [
+      45.46,
+      45.81,
+      46.45
+    ],
+    [
+      55.21,
+      50.08,
+      45.31
+    ],
+    [
+      98.53,
+      96.48,
+      100.97
+    ],
+    [
+      186.82,
+      181.21,
+      186.54
+    ],
+    [
+      402.02,
+      407.58,
+      392.57
+    ],
+    [
+      1099.15,
+      1064.83,
+      1028.54
+    ]
+  ],
+  "tiers": [
+    {
+      "index": 0,
+      "name": "残魂列阵",
+      "reference": {
+        "level": 10,
+        "star": 2,
+        "skill": 5,
+        "relic": 10
+      },
+      "winRates": [
+        0.933,
+        0.658,
+        0.308
+      ]
+    },
+    {
+      "index": 1,
+      "name": "蜃影回廊",
+      "reference": {
+        "level": 31,
+        "star": 2,
+        "skill": 5,
+        "relic": 10
+      },
+      "winRates": [
+        0.925,
+        0.625,
+        0.35
+      ]
+    },
+    {
+      "index": 2,
+      "name": "潮汐遗构",
+      "reference": {
+        "level": 62,
+        "star": 3,
+        "skill": 10,
+        "relic": 25
+      },
+      "winRates": [
+        0.933,
+        0.742,
+        0.433
+      ]
+    },
+    {
+      "index": 3,
+      "name": "雷髓裂谷",
+      "reference": {
+        "level": 78,
+        "star": 3,
+        "skill": 10,
+        "relic": 25
+      },
+      "winRates": [
+        0.958,
+        0.783,
+        0.45
+      ]
+    },
+    {
+      "index": 4,
+      "name": "幽林菌穹",
+      "reference": {
+        "level": 108,
+        "star": 4,
+        "skill": 15,
+        "relic": 40
+      },
+      "winRates": [
+        0.917,
+        0.717,
+        0.542
+      ]
+    },
+    {
+      "index": 5,
+      "name": "熔心地脉",
+      "reference": {
+        "level": 133,
+        "star": 4,
+        "skill": 15,
+        "relic": 40
+      },
+      "winRates": [
+        0.875,
+        0.633,
+        0.375
+      ]
+    },
+    {
+      "index": 6,
+      "name": "霜寂雪原",
+      "reference": {
+        "level": 164,
+        "star": 5,
+        "skill": 18,
+        "relic": 50
+      },
+      "winRates": [
+        0.892,
+        0.658,
+        0.517
+      ]
+    },
+    {
+      "index": 7,
+      "name": "织梦沉渊",
+      "reference": {
+        "level": 193,
+        "star": 5,
+        "skill": 18,
+        "relic": 50
+      },
+      "winRates": [
+        0.925,
+        0.692,
+        0.45
+      ]
+    }
+  ],
+  "progression": [
+    {
+      "tier": "黑铁",
+      "minPoints": 0,
+      "fullWeeks": 0
+    },
+    {
+      "tier": "青铜",
+      "minPoints": 300,
+      "fullWeeks": 1
+    },
+    {
+      "tier": "白银",
+      "minPoints": 900,
+      "fullWeeks": 1
+    },
+    {
+      "tier": "黄金",
+      "minPoints": 1800,
+      "fullWeeks": 1
+    },
+    {
+      "tier": "铂金",
+      "minPoints": 3600,
+      "fullWeeks": 2
+    },
+    {
+      "tier": "钻石",
+      "minPoints": 7200,
+      "fullWeeks": 4
+    },
+    {
+      "tier": "大师",
+      "minPoints": 14400,
+      "fullWeeks": 8
+    },
+    {
+      "tier": "王者",
+      "minPoints": 28800,
+      "fullWeeks": 15
+    }
+  ],
+  "seasonWeeks": 4,
+  "seasonCarryPct": 0.4,
+  "pointsPerSquad": 400,
+  "pointsClearBonus": 800
+}

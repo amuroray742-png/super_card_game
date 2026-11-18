@@ -78,7 +78,7 @@ function tierProgress(min: number): number {
     <section class="panel">
       <div class="panel-title"><span>竞技数据</span></div>
       <div class="row-between tiny">
-        <span class="muted">段位分</span>
+        <span class="muted">天梯段位分</span>
         <b>{{ formatNumber(arena.tierPoints) }}</b>
       </div>
       <div class="row-between tiny">
@@ -88,6 +88,10 @@ function tierProgress(min: number): number {
       <div class="row-between tiny">
         <span class="muted">勋章</span>
         <b>{{ formatNumber(arena.medals) }}</b>
+      </div>
+      <div class="row-between tiny">
+        <span class="muted">竞技材料</span>
+        <b>{{ formatNumber(arena.arenaMaterials ?? 0) }}</b>
       </div>
       <div class="row-between tiny">
         <span class="muted">竞技等级</span>
@@ -100,8 +104,12 @@ function tierProgress(min: number): number {
       <p class="tiny muted" style="margin: 8px 0 0">
         竞技等级决定可用的战术铭文槽位数量，不直接提供属性加成。
       </p>
+      <p class="tiny muted" style="margin: 4px 0 0">
+        天梯段位分由**三队天梯**累计（每周一轮），与对战分互不换算（§9.2）。
+      </p>
     </section>
 
+    <button class="btn btn-block btn-ghost" @click="router.push('/ladder')">前往演武场 ›</button>
     <button class="btn btn-block btn-ghost" @click="router.push('/arena')">返回竞技场</button>
   </div>
 </template>

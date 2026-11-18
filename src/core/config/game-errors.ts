@@ -46,6 +46,16 @@ export const GAME_ERROR_CODES = {
   TASK_NOT_COMPLETED: 'TASK_NOT_COMPLETED',
   /** 本周期该任务已领取过了 */
   TASK_ALREADY_CLAIMED: 'TASK_ALREADY_CLAIMED',
+  /** 竞技场（Phase 11；首发仅为 PVE 天梯段位数据） */
+  ARENA_NOT_FOUND: 'ARENA_NOT_FOUND',
+  /** 三队天梯：三队都是空的 */
+  LADDER_NO_SQUAD: 'LADDER_NO_SQUAD',
+  /** 三队天梯：本周已经结算过了 */
+  LADDER_ALREADY_SETTLED: 'LADDER_ALREADY_SETTLED',
+  /** 三队天梯：阵容不合法（未拥有的英灵 / 同队重复） */
+  LADDER_INVALID_LINEUP: 'LADDER_INVALID_LINEUP',
+  /** 没有可领取的回流奖励 */
+  RETURN_NOT_AVAILABLE: 'RETURN_NOT_AVAILABLE',
   /** 兑换码无效 */
   CODE_INVALID: 'CODE_INVALID',
   /** 兑换码已使用 */
@@ -92,6 +102,11 @@ export const GAME_ERROR_MESSAGES: Record<GameErrorCode, string> = {
   TASK_NOT_FOUND: '任务不存在',
   TASK_NOT_COMPLETED: '任务还没完成',
   TASK_ALREADY_CLAIMED: '该任务的奖励已经领取过了',
+  ARENA_NOT_FOUND: '目标不存在',
+  LADDER_NO_SQUAD: '请先在演武场编队',
+  LADDER_ALREADY_SETTLED: '本周的天梯已经挑战过了',
+  LADDER_INVALID_LINEUP: '阵容不合法',
+  RETURN_NOT_AVAILABLE: '当前没有可领取的回流奖励',
   CODE_INVALID: '兑换码无效',
   CODE_USED: '该兑换码已使用',
   REBIRTH_LOCKED: '暂不满足圣杯重启条件',

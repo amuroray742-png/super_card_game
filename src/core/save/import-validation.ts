@@ -7,6 +7,7 @@ import { POOLS } from '../config/pools.ts'
 import { STAGES } from '../config/stages.ts'
 import { BATTLE, LEVEL, STAR, SKILL, RELIC, REBIRTH, GACHA } from '../config/economy.ts'
 import { parseEquipKey } from '../systems/loadout.ts'
+import { emptyLadderSquads } from '../config/ladder.ts'
 import { dayIndex, arenaWeekIndex } from '../time.ts'
 
 function requireValid(ok: unknown): asserts ok {
@@ -109,7 +110,22 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   // 导入后整周拿不到竞技勋章与竞技抽卡券（公式见 arena.ts 的 min(base, CAP - weekly)）。
   save.arena.weeklyMedals = 0
   save.arena.weeklyTickets = 0
+  save.arena.weeklyMaterials = 0
   save.arena.defenseLoadout = null
   save.arena.snapshotHash = null
+  // 天梯：周结算标记与编队**不继承**导入值。
+  //
+  // ⚠ 继承了「本周已结算」的话，导入后一整周都打不了天梯（每周只有一轮）；
+  //   编队里也可能有玩家已经不再拥有的英灵 → 一挑战就报错。
+  //   段位分与赛季称号保留（那是玩家真打出来的进度）。
+  save.arena.ladder.lastSettledWeek = null
+  save.arena.ladder.seasonPoints = 0
+  save.arena.ladder.season = 1
+  save.arena.ladder.seasonStartWeek = arenaWeekIndex(now)
+  save.arena.ladder.squads = emptyLadderSquads()
+  save.arena.ladder.lastActiveAt = now
+  save.arena.ladder.lastReturnAt = 0
+  save.arena.ladder.returnPending = false
+  save.arena.ladder.returnDays = 0
   return save
 }

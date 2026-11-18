@@ -77,6 +77,9 @@ function setName(ids: (string | null)[] | undefined): string {
       <p class="tiny warn-text" style="margin: 8px 0 0; line-height: 1.8">
         竞技场<b>不提供银两、经验、强化石、圣杯结晶</b>，产出不会回流主线养成经济。
       </p>
+      <p class="tiny muted" style="margin: 8px 0 0; line-height: 1.8">
+        30 回合仍未分胜负时，按<b>双方剩余血量比例</b>判定（血量比例高的一方获胜）。
+      </p>
     </section>
 
     <!-- 我的段位 -->
@@ -87,7 +90,7 @@ function setName(ids: (string | null)[] | undefined): string {
       </div>
       <div class="grid-3">
         <div class="metric">
-          <div class="tiny muted">段位</div>
+          <div class="tiny muted">天梯段位</div>
           <div class="metric-num gold">{{ tier }}</div>
         </div>
         <div class="metric">
@@ -100,7 +103,7 @@ function setName(ids: (string | null)[] | undefined): string {
         </div>
       </div>
       <div class="row-between tiny" style="margin-top: 10px">
-        <span class="muted">段位分</span>
+        <span class="muted">天梯段位分</span>
         <b>{{ formatNumber(arena.tierPoints) }}</b>
       </div>
       <div class="row-between tiny">
@@ -108,9 +111,21 @@ function setName(ids: (string | null)[] | undefined): string {
         <b>{{ formatNumber(arena.pvpPoints) }}</b>
       </div>
       <div class="row-between tiny">
+        <span class="muted">竞技材料</span>
+        <b>{{ formatNumber(arena.arenaMaterials ?? 0) }}</b>
+      </div>
+      <div class="row-between tiny">
         <span class="muted">战术铭文</span>
         <b>{{ runeSlots }} / 3</b>
       </div>
+      <button
+        class="btn btn-block"
+        style="margin-top: 10px"
+        data-testid="arena-goto-ladder"
+        @click="router.push('/ladder')"
+      >
+        前往演武场（三队天梯 · PVE 完整数值）›
+      </button>
     </section>
 
     <!-- 阵容快照 -->
@@ -152,6 +167,10 @@ function setName(ids: (string | null)[] | undefined): string {
       <div class="row-between tiny">
         <span class="muted">回合数</span>
         <b>{{ match.result.rounds }}</b>
+      </div>
+      <div v-if="match.tiebreak === 'hp-ratio'" class="row-between tiny">
+        <span class="muted">判定方式</span>
+        <b>回合用尽 · 按剩余血量判定</b>
       </div>
       <div class="row-between tiny">
         <span class="muted">我方存活</span>
