@@ -13,8 +13,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { BATTLE, REBIRTH } from '../../src/core/config/economy.ts'
+import { getStage } from '../../src/core/config/stages.ts'
+import { createHeroState } from '../../src/core/systems/growth.ts'
 import { startServerHarness, type ServerHarness } from './helpers/server-harness.ts'
-import { registerAndLoad } from './helpers/store-harness.ts'
+import { registerAndLoad, seedSave } from './helpers/store-harness.ts'
 
 /** 模拟存储：key = slot，value = 序列化后的存档（只读缓存） */
 const mem = vi.hoisted(() => new Map<string, string>())
@@ -66,6 +69,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await harness.close()
 })
 
@@ -117,6 +121,32 @@ describe('服务端权威：本地缓存不是权威', () => {
   })
 })
 
+describe('编队战力', () => {
+  it('永久加成让页面战力与挂机一起达到下一关门槛，竞技快照保持一致', async () => {
+    let now = Date.now()
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const store = await registerAndLoad('team_power')
+    const hero = createHeroState('xiangyu', now)
+    const nextStage = getStage(2)
+    await seedSave((save) => { save.heroes[hero.id] = hero })
+
+    expect(store.teamPower).toBeLessThan(nextStage.powerRequired)
+    const arenaHash = store.arenaHash
+    now += BATTLE.SECONDS_PER_BATTLE * 1000
+    expect(await store.tickIdle(1)).toMatchObject({ lastClearedStage: 1, nextTargetStage: 1 })
+
+    await seedSave((save) => {
+      save.heroes[hero.id] = hero
+      save.player.permBoost = REBIRTH.PERM_BOOST_CAP
+    })
+
+    expect(store.teamPower).toBeGreaterThanOrEqual(nextStage.powerRequired)
+    expect(store.arenaHash).toBe(arenaHash)
+    now += BATTLE.SECONDS_PER_BATTLE * 1000
+    expect(await store.tickIdle(1)).toMatchObject({ lastClearedStage: 1, nextTargetStage: nextStage.id })
+  })
+})
+
 describe('服务端权威：失败即原子', () => {
   it('余额不足 → 动作失败，存档一字节未变', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.now())
@@ -129,7 +159,6 @@ describe('服务端权威：失败即原子', () => {
     const res = await store.pull('standard', 10)
     expect(res).toBeNull()
     expect(JSON.stringify(store.save)).toBe(before)
-    vi.restoreAllMocks()
   })
 })
 

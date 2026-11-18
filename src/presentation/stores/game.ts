@@ -36,7 +36,7 @@ import { systemClock } from '../../core/time.ts'
 import { hashSeed } from '../../core/rng.ts'
 import { HEROES, HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { STAGES } from '../../core/config/stages.ts'
-import { getTeamPower, computeBondState, isTeamEmpty } from '../../core/systems/team.ts'
+import { computeBondState, isTeamEmpty } from '../../core/systems/team.ts'
 import { type OfflineSettlementResult } from '../../core/systems/idle.ts'
 import { getEquippedRelics, equippedOwnerMap, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { getPool, groupByRarity, resolvePoolHeroIds } from '../../core/config/pools.ts'
@@ -79,6 +79,7 @@ import {
   buildHeroIndex,
   buildRelicsByUid,
   buildTeam,
+  buildTeamPower,
 } from '../../core/systems/derive.ts'
 
 export const useGameStore = defineStore('game', () => {
@@ -507,7 +508,7 @@ export const useGameStore = defineStore('game', () => {
   /** 当前编队的运行时对象 */
   const team = computed<HeroRuntime[]>(() => buildTeam(save.value))
 
-  const teamPower = computed(() => getTeamPower(team.value, { mode: 'pve' }))
+  const teamPower = computed(() => buildTeamPower(save.value))
   const bondStates = computed(() => computeBondState(team.value))
   const teamEmpty = computed(() => isTeamEmpty(save.value.team.slots))
 
