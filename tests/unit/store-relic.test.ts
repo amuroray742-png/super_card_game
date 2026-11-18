@@ -49,7 +49,8 @@ vi.mock('../../src/platform/storage.ts', () => ({
 
 const { useGameStore } = await import('../../src/presentation/stores/game.ts')
 const { createHeroState } = await import('../../src/core/systems/growth.ts')
-const { generateRelic, getRelicMods, relicUpgradeCost } = await import('../../src/core/systems/relic.ts')
+const { getRelicMods, relicUpgradeCost } = await import('../../src/core/systems/relic.ts')
+const { makeTestRelic } = await import('./helpers.ts')
 const { getEquippedRelics } = await import('../../src/core/systems/loadout.ts')
 const { Rng } = await import('../../src/core/rng.ts')
 
@@ -166,7 +167,7 @@ describe('遗物强化', () => {
   it('强化真的 +1：等级涨、银两与强化石被扣、缓存已更新', async () => {
     const store = useGameStore()
     const rng = new Rng(2024)
-    const relic = generateRelic('set_zhanshen_1', rng, 1)
+    const relic = makeTestRelic('set_zhanshen_1', rng, 1)
     await seedSave((save) => {
       save.relics = [relic]
     })
@@ -187,7 +188,7 @@ describe('遗物强化', () => {
   it('资源不足时拒绝强化：不扣资源、等级不变', async () => {
     const store = useGameStore()
     const rng = new Rng(2024)
-    const relic = generateRelic('set_zhanshen_1', rng, 1)
+    const relic = makeTestRelic('set_zhanshen_1', rng, 1)
     await seedSave((save) => {
       save.relics = [relic]
       save.player.silver = 0
@@ -204,7 +205,7 @@ describe('遗物强化', () => {
   it('强化会真的提升属性（主词条随等级缩放）', async () => {
     const store = useGameStore()
     const rng = new Rng(2024)
-    const relic = generateRelic('set_zhanshen_1', rng, 1)
+    const relic = makeTestRelic('set_zhanshen_1', rng, 1)
     await seedSave((save) => {
       save.relics = [relic]
     })
@@ -244,7 +245,7 @@ describe('遗物一键推荐装备', () => {
       'set_tanpo_4',
     ]
     await seedSave((save) => {
-      save.relics = pool.map((id) => generateRelic(id, rng, 60))
+      save.relics = pool.map((id) => makeTestRelic(id, rng, 60))
     })
 
     const before = store.relicAdvice('xiangyu')
@@ -268,11 +269,11 @@ describe('遗物一键推荐装备', () => {
     const store = useGameStore()
     const rng = new Rng(99)
     const relics = [
-      generateRelic('set_zhanshen_1', rng, 60),
-      generateRelic('set_zhanshen_2', rng, 60),
-      generateRelic('set_zhanshen_3', rng, 60),
-      generateRelic('set_zhanshen_4', rng, 60),
-      generateRelic('set_tanpo_1', rng, 60),
+      makeTestRelic('set_zhanshen_1', rng, 60),
+      makeTestRelic('set_zhanshen_2', rng, 60),
+      makeTestRelic('set_zhanshen_3', rng, 60),
+      makeTestRelic('set_zhanshen_4', rng, 60),
+      makeTestRelic('set_tanpo_1', rng, 60),
     ]
     await seedSave((save) => {
       save.heroes['hanxin'] = { ...createHeroState('hanxin', 0), level: 60 }

@@ -38,7 +38,7 @@ import { computeBondState, isTeamEmpty } from '../../core/systems/team.ts'
 import { type OfflineSettlementResult } from '../../core/systems/idle.ts'
 import { getEquippedRelics, equippedOwnerMap, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { getPool } from '../../core/config/pools.ts'
-import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, generateRelic, RELIC_SETS } from '../../core/systems/relic.ts'
+import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, RELIC_SETS } from '../../core/systems/relic.ts'
 import { type RelicAdvice } from '../../core/systems/relic-advice.ts'
 import {
   applyExp,
@@ -506,6 +506,16 @@ export const useGameStore = defineStore('game', () => {
   /** 当前编队的运行时对象 */
   const team = computed<HeroRuntime[]>(() => buildTeam(save.value))
 
+  /**
+   * 每日入口的红点状态。
+   *
+   * ⚠ 跨天判定一律走 core 的 `dayIndex`（北京时间），
+   *   表现层不自己算「今天是不是新的一天」（铁律 #2 / #8）。
+   */
+  const dailyStatus = computed(() => ({
+    signedToday: save.value.daily.lastSignInDay === dayIndex(clock.now()),
+  }))
+
   const teamPower = computed(() => buildTeamPower(save.value))
   const bondStates = computed(() => computeBondState(team.value))
   const teamEmpty = computed(() => isTeamEmpty(save.value.team.slots))
@@ -776,6 +786,7 @@ export const useGameStore = defineStore('game', () => {
     teamPower,
     teamEmpty,
     bondStates,
+    dailyStatus,
     currentStage,
     clearedStage,
     ownedHeroes,

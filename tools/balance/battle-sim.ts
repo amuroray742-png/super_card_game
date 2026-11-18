@@ -18,7 +18,7 @@ import { getEnemy } from '../../src/core/config/enemies.ts'
 import { STAGES, getStage } from '../../src/core/config/stages.ts'
 import { getTeamPower, preferredSlotForRole } from '../../src/core/systems/team.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
-import { generateRelic } from '../../src/core/systems/relic.ts'
+import { generateRelic, makeRelicUid } from '../../src/core/systems/relic.ts'
 import { Rng } from '../../src/core/rng.ts'
 import type { EnemyDef, HeroRuntime, HeroState } from '../../src/core/model/types.ts'
 // 加载遗物配置（内部会注册到遗物索引）
@@ -30,6 +30,10 @@ const TRIALS = 120
 const SCAN_TRIALS = 20
 
 /** 构造一支指定投入水平的队伍（阵型与玩家实际摆法一致） */
+/** 模拟用的遗物 uid 计数器（不入存档，但同批内必须唯一） */
+let relicSeq = 0
+
+/** 构造一支指定投入水平的队伍（满编与实际摆法一致） */
 function buildTeam(level: number, star: number, skillLevel: number, relicLevel: number): HeroRuntime[] {
   const rng = new Rng(20261110)
   const roster = HEROES.filter((h) => h.rarity === 'SSR').slice(0, 6)
@@ -50,9 +54,10 @@ function buildTeam(level: number, star: number, skillLevel: number, relicLevel: 
       obtainedAt: 0,
     }
     const setId = def.relicAffinity[0]
-    const relics = Array.from({ length: 6 }, (_, i) =>
-      generateRelic(`${setId}_${(i % 5) + 1}`, rng, relicLevel),
-    )
+    const relics = Array.from({ length: 6 }, (_, i) => {
+      relicSeq += 1
+      return generateRelic(`${setId}_${(i % 5) + 1}`, rng, relicLevel, makeRelicUid(relicSeq))
+    })
     return { def, state, relics, slot }
   })
 }

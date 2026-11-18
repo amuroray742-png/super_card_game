@@ -13,13 +13,16 @@ import { computePower, resolveStats } from '../../src/core/systems/stats.ts'
 import { getHeroPassiveMods } from '../../src/core/systems/growth.ts'
 import { getHeroSetMods } from '../../src/core/systems/relic.ts'
 import { getTeamPower, getBondMods, preferredSlotForRole } from '../../src/core/systems/team.ts'
-import { generateRelic } from '../../src/core/systems/relic.ts'
+import { generateRelic, makeRelicUid } from '../../src/core/systems/relic.ts'
 import { Rng } from '../../src/core/rng.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
 // 加载遗物 / 敌人配置（内部会注册到各自索引）
 import '../../src/core/config/relics.ts'
 import '../../src/core/config/enemies.ts'
 import type { HeroRuntime, HeroState } from '../../src/core/model/types.ts'
+
+/** 模拟用的遗物 uid 计数器（不入存档，但同批内必须唯一） */
+let relicSeq = 0
 
 /** 构造一支指定投入水平的队伍 */
 function buildTeam(
@@ -57,7 +60,8 @@ function buildTeam(
     const setId = def.relicAffinity[0]
     const relics = Array.from({ length: 6 }, (_, i) => {
       const relicDef = `${setId}_${(i % 5) + 1}`
-      return generateRelic(relicDef, rng, relicLevel)
+      relicSeq += 1
+      return generateRelic(relicDef, rng, relicLevel, makeRelicUid(relicSeq))
     })
     return { def, state, relics, slot }
   })

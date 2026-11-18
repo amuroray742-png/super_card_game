@@ -590,6 +590,15 @@ export interface SaveData {
   }
   heroes: Record<string, HeroState>
   relics: RelicInstance[]
+  /**
+   * 遗物实例 uid 自增序号。
+   *
+   * ⚠ uid 必须由**存档内**的计数器派生（`r` + 序号的 36 进制）。
+   *   早前用「模块级全局计数器 + Math.random()」生成：进程重启后计数器归零，
+   *   会与存档里已有的 uid 重复 → `find(uid)` 命中**错误遗物**（强化/分解错件）；
+   *   且 core 里出现 Math.random() 违反铁律 #1。
+   */
+  relicSeq: number
   equipped: Record<string, { heroId: string; relicId: string }>
   team: { slots: (string | null)[]; presets: TeamPreset[] }
   gacha: {

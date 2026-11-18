@@ -5,7 +5,7 @@ import { HERO_INDEX } from '../config/heroes/index.ts'
 import { RELIC_INDEX } from '../config/relics.ts'
 import { POOLS } from '../config/pools.ts'
 import { STAGES } from '../config/stages.ts'
-import { ARENA, BATTLE, LEVEL, STAR, SKILL, RELIC, REBIRTH, GACHA } from '../config/economy.ts'
+import { BATTLE, LEVEL, STAR, SKILL, RELIC, REBIRTH, GACHA } from '../config/economy.ts'
 import { parseEquipKey } from '../systems/loadout.ts'
 import { dayIndex, arenaWeekIndex } from '../time.ts'
 
@@ -98,8 +98,10 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   save.createdAt = save.savedAt = save.lastTickAt = save.stats.firstStartAt = now
   save.daily = { signInStreak: 0, lastSignInDay: dayIndex(now), taskProgress: {}, taskClaimed: [] }
   save.arena.rewardWeek = arenaWeekIndex(now)
-  save.arena.weeklyMedals = ARENA.MEDAL_WEEKLY_CAP
-  save.arena.weeklyTickets = ARENA.TICKET_WEEKLY_CAP
+  // 「本周已获得」必须从 0 起算：置成周上限值等于宣告本周已满，
+  // 导入后整周拿不到竞技勋章与竞技抽卡券（公式见 arena.ts 的 min(base, CAP - weekly)）。
+  save.arena.weeklyMedals = 0
+  save.arena.weeklyTickets = 0
   save.arena.defenseLoadout = null
   save.arena.snapshotHash = null
   return save

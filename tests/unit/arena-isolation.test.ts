@@ -22,13 +22,13 @@ import {
 } from '../../src/core/systems/arena.ts'
 import { computePower, resolveStats } from '../../src/core/systems/stats.ts'
 import { effectiveRatio } from '../../src/core/systems/battle.ts'
-import { generateRelic, getHeroSetMods, getRelicMods } from '../../src/core/systems/relic.ts'
+import { getHeroSetMods, getRelicMods } from '../../src/core/systems/relic.ts'
 // 加载遗物配置（内部会注册到遗物索引）
 import '../../src/core/config/relics.ts'
 import { getBondMods } from '../../src/core/systems/team.ts'
 import { ARENA_CAPS, DEFAULT_ARENA_PROFILE } from '../../src/core/config/economy.ts'
 import { Rng } from '../../src/core/rng.ts'
-import { makeHero, maxedHero, nakedHero } from './helpers.ts'
+import { makeTestRelic, makeHero, maxedHero, nakedHero } from './helpers.ts'
 
 import { buildArenaSnapshot } from '../../src/core/systems/derive.ts'
 import { createNewSave, normalizeSave } from '../../src/core/save/schema.ts'
@@ -49,7 +49,7 @@ describe('竞技整改回归', () => {
   it.each([2, 4, 6])('快照保留 %i 件套并以竞技系数生效', (pieces) => {
     const save = arenaSave()
     for (let i = 0; i < pieces; i++) {
-      const relic = generateRelic('set_zhanshen_1', new Rng(i + 1))
+      const relic = makeTestRelic('set_zhanshen_1', new Rng(i + 1))
       relic.uid = `test-${i}`
       save.relics.push(relic)
       equipRelic(save, 'xiangyu', i, relic.uid)
@@ -173,8 +173,8 @@ describe('2. 永久加成屏蔽', () => {
 describe('3. 遗物强化屏蔽', () => {
   it('遗物 60 级与 1 级在竞技模式下无差异', () => {
     const rng = new Rng(1)
-    const low = generateRelic('set_zhanshen_1', rng, 1)
-    const high = generateRelic('set_zhanshen_1', rng, 60)
+    const low = makeTestRelic('set_zhanshen_1', rng, 1)
+    const high = makeTestRelic('set_zhanshen_1', rng, 60)
 
     // PVE 下差异显著（单件词条随强化等级缩放）
     const pveLow = getRelicMods(low)
@@ -220,8 +220,8 @@ describe('4. 封顶系数生效', () => {
   it('套装效果系数 ≤ 0.7', () => {
     const rng = new Rng(2)
     const relics = [
-      generateRelic('set_zhanshen_1', rng),
-      generateRelic('set_zhanshen_2', rng),
+      makeTestRelic('set_zhanshen_1', rng),
+      makeTestRelic('set_zhanshen_2', rng),
     ]
     const setMods = getHeroSetMods({ relics })
     // 各自路径的基线（不含套装效果），再比相对增量

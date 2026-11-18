@@ -13,11 +13,12 @@
  *   表现层，因此断言的是「规则本身」，而不是「界面点下去有没有生效」。
  */
 import { beforeEach, describe, expect, it } from 'vitest'
+import { makeTestRelic } from './helpers.ts'
 import type { SaveData } from '../../src/core/model/types.ts'
 import { applyAction, computeRelicAdvice, type ActionContext } from '../../src/core/systems/actions.ts'
 import { createNewSave } from '../../src/core/save/schema.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
-import { generateRelic, relicUpgradeCost, getRelicMods } from '../../src/core/systems/relic.ts'
+import { relicUpgradeCost, getRelicMods } from '../../src/core/systems/relic.ts'
 import { getEquippedRelics } from '../../src/core/systems/loadout.ts'
 import { Rng } from '../../src/core/rng.ts'
 import { GACHA } from '../../src/core/config/economy.ts'
@@ -58,7 +59,7 @@ describe('动作层：失败即原子（存档不变）', () => {
 
   it('遗物强化：资源不足 → 等级与资源都不变', () => {
     const rng = new Rng(1)
-    save.relics = [generateRelic('set_zhanshen_1', rng, 1)]
+    save.relics = [makeTestRelic('set_zhanshen_1', rng, 1)]
     save.player.silver = 0
     save.player.relicStones = 0
     const before = JSON.stringify(save)
@@ -187,7 +188,7 @@ describe('动作层：成功路径', () => {
 
   it('遗物强化：等级 +1、银两与强化石按配置扣、主词条随之变强', () => {
     const rng = new Rng(7)
-    save.relics = [generateRelic('set_zhanshen_1', rng, 1)]
+    save.relics = [makeTestRelic('set_zhanshen_1', rng, 1)]
     save.player.silver = 100_000
     save.player.relicStones = 500
     const uid = save.relics[0].uid
@@ -207,7 +208,7 @@ describe('动作层：成功路径', () => {
 
   it('遗物强化：满级后拒绝（不会越过 MAX_LEVEL）', () => {
     const rng = new Rng(7)
-    save.relics = [generateRelic('set_zhanshen_1', rng, 60)]
+    save.relics = [makeTestRelic('set_zhanshen_1', rng, 60)]
     save.player.silver = 1_000_000
     save.player.relicStones = 10_000
     const { ctx } = makeCtx(save)
@@ -273,7 +274,7 @@ describe('动作层：成功路径', () => {
 
   it('遗物分解：返还银两与强化石、从仓库与装备槽移除', () => {
     const rng = new Rng(11)
-    save.relics = [generateRelic('set_zhanshen_1', rng, 10)]
+    save.relics = [makeTestRelic('set_zhanshen_1', rng, 10)]
     save.heroes['xiangyu'] = createHeroState('xiangyu', NOW)
     const uid = save.relics[0].uid
     save.equipped['xiangyu#0'] = { heroId: 'xiangyu', relicId: uid }
@@ -369,7 +370,7 @@ describe('动作层：成功路径', () => {
     seedTeam(save)
     const rng = new Rng(4242)
     save.relics = ['set_zhanshen_1', 'set_zhanshen_2', 'set_zhanshen_3', 'set_zhanshen_4'].map((id) =>
-      generateRelic(id, rng, 60),
+      makeTestRelic(id, rng, 60),
     )
     const before = computeRelicAdvice(save, 'xiangyu')!
     const { ctx } = makeCtx(save)
@@ -395,3 +396,4 @@ describe('动作层：成功路径', () => {
     expect(save.rng.seed).toBe(987654321)
   })
 })
+

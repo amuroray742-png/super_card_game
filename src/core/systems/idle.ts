@@ -11,7 +11,7 @@
  * 这样不会出现"挂机 12 小时打不过却照样领满"的割裂感。
  */
 import type { BattleContext, BattleUnit, HeroRuntime, RewardBundle, StageDef } from '../model/types.ts'
-import { BATTLE, DROP_TABLES, IDLE } from '../config/economy.ts'
+import { BATTLE, DROP_TABLES, IDLE, RELIC } from '../config/economy.ts'
 import { getStage } from '../config/stages.ts'
 import { Rng } from '../rng.ts'
 import { runBattle } from './battle.ts'
@@ -268,9 +268,9 @@ function mergeRewards(target: RewardBundle, source: RewardBundle, shards: Record
   }
 }
 
-/** 生成一件遗物实例（用于掉落） */
-export function rollRelicInstance(relicId: string, rng: Rng) {
-  return generateRelic(relicId, rng)
+/** 生成一件遗物实例（uid 由调用方给出——存档内的遗物用 `nextRelicUid(save)`） */
+export function rollRelicInstance(relicId: string, rng: Rng, uid: string) {
+  return generateRelic(relicId, rng, RELIC.MIN_LEVEL, uid)
 }
 
 // ─────────────────────────── 内部索引 ───────────────────────────

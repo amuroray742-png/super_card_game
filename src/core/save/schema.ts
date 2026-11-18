@@ -6,10 +6,10 @@
 import type { SaveData } from '../model/types.ts'
 import { START_RESOURCES } from '../config/economy.ts'
 import { arenaWeekIndex } from '../time.ts'
-import { RELIC_DEFS, RELIC_SETS } from '../systems/relic.ts'
+import { makeRelicUid, parseLegacyRelicUid, RELIC_DEFS, RELIC_SETS } from '../systems/relic.ts'
 import '../config/relics.ts'
 
-export const SAVE_VERSION = 6
+export const SAVE_VERSION = 7
 
 export type Migration = (save: SaveData) => SaveData
 
@@ -52,6 +52,36 @@ export const MIGRATIONS: Record<number, Migration> = {
   // v5 → v6：旧版曾把权威随机状态发给客户端，载入后轮换该序列。
   5: (save) => {
     save.rng = { seed: 0, counter: 0 }
+    return save
+  },
+  // v6 → v7：遗物 uid 改为**存档内自增**。
+  //
+  // 旧 uid = `r` + 计数器(36 进制) + 随机后缀(36 进制)，两段长度不定 → 无法唯一切分，
+  // 而且计数器是**模块级全局变量**（进程重启即归零）→ 会与存档里已有 uid 重复，
+  // `find(uid)` 命中错误遗物（强化 / 分解错件）。
+  //
+  // 迁移策略：给每件遗物**重新编号**成 `r` + 新序号（序号从「所有旧 uid 可能的最大计数器」之后开始），
+  // 并同步改写 `save.equipped` 里的 relicId 引用（装备关系不能丢）。
+  6: (save) => {
+    // 旧格式后缀至少 1 位 → 计数器最大只能取「除末位以外」的那段
+    let maxCounter = 0
+    for (const relic of save.relics) {
+      const counter = parseLegacyRelicUid(relic.uid)
+      if (counter !== null && counter > maxCounter) maxCounter = counter
+    }
+    const remap = new Map<string, string>()
+    let seq = maxCounter
+    for (const relic of save.relics) {
+      seq += 1
+      const next = makeRelicUid(seq)
+      remap.set(relic.uid, next)
+      relic.uid = next
+    }
+    for (const entry of Object.values(save.equipped)) {
+      const mapped = remap.get(entry.relicId)
+      if (mapped) entry.relicId = mapped
+    }
+    save.relicSeq = seq
     return save
   },
 }
@@ -101,6 +131,7 @@ export function createNewSave(now: number, seed = 0): SaveData {
     },
     heroes: {},
     relics: [],
+    relicSeq: 0,
     equipped: {},
     team: { slots: [null, null, null, null, null, null], presets: [] },
     gacha: { pitySSR: 0, pity10: 0, history: [], pools: {}, newbieUsed: false },
@@ -156,6 +187,7 @@ export function normalizeSave(raw: unknown): SaveData {
     daily: { ...base.daily, ...(save.daily ?? {}) },
     heroes: save.heroes ?? {},
     relics: Array.isArray(save.relics) ? save.relics : [],
+    relicSeq: Number.isFinite(save.relicSeq) ? Math.max(0, Math.floor(save.relicSeq!)) : 0,
     equipped: save.equipped ?? {},
     codes: Array.isArray(save.codes) ? save.codes : [],
   }

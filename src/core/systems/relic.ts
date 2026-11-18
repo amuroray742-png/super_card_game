@@ -4,7 +4,7 @@
  * 遗物是最大的乘区来源（zone 'relic'）。
  * 竞技模式下：只取套装效果（×0.7），随机词条与强化等级一律无效（§6.8）。
  */
-import type { RelicDef, RelicInstance, RelicSetDef, StatMod } from '../model/types.ts'
+import type { RelicDef, RelicInstance, RelicSetDef, SaveData, StatMod } from '../model/types.ts'
 import { RELIC } from '../config/economy.ts'
 import { Rng } from '../rng.ts'
 
@@ -17,11 +17,44 @@ export function registerRelics(defs: readonly RelicDef[], sets: readonly RelicSe
   for (const s of sets) RELIC_SETS.set(s.id, s)
 }
 
-/** 全局遗物实例 id 计数器（存档内自增，避免随机碰撞） */
-let instanceCounter = 0
-export function nextRelicUid(prefix = 'r'): string {
-  instanceCounter++
-  return `${prefix}${instanceCounter.toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`
+// ─────────────────────────── uid ───────────────────────────
+
+/**
+ * 由序号生成遗物 uid（**纯函数**）。
+ *
+ * 存档内的遗物 uid 一律经 `nextRelicUid(save)` 派生；
+ * 本函数供**模拟 / 测试**等不入存档的场景使用。
+ */
+export function makeRelicUid(seq: number): string {
+  return `r${seq.toString(36)}`
+}
+
+/**
+ * 存档内的下一个遗物 uid（**自增，恒唯一**）。
+ *
+ * ⚠ 为什么不用随机后缀：随机后缀空间有限，遗物量级上千后必然碰撞；
+ *   碰撞会让 `save.relics.find(r => r.uid === uid)` 命中**错误遗物**。
+ *   存档内自增序号 → 唯一性由构造保证，且不依赖任何平台随机源（铁律 #1）。
+ */
+export function nextRelicUid(save: SaveData): string {
+  save.relicSeq = (save.relicSeq ?? 0) + 1
+  return makeRelicUid(save.relicSeq)
+}
+
+/**
+ * 解析**旧格式** uid 里的计数器（迁移用）。
+ *
+ * 旧格式 = `r` + 计数器(36 进制) + 随机后缀(36 进制)，两段长度不定 → 无法唯一切分。
+ * 这里返回**可能的最大计数器**（把除末位外的都当计数器），宁可高估也不低估，
+ * 保证迁移后的新序号不会与任何旧 uid 撞上。
+ */
+export function parseLegacyRelicUid(uid: string): number | null {
+  if (!uid.startsWith('r')) return null
+  const rest = uid.slice(1)
+  if (rest.length < 2) return null
+  const counter = rest.slice(0, -1)
+  const value = parseInt(counter, 36)
+  return Number.isFinite(value) ? value : null
 }
 
 // ─────────────────────────── 生成 ───────────────────────────
@@ -29,8 +62,16 @@ export function nextRelicUid(prefix = 'r'): string {
 /**
  * 生成一件遗物实例。
  * 主词条来自定义（固定），副词条从词条池随机抽取并定值（生成后不变）。
+ *
+ * @param uid 实例 id —— **由调用方从存档派生**（`nextRelicUid(save)`），
+ *            本函数不生成 id，保证「生成遗物」是纯函数。
  */
-export function generateRelic(defId: string, rng: Rng, level: number = RELIC.MIN_LEVEL): RelicInstance {
+export function generateRelic(
+  defId: string,
+  rng: Rng,
+  level: number = RELIC.MIN_LEVEL,
+  uid: string,
+): RelicInstance {
   const def = RELIC_DEFS.get(defId)
   if (!def) throw new Error(`未知遗物定义：${defId}`)
 
@@ -42,7 +83,7 @@ export function generateRelic(defId: string, rng: Rng, level: number = RELIC.MIN
   }))
 
   return {
-    uid: nextRelicUid(),
+    uid,
     defId,
     level: clampLevel(level),
     subStats,
@@ -50,9 +91,13 @@ export function generateRelic(defId: string, rng: Rng, level: number = RELIC.MIN
   }
 }
 
-/** 批量生成 */
-export function generateRelics(defIds: readonly string[], rng: Rng): RelicInstance[] {
-  return defIds.map((id) => generateRelic(id, rng))
+/** 批量生成（uid 由调用方按顺序给出） */
+export function generateRelics(
+  defIds: readonly string[],
+  rng: Rng,
+  uids: readonly string[],
+): RelicInstance[] {
+  return defIds.map((id, i) => generateRelic(id, rng, RELIC.MIN_LEVEL, uids[i] ?? makeRelicUid(i + 1)))
 }
 
 // ─────────────────────────── 属性 ───────────────────────────

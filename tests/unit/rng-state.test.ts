@@ -110,7 +110,7 @@ describe('core：RNG 快照忠实复原', () => {
 
 describe('存档：随机数状态字段', () => {
   it('存档版本已升级（新增 rng 字段）', () => {
-    expect(SAVE_VERSION).toBe(6)
+    expect(SAVE_VERSION).toBe(7)
   })
 
   it('新建存档带随机种子', () => {

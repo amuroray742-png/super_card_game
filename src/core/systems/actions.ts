@@ -59,6 +59,7 @@ import {
   applyRelicUpgrade,
   decomposeValue,
   generateRelic,
+  nextRelicUid,
   relicUpgradeCost,
   RELIC_SETS,
 } from './relic.ts'
@@ -284,7 +285,8 @@ export function applyRewardBundle(
   }
   if (rewards.relics) {
     for (const defId of rewards.relics) {
-      save.relics.push(generateRelic(defId, rng, 1))
+      // uid 由**存档内**计数器派生 → 唯一且可复现（不用随机后缀，避免大档碰撞）
+      save.relics.push(generateRelic(defId, rng, 1, nextRelicUid(save)))
     }
   }
   if (rewards.heroes) {

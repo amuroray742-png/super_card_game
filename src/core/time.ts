@@ -44,12 +44,32 @@ export function seconds(ms: number): number {
   return ms * 1000
 }
 
-/** 一天的自然日编号（用于每日签到跨天判定） */
+/** 北京时间与 UTC 的偏移（毫秒） */
+const BEIJING_OFFSET_MS = 8 * 3_600_000
+
+/**
+ * 北京时间自然日编号（用于每日签到 / 每日任务的跨天判定）。
+ *
+ * ⚠ 口径统一到**北京时间**：
+ *   此前 `dayIndex` 按 UTC 零点切日，而竞技周按北京时间周一零点切，
+ *   两套口径并存会让「今日签到」与「本周奖励」在不同时间点翻转。
+ *   周期类判定（日 / 周）现在**同源**，都走北京时间。
+ */
+export function beijingDayIndex(timestamp: number): number {
+  return Math.floor((timestamp + BEIJING_OFFSET_MS) / 86_400_000)
+}
+
+/** 一天的自然日编号（北京时间） */
 export function dayIndex(timestamp: number): number {
-  return Math.floor(timestamp / 86_400_000)
+  return beijingDayIndex(timestamp)
 }
 
 /** 北京时间周一零点切周。1970-01-01 为周四，平移三天到周一。 */
 export function arenaWeekIndex(timestamp: number): number {
-  return Math.floor((timestamp + 8 * 3_600_000 + 3 * 86_400_000) / (7 * 86_400_000))
+  return Math.floor((timestamp + BEIJING_OFFSET_MS + 3 * 86_400_000) / (7 * 86_400_000))
+}
+
+/** 一周的自然周编号（北京时间周一零点）——与竞技周同源，供周期任务复用 */
+export function weekIndex(timestamp: number): number {
+  return arenaWeekIndex(timestamp)
 }

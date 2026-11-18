@@ -14,11 +14,12 @@
  *   3. **关卡门槛与敌方缩放单调递增**，章边界不倒挂。
  */
 import { describe, expect, it } from 'vitest'
+import { makeTestRelic } from './helpers.ts'
 import { STAGES, getStage } from '../../src/core/config/stages.ts'
 import { STAGE } from '../../src/core/config/economy.ts'
 import { getEnemy } from '../../src/core/config/enemies.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
-import { generateRelic } from '../../src/core/systems/relic.ts'
+import { getRelicMods } from '../../src/core/systems/relic.ts'
 import { getTeamPower, preferredSlotForRole } from '../../src/core/systems/team.ts'
 import { simulateWinRate } from '../../src/core/systems/battle.ts'
 import { Rng } from '../../src/core/rng.ts'
@@ -82,7 +83,7 @@ function buildTeam(level: number): HeroRuntime[] {
     }
     const setId = def.relicAffinity[0]
     const relics = Array.from({ length: 6 }, (_, i) =>
-      generateRelic(`${setId}_${(i % 5) + 1}`, rng, relic),
+      makeTestRelic(`${setId}_${(i % 5) + 1}`, rng, relic),
     )
     return { def, state, relics, slot }
   })
@@ -146,3 +147,4 @@ describe('关卡难度：各章 BOSS 实战可通关', () => {
     }
   })
 })
+

@@ -12,10 +12,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import { recommendRelicLoadout, activeSetTiers } from '../../src/core/systems/relic-advice.ts'
-import { generateRelic, getSetMods } from '../../src/core/systems/relic.ts'
+import { getSetMods } from '../../src/core/systems/relic.ts'
 import { resolveStats, computePower } from '../../src/core/systems/stats.ts'
 import { Rng } from '../../src/core/rng.ts'
-import { nakedHero } from './helpers.ts'
+import { makeTestRelic, nakedHero } from './helpers.ts'
 import type { RelicInstance } from '../../src/core/model/types.ts'
 import '../../src/core/config/relics.ts'
 
@@ -23,7 +23,7 @@ import '../../src/core/config/relics.ts'
 function zhanshenSet(level = 60): RelicInstance[] {
   const rng = new Rng(20260117)
   return ['set_zhanshen_1', 'set_zhanshen_2', 'set_zhanshen_3', 'set_zhanshen_4', 'set_zhanshen_5', 'set_zhanshen_1'].map(
-    (id) => generateRelic(id, rng, level),
+    (id) => makeTestRelic(id, rng, level),
   )
 }
 
@@ -31,7 +31,7 @@ function zhanshenSet(level = 60): RelicInstance[] {
 function tanpoSet(level = 60): RelicInstance[] {
   const rng = new Rng(88888)
   return ['set_tanpo_1', 'set_tanpo_2', 'set_tanpo_3', 'set_tanpo_4'].map((id) =>
-    generateRelic(id, rng, level),
+    makeTestRelic(id, rng, level),
   )
 }
 
@@ -104,8 +104,8 @@ describe('遗物一键推荐', () => {
   it('会挑更强的遗物：满强化 SSR 胜过 1 级白装', () => {
     const hero = nakedHero('xiangyu')
     const rng = new Rng(7)
-    const weak = generateRelic('set_jiangtun_5', rng, 1)
-    const strong = generateRelic('set_zhanshen_1', rng, 60)
+    const weak = makeTestRelic('set_jiangtun_5', rng, 1)
+    const strong = makeTestRelic('set_zhanshen_1', rng, 60)
     const advice = recommendRelicLoadout(hero, [weak, strong], [])
     expect(advice.slots[0]?.uid).toBe(strong.uid)
   })

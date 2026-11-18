@@ -12,6 +12,7 @@ import { POOLS } from '../../src/core/config/pools.ts'
 import { BONDS } from '../../src/core/config/bonds.ts'
 import { BASE_RATES, GACHA, STAGE } from '../../src/core/config/economy.ts'
 import { getTeamPower } from '../../src/core/systems/team.ts'
+import { nextRelicUid } from '../../src/core/systems/relic.ts'
 import { ELEMENTS, ROLES } from '../../src/core/model/types.ts'
 import { maxedHero } from './helpers.ts'
 
@@ -62,6 +63,63 @@ describe('存档结构与迁移（§12.3 铁律 #4）', () => {
     expect(fixed.player.silver).toBe(10)
     expect(fixed.team.slots).toHaveLength(6)
     expect(fixed.arena.medals).toBe(0)
+  })
+
+  it('v6 → v7：遗物 uid 重编号后互不重复，装备引用同步改写', () => {
+    const old = createNewSave(4000) as unknown as Record<string, unknown>
+    old.version = 6
+    old.heroes = {
+      xiangyu: {
+        id: 'xiangyu',
+        level: 10,
+        exp: 0,
+        star: 1,
+        skillLevels: [1, 1, 1],
+        shards: 0,
+        coreAwakened: false,
+        obtainedAt: 0,
+      },
+    }
+    // 旧格式 uid：r + 计数器(36) + 随机后缀(36)
+    old.relics = [
+      { uid: 'r1t', defId: 'set_zhanshen_1', level: 3, subStats: [], locked: false },
+      { uid: 'r2k', defId: 'set_zhanshen_2', level: 5, subStats: [], locked: false },
+      { uid: 'rt1', defId: 'set_zhanshen_3', level: 7, subStats: [], locked: false },
+    ]
+    old.equipped = { 'xiangyu#0': { heroId: 'xiangyu', relicId: 'r2k' } }
+
+    // 走真实载入路径（deserialize 会按存档版本跑迁移链）
+    const migrated = deserialize(JSON.stringify(old))
+    expect(migrated.version).toBe(SAVE_VERSION)
+
+    const uids = migrated.relics.map((r) => r.uid)
+    expect(new Set(uids).size).toBe(uids.length)
+    // 旧 uid 全部换掉
+    expect(uids).not.toContain('r1t')
+    expect(uids).not.toContain('r2k')
+    expect(uids).not.toContain('rt1')
+    // 序号从「旧 uid 可能的最大计数器」之后开始
+    expect(migrated.relicSeq).toBeGreaterThan(29)
+
+    // 装备关系不能丢：引用的仍是同一件遗物
+    const equipped = migrated.equipped['xiangyu#0']
+    expect(equipped).toBeDefined()
+    expect(migrated.relics.some((r) => r.uid === equipped.relicId)).toBe(true)
+    // 且指向原来那件（defId 不变）
+    expect(migrated.relics.find((r) => r.uid === equipped.relicId)!.defId).toBe('set_zhanshen_2')
+  })
+
+  it('v6 → v7：重编号后的 uid 不会被后续生成撞上', () => {
+    const old = createNewSave(5000) as unknown as Record<string, unknown>
+    old.version = 6
+    old.relics = [{ uid: 'r1t', defId: 'set_zhanshen_1', level: 1, subStats: [], locked: false }]
+    const migrated = deserialize(JSON.stringify(old))
+    const seen = new Set(migrated.relics.map((r) => r.uid))
+    for (let i = 0; i < 100; i++) {
+      const uid = nextRelicUid(migrated)
+      expect(seen.has(uid)).toBe(false)
+      seen.add(uid)
+    }
   })
 })
 

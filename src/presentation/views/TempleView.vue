@@ -71,6 +71,23 @@ function starOf(id: string): number {
       </button>
     </section>
 
+    <!-- 每日入口（签到 / 日常任务） -->
+    <section class="panel">
+      <div class="row-between">
+        <div class="row" style="gap: 6px; align-items: center">
+          <span>每日</span>
+          <span v-if="!store.dailyStatus.signedToday" class="dot" data-testid="daily-dot" />
+        </div>
+        <span class="tiny muted">签到 · 日常任务</span>
+      </div>
+      <p class="tiny muted" style="margin: 6px 0 8px">
+        {{ store.dailyStatus.signedToday ? '今日已签到' : '今日尚未签到' }}
+      </p>
+      <button class="btn btn-sm btn-block" data-testid="daily-entry" @click="router.push('/daily')">
+        前往每日
+      </button>
+    </section>
+
     <!-- 筛选 -->
     <section class="panel">
       <input v-model="keyword" class="search" placeholder="搜索英灵名" />
@@ -219,5 +236,13 @@ function starOf(id: string): number {
 
 .dim {
   color: #4a4438;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-gold);
+  display: inline-block;
 }
 </style>

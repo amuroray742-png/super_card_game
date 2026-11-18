@@ -1,16 +1,22 @@
 <script setup lang="ts">
 /**
- * 传承：圣杯重启（永久加成）与兑换码。
+ * 传承：圣杯重启（永久加成）、兑换码，以及竞技场 / 图鉴 / 天梯入口。
  * 重启条件与收益全部取自 core 的 previewRebirth，组件只做展示与确认。
  */
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { REBIRTH, REDEEM_CODES } from '../../core/config/economy.ts'
+import { tierForPoints } from '../../core/systems/arena.ts'
 import { formatRate } from '../utils/format'
 
 const store = useGameStore()
+const router = useRouter()
 
 const preview = computed(() => store.rebirthPreview)
+
+/** 我的段位（与竞技场页同一口径） */
+const myTier = computed(() => tierForPoints(store.save.arena.tierPoints ?? 0))
 
 /** 重启二次确认 */
 const confirmOpen = ref(false)
@@ -38,6 +44,20 @@ async function redeem() {
 <template>
   <div class="page">
     <div class="page-title">传承</div>
+
+    <!-- 竞技场 / 图鉴 / 天梯入口 -->
+    <section class="panel">
+      <div class="panel-title">
+        <span>玩法入口</span>
+        <span class="tiny muted">竞技场 · 图鉴 · 天梯</span>
+      </div>
+      <button class="btn btn-sm btn-block" data-testid="arena-entry" @click="router.push('/arena')">
+        竞技场 · 镜像试炼<span class="tiny muted" style="margin-left: 6px">{{ myTier }}</span>
+      </button>
+      <button class="btn btn-sm btn-block" style="margin-top: 6px" data-testid="codex-entry" @click="router.push('/codex')">
+        图鉴 · 英灵与遗物
+      </button>
+    </section>
 
     <!-- 重启概览 -->
     <section class="panel">

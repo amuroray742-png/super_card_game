@@ -116,6 +116,40 @@ test.describe('抽卡入口可达（核心闭环）', () => {
   })
 })
 
+test.describe('核心页面入口可达（铁律 #10）', () => {
+  /**
+   * ⚠ 历史教训：召唤页曾有路由、有入口文案，但**游戏内一个入口都没挂**，
+   *   玩家只能手敲 URL —— 核心循环在游戏内完全不可达。
+   *   这条用例守的是「从主界面点得进去」，不是「路由存在」。
+   */
+  test('圣殿页可进入每日页', async ({ page }) => {
+    await gotoApp(page, '#/temple')
+    const entry = page.getByTestId('daily-entry')
+    await expect(entry).toBeVisible()
+    await entry.click()
+    await expect(page).toHaveURL(/#\/daily/)
+    await expect(page.getByText('每日签到').first()).toBeVisible()
+  })
+
+  test('传承页可进入竞技场与图鉴', async ({ page }) => {
+    await gotoApp(page, '#/legacy')
+
+    const arena = page.getByTestId('arena-entry')
+    await expect(arena).toBeVisible()
+    await arena.click()
+    await expect(page).toHaveURL(/#\/arena/)
+    await expect(page.getByText('竞技场').first()).toBeVisible()
+
+    await page.goBack()
+    await gotoApp(page, '#/legacy')
+    const codex = page.getByTestId('codex-entry')
+    await expect(codex).toBeVisible()
+    await codex.click()
+    await expect(page).toHaveURL(/#\/codex/)
+    await expect(page.getByText('图鉴').first()).toBeVisible()
+  })
+})
+
 test.describe('新手保底（§7.3 第 3 条）', () => {
   test('首次十连保底 1 位传说英灵，资格消耗后新手池隐藏', async ({ page }) => {
     await gotoApp(page, '#/compliance')
