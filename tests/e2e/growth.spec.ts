@@ -1,8 +1,18 @@
-import { test, expect, type Page } from '@playwright/test'
-import { cachedSaveOf, registerAccount, seedSession, settleIdleThroughUi, skipGachaReveal, uniqueUsername } from './helpers'
+import { test, expect, type Locator, type Page } from '@playwright/test'
+import type { ActionRequest, ActionResponse } from '../../src/core/systems/action-protocol.ts'
+import type { FeedExpResult } from '../../src/core/systems/actions.ts'
+import { cachedSaveOf, registerAccount, seedSession, settleIdleThroughUi, skipGachaReveal, uniqueUsername, type CachedSave } from './helpers'
 
 // 真实等待挂机预算；普通用例也不能再依赖连点瞬间领取十场。
 test.setTimeout(180_000)
+
+test.beforeEach(async ({ page }) => {
+  // 普通动作也会结算已累积的挂机收益，继续操作前先收下弹窗里的结算。
+  const offlineReport = page.locator('.dialog').filter({ hasText: '离线推征结算' })
+  await page.addLocatorHandler(offlineReport, async (report) => {
+    await report.getByRole('button', { name: '收下', exact: true }).click()
+  })
+})
 
 /**
  * 英灵养成端到端用例（属性面板 + 技能升级 + 喂经验扣经验池）。
@@ -84,11 +94,6 @@ async function heroLevelOf(page: Page, accountId: number, heroId: string): Promi
   return (await cachedSaveOf(page, accountId))?.heroes?.[heroId]?.level ?? 0
 }
 
-/** 读取某个英灵在存档里已投入但未升级的经验 */
-async function heroExpOf(page: Page, accountId: number, heroId: string): Promise<number> {
-  return (await cachedSaveOf(page, accountId))?.heroes?.[heroId]?.exp ?? 0
-}
-
 /** 从详情页 URL 里取英灵 id */
 function heroIdFromUrl(page: Page): string {
   return page.url().split('/hero/')[1]?.split('?')[0]?.split('#')[0] ?? ''
@@ -100,17 +105,52 @@ function heroIdFromUrl(page: Page): string {
  * ⚠ 经验是**推征掉落**进池子的，玩家必须先打过一场才有经验可喂。
  *   推征遇到战败会中断（runIdle 遇败即停），所以这里允许「这一轮没涨」再重试。
  */
-async function farmExp(page: Page, accountId: number, target: number, timeout = 150_000, battles = 1): Promise<number> {
+async function farmExp(page: Page, accountId: number, target: number, timeout = 150_000): Promise<number> {
   await page.goto('/#/expedition')
   await page.waitForLoadState('networkidle')
   let pool = await expPoolOf(page, accountId)
   const deadline = Date.now() + timeout
   while (pool < target && Date.now() < deadline) {
-    await settleIdleThroughUi(page, accountId, battles)
+    await settleIdleThroughUi(page, accountId)
     pool = await expPoolOf(page, accountId)
   }
   expect(pool, `真实挂机经验池未达到 ${target}（实际 ${pool}）`).toBeGreaterThanOrEqual(target)
   return pool
+}
+
+/** 清空编队以暂停收益，随后可以精确核对每笔养成扣款。 */
+async function pauseFarming(page: Page): Promise<void> {
+  await page.goto('/#/formation')
+  const slots = page.locator('.slot')
+  const picker = page.locator('.dialog').filter({ hasText: '选择英灵' })
+  await expect(slots).toHaveCount(SLOT_TEXTS.length)
+  for (let i = 0; i < SLOT_TEXTS.length; i++) {
+    const slot = slots.nth(i)
+    if (await slot.locator('.slot-empty').count()) continue
+    await slot.click()
+    await picker.getByRole('button', { name: new RegExp(`清空第 ${i + 1} 槽`) }).click()
+    await expect(slot.locator('.slot-empty')).toHaveCount(1)
+    await picker.getByRole('button', { name: '关闭', exact: true }).click()
+  }
+  await expect(slots.locator('.slot-empty')).toHaveCount(SLOT_TEXTS.length)
+}
+
+/** 读取本次喂经验的权威响应，核对实际扣费与变更后的存档。 */
+async function feedThroughUi(page: Page, button: Locator): Promise<{ save: CachedSave; applied: number }> {
+  const responsePromise = page.waitForResponse((response) => {
+    const request = response.request()
+    if (request.method() !== 'POST' || new URL(response.url()).pathname !== '/api/action') return false
+    return (request.postDataJSON() as ActionRequest).action.type === 'hero.feedExp'
+  })
+  await button.click()
+  const response = await responsePromise
+  expect(response.ok()).toBe(true)
+  const body = await response.json() as ActionResponse
+  expect(body.ok, body.message).toBe(true)
+  expect(body.save).toBeTruthy()
+  expect(body.result).toBeTruthy()
+  const result = body.result as FeedExpResult
+  return { save: JSON.parse(body.save!.payload) as CachedSave, applied: result.applied }
 }
 
 /** 进圣殿点开第一个英灵的详情页 */
@@ -264,6 +304,7 @@ test.describe('喂经验扣玩家经验池', () => {
     const pool = await farmExp(page, accountId, 1_200)
     expect(pool).toBeGreaterThan(0)
 
+    await pauseFarming(page)
     await openFirstHeroDetail(page)
     // 详情页要能看到经验池
     await expect(page.locator('[data-testid="exp-pool"]')).toBeVisible()
@@ -272,10 +313,11 @@ test.describe('喂经验扣玩家经验池', () => {
     const poolBefore = await expPoolOf(page, accountId)
 
     // 喂 1000 经验这一档
-    await page.locator('[data-feed="1000"]').click()
+    const fed = await feedThroughUi(page, page.locator('[data-feed="1000"]'))
 
-    // ⚠ 原实现只加不减：经验池纹丝不动，等于白嫖等级
-    await expect.poll(() => expPoolOf(page, accountId), { timeout: 8_000 }).toBe(poolBefore - 1000)
+    // 精确守住扣费：本次权威响应必须扣1000，不被后续在线入账污染。
+    expect(fed.applied).toBe(1000)
+    expect(fed.save.player?.exp).toBe(poolBefore - 1000)
     await expect.poll(() => levelOf(page), { timeout: 8_000 }).toBeGreaterThan(levelBefore)
   })
 
@@ -288,6 +330,7 @@ test.describe('喂经验扣玩家经验池', () => {
     // 1.2 千的经验喂不起「1.0 万」那一档
     expect(pool).toBeLessThan(10_000)
 
+    await pauseFarming(page)
     await openFirstHeroDetail(page)
     const btn = page.locator('[data-feed="10000"]')
     await expect(btn).toBeDisabled()
@@ -299,10 +342,13 @@ test.describe('喂经验扣玩家经验池', () => {
     await pullHeroes(page)
     await setupTeam(page)
     await farmExp(page, accountId, 1_200)
+    await pauseFarming(page)
     await openFirstHeroDetail(page)
 
-    await page.locator('[data-testid="feed-all"]').click()
-    await expect.poll(() => expPoolOf(page, accountId), { timeout: 8_000 }).toBe(0)
+    const poolBefore = await expPoolOf(page, accountId)
+    const fed = await feedThroughUi(page, page.locator('[data-testid="feed-all"]'))
+    expect(fed.applied).toBe(poolBefore)
+    expect(fed.save.player?.exp).toBe(0)
     await expect(page.locator('[data-testid="feed-all"]')).toBeDisabled()
   })
 })
@@ -341,19 +387,23 @@ test.describe('境界突破链路（喂经验至 Lv60 → 消耗印记突破到 
     // 升到 Lv60 单人要 7874 经验；这里攒到 1.5 万，
     // 好让突破后有**足够的存量经验**兑现成等级（否则只跨 1 级看不出兑现）。
     const TARGET_POOL = 15_000
-    const pool = await farmExp(page, accountId, TARGET_POOL, 1_650_000, 10)
+    const pool = await farmExp(page, accountId, TARGET_POOL, 1_650_000)
     expect(pool, `经验池没攒到 ${TARGET_POOL}（实际 ${pool}）`).toBeGreaterThanOrEqual(TARGET_POOL)
 
     // ── 2) 全部喂给主角 → 撞到境界门槛 Lv60 ──
+    // 收集过程全是真实挂机；收够后通过玩家编队操作暂停，隔离扣款/突破断言。
+    await pauseFarming(page)
     await page.goto(`/#/hero/${heroId}`)
     await page.waitForLoadState('networkidle')
-    await page.locator('[data-testid="feed-all"]').click()
+    const poolBeforeFeed = await expPoolOf(page, accountId)
+    const fed = await feedThroughUi(page, page.locator('[data-testid="feed-all"]'))
 
+    expect(fed.applied).toBe(poolBeforeFeed)
+    expect(fed.save.heroes?.[heroId]?.level).toBe(60)
+    expect(fed.save.player?.exp).toBe(0)
     await expect.poll(() => heroLevelOf(page, accountId, heroId), { timeout: 15_000 }).toBe(60)
-    // 经验池被扣干
-    await expect.poll(() => expPoolOf(page, accountId), { timeout: 8_000 }).toBe(0)
     // 没升掉的经验存在英灵身上（卡在门槛上也不丢）
-    const banked = await heroExpOf(page, accountId, heroId)
+    const banked = fed.save.heroes?.[heroId]?.exp ?? 0
     expect(banked).toBeGreaterThan(0)
 
     // ── 3) 境界门槛出现突破入口 ──
