@@ -9,7 +9,7 @@ import { GACHA } from '../config/economy.ts'
 import { getPool, groupByRarity, resolvePoolHeroIds } from '../config/pools.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { Rng } from '../rng.ts'
-import { drawRarity, type PityState } from './gachaRates.ts'
+import { computeEffectiveRates, drawRarity, shouldReplaceForNewbie, type PityState } from './gachaRates.ts'
 
 export interface PullResult {
   heroId: string
@@ -52,6 +52,23 @@ export interface PullContext {
    * 因此资格应按「是否已使用过」判定，而非「是否拥有该角色」。
    */
   newbieUsed?: boolean
+}
+
+function availableRarities(byRarity: Record<Rarity, string[]>): Rarity[] {
+  return (['SSR', 'SR', 'R', 'N'] as const).filter((rarity) => byRarity[rarity].length > 0)
+}
+
+/** 优先使用新手池指定的英灵。其他卡池使用该池的 SSR。 */
+function newbieGuaranteeTarget(byRarity: Record<Rarity, string[]>, newbieUsed: boolean): string | undefined {
+  if (newbieUsed) return undefined
+  const preferredHeroId = getPool('newbie').guaranteedHeroId
+  return preferredHeroId && byRarity.SSR.includes(preferredHeroId) ? preferredHeroId : byRarity.SSR[0]
+}
+
+/** 当前卡池和玩家保底资格对应的公示。 */
+export function ratesForPool(pool: PoolDef, pity: PityState, newbieUsed: boolean) {
+  const byRarity = groupByRarity(resolvePoolHeroIds(pool))
+  return computeEffectiveRates(pity, availableRarities(byRarity), newbieGuaranteeTarget(byRarity, newbieUsed) !== undefined)
 }
 
 /**
@@ -165,25 +182,10 @@ export function executePull(
    * 并入池内最低档，否则抽到 R/N 时取不到英灵（抛错），
    * 且公示概率与实际不符（合规问题）。见 gachaRates.projectToPool。
    */
-  const availableRarities = (['SSR', 'SR', 'R', 'N'] as const).filter((r) => (byRarity[r]?.length ?? 0) > 0)
-
-  /**
-   * 新手保底（方案 §7.3 第 3 条：「新手期首次 10 连保底 1 个 SSR」）。
-   *
-   * 资格按「是否已使用过」判定（`ctx.newbieUsed`），而非「是否已拥有该角色」——
-   * 后者会导致玩家在别的池先抽到该角色后福利永久失效。
-   *
-   * 保底目标：优先新手池指定的 SSR；若该角色不在当前池内，
-   * 退化为当前池内的任一 SSR（纪元池也含 SSR，故仍然成立）。
-   */
-  const newbiePool = getPool('newbie')
-  const preferredHeroId = newbiePool.guaranteedHeroId
-  const guaranteeTarget =
-    preferredHeroId && byRarity.SSR?.includes(preferredHeroId)
-      ? preferredHeroId
-      : byRarity.SSR?.[0]
-  const needGuarantee =
-    ctx.newbieUsed !== true && count === GACHA.TEN_PULL_COUNT && guaranteeTarget !== undefined
+  const rarities = availableRarities(byRarity)
+  const guaranteeTarget = count === GACHA.TEN_PULL_COUNT
+    ? newbieGuaranteeTarget(byRarity, ctx.newbieUsed === true)
+    : undefined
 
   /**
    * 新手资格在**首次十连**时即消耗，无论该十连是否自然抽到 SSR。
@@ -192,7 +194,7 @@ export function executePull(
    * 来把资格一直留到下一次十连，等于反复享受「十连必出 SSR」。
    * 资格与「本次是否触发替换」是两件事，必须分开判定。
    */
-  const newbieUsedConsumed = needGuarantee
+  const newbieUsedConsumed = guaranteeTarget !== undefined
 
   let batchHasSRPlus = false
 
@@ -211,7 +213,7 @@ export function executePull(
       isTenPull: count === GACHA.TEN_PULL_COUNT,
       batchHasSRPlus,
       batchIndex: i,
-      availableRarities,
+      availableRarities: rarities,
     })
 
     // 十连内抽到 SSR → 大保底计数归零（§7.3）
@@ -223,12 +225,8 @@ export function executePull(
     let rarity = draw.rarity
 
     // 新手保底：批次内最后一个位置替换为指定 SSR
-    if (
-      needGuarantee &&
-      i === count - 1 &&
-      !results.some((r) => r.rarity === 'SSR')
-    ) {
-      heroId = guaranteeTarget!
+    if (guaranteeTarget && shouldReplaceForNewbie(newbieUsedConsumed, i, results.some((r) => r.rarity === 'SSR'))) {
+      heroId = guaranteeTarget
       rarity = HERO_INDEX.get(heroId)?.rarity ?? 'SSR'
       guaranteedTriggered = true
       pity = { pitySSR: 0, pity10: 0 }

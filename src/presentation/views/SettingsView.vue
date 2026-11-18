@@ -61,10 +61,11 @@ const deleteOpen = ref(false)
 /** 注销账号：服务端级联删除账号 / 会话 / 云存档 */
 async function doDeleteAccount() {
   const ok = await account.deleteAccount()
-  deleteOpen.value = false
   if (!ok) return
-  store.notify('账号已注销，云端数据已删除', 'warn')
+  deleteOpen.value = false
+  const warning = account.error
   await router.replace('/login')
+  store.notify(warning || '账号已注销，云端数据已删除', warning ? 'warn' : 'ok')
 }
 
 // ─────────────────────────── 存档导出 / 导入 ───────────────────────────
@@ -143,7 +144,7 @@ async function doReset() {
         进度随账号保存在云端，登录后可在其他设备继续；本机也会保留一份副本。
       </p>
       <button class="btn btn-sm btn-block" style="margin-top: 10px" @click="doLogout">退出登录</button>
-      <button class="btn btn-sm btn-danger btn-block" style="margin-top: 6px" @click="deleteOpen = true">
+      <button class="btn btn-sm btn-danger btn-block" style="margin-top: 6px" :disabled="account.busy" @click="account.error = null; deleteOpen = true">
         注销账号
       </button>
     </section>
@@ -271,9 +272,10 @@ async function doReset() {
           注销后会删除账号 {{ account.user?.username }} 的云端存档与登录状态，本机副本也会被清除。
           该操作不可撤销，如需保留进度请先导出存档。
         </p>
+        <p v-if="account.error" role="alert" class="tiny">{{ account.error }}</p>
         <div class="row" style="gap: 8px">
-          <button class="btn btn-sm" style="flex: 1" @click="deleteOpen = false">取消</button>
-          <button class="btn btn-sm btn-danger" style="flex: 1" @click="doDeleteAccount">确认注销</button>
+          <button class="btn btn-sm" style="flex: 1" :disabled="account.busy" @click="deleteOpen = false">取消</button>
+          <button class="btn btn-sm btn-danger" style="flex: 1" :disabled="account.busy" @click="doDeleteAccount">确认注销</button>
         </div>
       </div>
     </div>

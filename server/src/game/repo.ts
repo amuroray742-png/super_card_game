@@ -60,19 +60,11 @@ export function writeActionLog(
   ).run(userId, actionId, result, createdAt)
 }
 
-/**
- * 只保留最近 `keep` 条幂等记录。
- *
- * 客户端的重试窗口是秒级，不需要永久留档；不裁剪的话日志表会无限增长。
- */
-export function trimActionLogs(db: Db, userId: number, keep: number): void {
+/** 清除过期响应正文，保留动作 ID 与时间作为已执行凭据。 */
+export function expireActionResults(db: Db, userId: number, expiresBefore: number): void {
   db.prepare(
-    `DELETE FROM action_log
-      WHERE user_id = ?
-        AND action_id NOT IN (
-          SELECT action_id FROM action_log WHERE user_id = ? ORDER BY id DESC LIMIT ?
-        )`,
-  ).run(userId, userId, keep)
+    "UPDATE action_log SET result = '' WHERE user_id = ? AND created_at <= ? AND result <> ''",
+  ).run(userId, expiresBefore)
 }
 
 /** 读账号标记（如「存量旧档已迁走」）；不存在返回 undefined */

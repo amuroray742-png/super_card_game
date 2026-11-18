@@ -30,9 +30,9 @@ test.describe('《超级圣杯战争》核心链路', () => {
   })
 
   test('概率公示页显示基础/综合双栏与两位小数', async ({ page }) => {
-    await gotoApp(page, '#/compliance')
+    await page.goto('/#/compliance')
     await expect(page.getByText('概率公示').first()).toBeVisible()
-    // 基础概率 0.60% 与综合概率 11.69% 必须在页面上可读
+    // 公开页展示常规十连，账号资格由登录后的公示单独覆盖。
     await expect(page.getByText('0.60%').first()).toBeVisible()
     await expect(page.getByText('11.69%').first()).toBeVisible()
   })
@@ -118,7 +118,12 @@ test.describe('抽卡入口可达（核心闭环）', () => {
 
 test.describe('新手保底（§7.3 第 3 条）', () => {
   test('首次十连保底 1 位传说英灵，资格消耗后新手池隐藏', async ({ page }) => {
-    await gotoApp(page, '#/gacha')
+    await gotoApp(page, '#/compliance')
+    const standard = page.locator('.pool-rate').filter({ hasText: '万灵殿' })
+    await expect(standard.locator('tbody tr').first().locator('td').nth(2)).toHaveText('100.00%')
+    await page.goto('/#/gacha')
+    const ssrRate = page.locator('.rate-table tbody tr').first().locator('td').nth(2)
+    await expect(ssrRate).toHaveText('100.00%')
     // 资格未消耗时，新手池「初临之赐」可见
     await expect(page.getByRole('button', { name: '初临之赐' })).toBeVisible()
 
@@ -138,6 +143,9 @@ test.describe('新手保底（§7.3 第 3 条）', () => {
 
     // 资格消耗后新手池隐藏
     await expect(page.getByRole('button', { name: '初临之赐' })).toHaveCount(0)
+    await expect(ssrRate).toHaveText('11.69%')
+    await page.goto('/#/compliance')
+    await expect(standard.locator('tbody tr').first().locator('td').nth(2)).toHaveText('11.69%')
   })
 })
 
@@ -211,7 +219,8 @@ test.describe('抽卡券可用于十连（逐抽计价）', () => {
 })
 
 test.describe('抽卡演出（分级演出）', () => {
-  test('十连：逐张翻牌 → SSR 全屏爆点 → 停住等点击 → 点一下才演完', async ({ page }) => {
+  test('十连逐张翻牌，每个 SSR 爆点都停住等点击后才继续', async ({ page }) => {
+    test.setTimeout(60_000)
     await gotoApp(page, '#/gacha')
 
     // 还没抽：没有结算弹窗
@@ -243,8 +252,14 @@ test.describe('抽卡演出（分级演出）', () => {
     await expect(reveal).toBeVisible()
     await expect(holdHint).toBeVisible()
 
-    // 玩家点一下画面 → 继续演完 → 出结算
-    await reveal.click({ position: { x: 12, y: 12 } })
+    // 每个实际抽到的 SSR 都有自己的停顿，须逐个放行。
+    const ssrCount = await page.locator('.hist-row .tag-ssr').count()
+    expect(ssrCount).toBeGreaterThanOrEqual(1)
+    for (let i = 0; i < ssrCount; i++) {
+      await expect(holdHint).toBeVisible({ timeout: 15000 })
+      await reveal.click({ position: { x: 12, y: 12 } })
+      await expect(holdHint).toBeHidden()
+    }
     await expect(page.locator('.dialog')).toBeVisible({ timeout: 15000 })
     await expect(reveal).toHaveCount(0)
 

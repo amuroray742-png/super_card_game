@@ -8,6 +8,7 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { IDLE } from '../core/config/economy.ts'
+import { STAGE_INDEX } from '../core/config/stages.ts'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from './stores/game'
 import { useAccountStore } from './stores/account'
@@ -59,6 +60,7 @@ const offlineRewards = computed(() => {
     { label: '遗物', value: r.relics?.length ?? 0 },
   ].filter((x) => x.value > 0)
 })
+const offlineBlockedStage = computed(() => STAGE_INDEX.get(store.offlineReport?.blockedAtStage ?? 0))
 
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 function stopHeartbeat() {
@@ -197,6 +199,7 @@ function goBackBare() {
           离线时长 {{ Math.round(store.offlineReport.elapsedSeconds / 60) }} 分钟，
           共进行 {{ store.offlineReport.battles }} 场推征
         </p>
+        <p v-if="offlineBlockedStage" class="muted tiny">本次结算在「{{ offlineBlockedStage.name }}」战败。</p>
         <div v-for="r in offlineRewards" :key="r.label" class="row-between" style="padding: 4px 0">
           <span class="muted">{{ r.label }}</span>
           <b>+{{ formatNumber(r.value) }}</b>

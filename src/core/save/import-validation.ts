@@ -94,6 +94,7 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   requireValid((BATTLE.SPEED_OPTIONS as readonly number[]).includes(save.settings.speed) && typeof save.settings.sfx === 'boolean' && typeof save.settings.skipAnim === 'boolean')
   // 控制字段不信任导入值：不补历史离线收益、不继承可预测序列或周期领取资格。
   save.rng = { seed: seed(), counter: 0 }
+  delete save.idle.farm
   save.createdAt = save.savedAt = save.lastTickAt = save.stats.firstStartAt = now
   save.daily = { signInStreak: 0, lastSignInDay: dayIndex(now), taskProgress: {}, taskClaimed: [] }
   save.arena.rewardWeek = arenaWeekIndex(now)

@@ -18,9 +18,9 @@ import { GameService } from '../../../server/src/game/service.ts'
 import { UserLock } from '../../../server/src/game/lock.ts'
 import { WindowLimiter } from '../../../server/src/rateLimit.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
-import { writeSave, writeFlag } from '../../../server/src/game/repo.ts'
-import { LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
-import { serialize, exportSave } from '../../../src/core/save/serialize.ts'
+import { readActionLog, readSave, writeSave, writeFlag } from '../../../server/src/game/repo.ts'
+import { ACCOUNT, LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
+import { deserialize, serialize, exportSave, SAVE_VERSION } from '../../../src/core/save/serialize.ts'
 import { grantHero } from '../../../src/core/systems/actions.ts'
 import type { PullActionResult } from '../../../src/core/systems/actions.ts'
 import type { ActionResponse } from '../../../src/core/systems/action-protocol.ts'
@@ -107,6 +107,7 @@ describe('动作接口：建档', () => {
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
     expect(res.body.save?.payload).toBeTruthy()
+    expect(JSON.parse(res.body.save!.payload)).not.toHaveProperty('rng')
 
     const save = await pullSave(acc.accessToken)
     expect(save).not.toBeNull()
@@ -123,10 +124,31 @@ describe('动作接口：建档', () => {
   it('服务端生成的随机种子非零且各账号不同（不得用常量种子）', async () => {
     const a = await withSave('alice')
     const b = await withSave('bob')
-    const saveA = await pullSave(a.accessToken)
-    const saveB = await pullSave(b.accessToken)
-    expect(saveA?.rng.seed).not.toBe(0)
-    expect(saveA?.rng.seed).not.toBe(saveB?.rng.seed)
+    const saveA = deserialize(readSave(bundle.db, a.user.id)!.payload)
+    const saveB = deserialize(readSave(bundle.db, b.user.id)!.payload)
+    expect(saveA.rng.seed).not.toBe(0)
+    expect(saveA.rng.seed).not.toBe(saveB.rng.seed)
+    expect(await pullSave(a.accessToken)).not.toHaveProperty('rng')
+  })
+
+  it('首次载入旧档即轮换公开过的随机状态，玩家进度与保底进度仍能读取', async () => {
+    const acc = await withSave('alice')
+    const now = Date.now()
+    const old = { ...createNewSave(now, 42), version: 5 }
+    old.rng.counter = 7
+    old.player.silver = 789
+    old.gacha.pitySSR = 30
+    writeSave(bundle.db, acc.user.id, serialize(old), now, now)
+
+    expect(await pullSave(acc.accessToken)).toMatchObject({
+      version: SAVE_VERSION, player: { silver: 789 }, gacha: { pitySSR: 30 },
+    })
+    const stored = deserialize(readSave(bundle.db, acc.user.id)!.payload)
+    expect(stored.rng.seed).not.toBe(0)
+    expect(stored.rng.seed).not.toBe(42)
+    expect(stored.rng.counter).toBe(0)
+    await pullSave(acc.accessToken)
+    expect(deserialize(readSave(bundle.db, acc.user.id)!.payload).rng).toEqual(stored.rng)
   })
 })
 
@@ -165,12 +187,40 @@ describe('动作接口：扣费与幂等', () => {
     expect(second.status).toBe(200)
     expect(second.body.ok).toBe(true)
     expect(second.body.replayed).toBe(true)
+    expect(JSON.parse(second.body.save!.payload)).not.toHaveProperty('rng')
     expect(pullResult(second.body).items).toEqual(pullResult(first.body).items)
 
     const save = await pullSave(acc.accessToken)
     // 只扣了一次：结晶 3000 → 0，抽卡券 10 → 10（没被第二次抽走）
     expect(save?.player.crystals).toBe(0)
     expect(save?.player.tickets).toBe(10)
+  })
+
+  it('心跳和大量后续动作不淘汰抽卡结果，逾期重试也不再扣费', async () => {
+    const acc = await withSave('alice')
+    const actionId = 'interrupted-ten-pull'
+    const pull = { type: 'gacha.pull', poolId: 'standard', count: 10 }
+    const first = await post(acc.accessToken, actionId, pull)
+    expect(first.body.ok).toBe(true)
+
+    const service = new GameService(bundle.db, new UserLock())
+    for (let i = 0; i < 70; i++) {
+      await service.execute(acc.user.id, { actionId: `hb-${i}`, action: { type: 'idle.heartbeat' } })
+      await service.execute(acc.user.id, { actionId: `settings-${i}`, action: { type: 'settings.update', speed: 1 } })
+    }
+    expect(readActionLog(bundle.db, acc.user.id, 'hb-0')).toBeUndefined()
+    const resumed = await post(acc.accessToken, actionId, pull)
+    expect(resumed.body).toMatchObject({ ok: true, replayed: true, result: first.body.result })
+
+    bundle.db.prepare('UPDATE action_log SET created_at = ? WHERE user_id = ? AND action_id = ?')
+      .run(Date.now() - ACCOUNT.ACTION_REPLAY_WINDOW_MS, acc.user.id, actionId)
+    const expired = await post(acc.accessToken, actionId, pull)
+    expect(expired.body).toMatchObject({ ok: false, replayed: true, code: 'ACTION_REPLAY_EXPIRED' })
+    await post(acc.accessToken, 'settings-prune', { type: 'settings.update', speed: 1 })
+    expect(readActionLog(bundle.db, acc.user.id, actionId)?.result).toBe('')
+    const retried = await post(acc.accessToken, actionId, pull)
+    expect(retried.body).toMatchObject({ ok: false, replayed: true, code: 'ACTION_REPLAY_EXPIRED' })
+    expect(await pullSave(acc.accessToken)).toMatchObject({ player: { crystals: 0, tickets: 10 }, stats: { totalPulls: 10 } })
   })
 
   it('不同 actionId → 各自扣费（结晶见底后改用抽卡券）', async () => {
@@ -203,6 +253,7 @@ describe('动作接口：扣费与幂等', () => {
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(false)
     expect(res.body.code).toBe('INSUFFICIENT_FUNDS')
+    expect(JSON.parse(res.body.save!.payload)).not.toHaveProperty('rng')
 
     const after = await pullSave(acc.accessToken)
     expect(after?.player.crystals).toBe(before?.player.crystals)
@@ -286,22 +337,24 @@ describe('动作接口：离线补算与导入', () => {
 
   it('已有云档禁止导入，即使声明legacy也不授权', async () => {
     const acc = await withSave('alice')
-    const before = await pullSave(acc.accessToken)
+    const before = readSave(bundle.db, acc.user.id)
     const res = await post(acc.accessToken, 'blocked-import', {
       type: 'save.import', legacy: true, payload: exportSave(createNewSave(Date.now(), 42)),
     })
     expect(res.body.code).toBe('IMPORT_FORBIDDEN')
-    expect((await pullSave(acc.accessToken))?.rng).toEqual(before?.rng)
+    expect(readSave(bundle.db, acc.user.id)).toEqual(before)
   })
 
   it('无云档首次迁移，随机与时间由服务端重建', async () => {
     const acc = await signUp('alice')
-    const payload = exportSave(createNewSave(Date.now(), 42))
+    const payload = btoa(serialize({ ...createNewSave(Date.now(), 42), version: 5 }))
     const res = await post(acc.accessToken, 'import-2', { type: 'save.import', payload })
     expect(res.body.ok).toBe(true)
     const save = await pullSave(acc.accessToken)
-    expect(save?.rng.seed).not.toBe(42)
-    expect(save?.rng.counter).toBe(0)
+    expect(save).not.toHaveProperty('rng')
+    const stored = deserialize(readSave(bundle.db, acc.user.id)!.payload)
+    expect(stored.rng.seed).not.toBe(42)
+    expect(stored.rng.counter).toBe(0)
     expect(save?.lastTickAt).toBeGreaterThan(Date.now() - 5000)
     expect(bundle.db.prepare('SELECT * FROM user_flags WHERE user_id = ?').all(acc.user.id)).toHaveLength(1)
   })

@@ -12,6 +12,7 @@ import { computed, ref } from 'vue'
 import {
   ACCOUNT_ERROR_CODES,
   ACCOUNT_ERROR_MESSAGES,
+  accountSlotKey,
   type AccountErrorCode,
 } from '../../core/config/account.ts'
 import {
@@ -24,6 +25,7 @@ import {
   type AuthResult,
   type CloudSave,
 } from '../../platform/account.ts'
+import { storage } from '../../platform/storage.ts'
 import type { GameAction } from '../../core/systems/actions.ts'
 import type { ActionResponse } from '../../core/systems/action-protocol.ts'
 
@@ -177,16 +179,24 @@ export const useAccountStore = defineStore('account', () => {
 
   /** 注销账号（服务端级联删除账号 / 会话 / 存档） */
   async function deleteAccount(): Promise<boolean> {
+    if (busy.value) return false
     busy.value = true
     error.value = null
     try {
-      const token = accessToken.value
-      if (!token) {
-        clearSession()
-        return true
+      const accountId = user.value?.id
+      if (accountId == null) throw new AccountError(ACCOUNT_ERROR_CODES.UNAUTHORIZED, 401)
+      if (offline.value) throw new AccountError(ACCOUNT_ERROR_CODES.NETWORK, 0)
+      await authorized((token) => {
+        if (user.value?.id !== accountId) throw new AccountError(ACCOUNT_ERROR_CODES.UNAUTHORIZED, 401)
+        return accountClient.deleteAccount(token)
+      })
+
+      try {
+        if (user.value?.id === accountId) clearSession()
+        await storage.clear(accountSlotKey(accountId))
+      } catch {
+        error.value = '云端数据已删除，本机数据清理失败，请清理浏览器站点数据'
       }
-      await accountClient.deleteAccount(token)
-      clearSession()
       return true
     } catch (err) {
       error.value = describeAccountError(err)
@@ -222,8 +232,12 @@ export const useAccountStore = defineStore('account', () => {
   /** 主动续期（服务端会轮换 refresh token，本地同步覆盖） */
   async function refreshSession(): Promise<void> {
     const stored = readStoredSession()
-    if (!stored) throw new AccountError(ACCOUNT_ERROR_CODES.UNAUTHORIZED, 401)
+    const accountId = user.value?.id
+    if (!stored || stored.user.id !== accountId) throw new AccountError(ACCOUNT_ERROR_CODES.UNAUTHORIZED, 401)
     const auth = await accountClient.refresh(stored.refreshToken)
+    if (user.value?.id !== accountId || auth.user.id !== accountId) {
+      throw new AccountError(ACCOUNT_ERROR_CODES.UNAUTHORIZED, 401)
+    }
     applyAuth(auth)
     status.value = 'authenticated'
   }

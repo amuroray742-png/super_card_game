@@ -4,8 +4,7 @@
  * 合规硬要求：公示表与实际抽卡必须调用同一套函数，不得复制定义。
  * 因此：
  * - `drawRarity()` 是唯一的抽卡实现
- * - `computeEffectiveRates()` 用**同一个 drawRarity** 做蒙特卡洛模拟，
- *   得到的综合概率即为公示值——公示与实际行为在构造上无法不一致。
+ * - `computeEffectiveRates()` 用同一套概率与保底规则做精确动态规划。
  */
 import type { Rarity } from '../model/types.ts'
 import { BASE_RATES, GACHA, RARITY_RANK } from '../config/economy.ts'
@@ -77,6 +76,15 @@ export interface DrawResult {
   state: PityState
 }
 
+/** 新手保底只在十连最后一张、整批仍无 SSR 时替换。 */
+export function shouldReplaceForNewbie(
+  eligible: boolean,
+  batchIndex: number,
+  hasSSR: boolean,
+): boolean {
+  return eligible && batchIndex === GACHA.TEN_PULL_COUNT - 1 && !hasSSR
+}
+
 /**
  * 软保底：第 71 抽起 SSR 概率线性提升，第 90 抽必出。
  *
@@ -118,7 +126,7 @@ export function rarityProbabilities(
   const needFloor =
     options.isTenPull === true &&
     options.batchHasSRPlus !== true &&
-    options.batchIndex === 9
+    options.batchIndex === GACHA.TEN_PULL_COUNT - 1
 
   const raw: Record<Rarity, number> =
     needFloor
@@ -186,6 +194,8 @@ export interface RateRow {
 
 export interface RatesSnapshot {
   rows: RateRow[]
+  /** 当前十连公示已计入首次十连资格。 */
+  newbieGuarantee: boolean
   /** 距离必出 SSR 还差多少抽 */
   pityRemaining: number
   /** 保底上限 */
@@ -205,6 +215,7 @@ export interface RatesSnapshot {
 export function computeTenPullOutcomes(
   start: PityState,
   availableRarities?: readonly Rarity[],
+  newbieGuarantee = false,
 ): {
   ssr: number
   srPlus: number
@@ -235,7 +246,7 @@ export function computeTenPullOutcomes(
     },
   ]
 
-  for (let position = 0; position < 10; position++) {
+  for (let position = 0; position < GACHA.TEN_PULL_COUNT; position++) {
     const next: DpState[] = []
     for (const s of states) {
       const state: PityState = { pitySSR: s.pitySSR, pity10: 0 }
@@ -245,9 +256,12 @@ export function computeTenPullOutcomes(
         batchIndex: position,
         availableRarities,
       })
-      for (const rarity of ['SSR', 'SR', 'R', 'N'] as Rarity[]) {
-        const p = probs[rarity]
+      for (const drawn of RARITY_ORDER) {
+        const p = probs[drawn]
         if (p <= 0) continue
+        const rarity = shouldReplaceForNewbie(newbieGuarantee, position, s.hasSSR)
+          ? 'SSR'
+          : drawn
         const after = applyPity(state, rarity, { isTenPull: true })
         next.push({
           pitySSR: after.pitySSR,
@@ -274,8 +288,6 @@ export function computeTenPullOutcomes(
   return hit
 }
 
-const SIM_TRIALS = 20000
-
 /**
  * 计算概率公示表。
  *
@@ -287,8 +299,9 @@ const SIM_TRIALS = 20000
 export function computeEffectiveRates(
   state: PityState = { pitySSR: 0, pity10: 0 },
   availableRarities?: readonly Rarity[],
+  newbieGuarantee = false,
 ): RatesSnapshot {
-  const outcomes = computeTenPullOutcomes(state, availableRarities)
+  const outcomes = computeTenPullOutcomes(state, availableRarities, newbieGuarantee)
 
   // 下一抽的实际概率（由当前保底状态 + 卡池收录范围直接推导）
   const singleProbs = rarityProbabilities(state, { availableRarities })
@@ -325,6 +338,7 @@ export function computeEffectiveRates(
 
   return {
     rows,
+    newbieGuarantee,
     pityRemaining: pityRemaining(state.pitySSR),
     pityMax: GACHA.PITY_SSR_MAX,
     softPityStart: GACHA.SOFT_PITY_START,

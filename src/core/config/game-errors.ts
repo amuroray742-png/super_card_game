@@ -53,6 +53,8 @@ export const GAME_ERROR_CODES = {
   SAVE_MISSING: 'SAVE_MISSING',
   /** 账号已经有存档了（不能重复建档） */
   SAVE_EXISTS: 'SAVE_EXISTS',
+  /** 动作已执行，原结果超过重放保留期 */
+  ACTION_REPLAY_EXPIRED: 'ACTION_REPLAY_EXPIRED',
 } as const
 
 export type GameErrorCode = (typeof GAME_ERROR_CODES)[keyof typeof GAME_ERROR_CODES]
@@ -84,6 +86,7 @@ export const GAME_ERROR_MESSAGES: Record<GameErrorCode, string> = {
   SERVER_UNAVAILABLE: '服务器暂时不可用，请稍后再试',
   SAVE_MISSING: '账号还没有存档',
   SAVE_EXISTS: '账号已经有存档了',
+  ACTION_REPLAY_EXPIRED: '该操作已执行，结果已过重试期限，请查看当前进度',
 }
 
 /** 是否属于「已知的动作错误码」 */

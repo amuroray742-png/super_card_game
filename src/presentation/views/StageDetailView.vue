@@ -130,7 +130,7 @@ function goStage(offset: number) {
         <div class="row" style="margin-top: 12px; gap: 6px">
           <button class="btn btn-sm" style="flex: 1" @click="previewBattle">战斗预览</button>
           <button class="btn btn-sm btn-primary" style="flex: 1" @click="setIdleTarget">
-            {{ isIdleTarget ? '已是挂机目标' : '设为挂机目标' }}
+            {{ isIdleTarget ? (store.save.idle.farm ? '重试该关' : '已是挂机目标') : '设为挂机目标' }}
           </button>
         </div>
       </section>

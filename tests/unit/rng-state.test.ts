@@ -11,38 +11,44 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { Rng } from '../../src/core/rng.ts'
 import { createNewSave, normalizeSave, SAVE_VERSION } from '../../src/core/save/schema.ts'
+import { deserialize, exportSave, serialize } from '../../src/core/save/serialize.ts'
+import { ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../src/core/config/account.ts'
+import { readSave } from '../../server/src/game/repo.ts'
 import { startServerHarness, type ServerHarness } from './helpers/server-harness.ts'
 import { registerAndLoad } from './helpers/store-harness.ts'
 
 /** 模拟存储：key = slot，value = 序列化后的存档 */
 const mem = vi.hoisted(() => new Map<string, string>())
 
-vi.mock('../../src/platform/storage.ts', () => ({
-  storage: {
-    async load(slot: string) {
-      const text = mem.get(slot)
-      return text ? JSON.parse(text) : null
+vi.mock('../../src/platform/storage.ts', async () => {
+  const { serializePublicSave } = await import('../../src/core/save/serialize.ts')
+  return {
+    storage: {
+      async load(slot: string) {
+        const text = mem.get(slot)
+        return text ? JSON.parse(text) : null
+      },
+      async save(slot: string, data: Parameters<typeof serializePublicSave>[0]) {
+        mem.set(slot, serializePublicSave(data))
+      },
+      async export(data: unknown) {
+        return JSON.stringify(data)
+      },
+      async import(text: string) {
+        return JSON.parse(text)
+      },
+      async clear(slot: string) {
+        mem.delete(slot)
+      },
+      async getFlag() {
+        return false
+      },
+      async setFlag() {
+        /* noop */
+      },
     },
-    async save(slot: string, data: unknown) {
-      mem.set(slot, JSON.stringify(data))
-    },
-    async export(data: unknown) {
-      return JSON.stringify(data)
-    },
-    async import(text: string) {
-      return JSON.parse(text)
-    },
-    async clear(slot: string) {
-      mem.delete(slot)
-    },
-    async getFlag() {
-      return false
-    },
-    async setFlag() {
-      /* noop */
-    },
-  },
-}))
+  }
+})
 
 const { useGameStore } = await import('../../src/presentation/stores/game.ts')
 
@@ -104,14 +110,14 @@ describe('core：RNG 快照忠实复原', () => {
 
 describe('存档：随机数状态字段', () => {
   it('存档版本已升级（新增 rng 字段）', () => {
-    expect(SAVE_VERSION).toBe(5)
+    expect(SAVE_VERSION).toBe(6)
   })
 
   it('新建存档带随机种子', () => {
     expect(createNewSave(1, 42).rng).toEqual({ seed: 42, counter: 0 })
   })
 
-  it('旧档（无 rng 字段）规范化后种子为 0，交由表现层补平台随机种子', () => {
+  it('旧档（无 rng 字段）规范化后种子为 0，等待服务端补种子', () => {
     const legacy = { ...createNewSave(1) } as Record<string, unknown>
     delete legacy.rng
     expect(normalizeSave(legacy).rng).toEqual({ seed: 0, counter: 0 })
@@ -121,6 +127,35 @@ describe('存档：随机数状态字段', () => {
     const save = createNewSave(1, 99)
     save.rng.counter = 5
     expect(normalizeSave(save).rng).toEqual({ seed: 99, counter: 5 })
+  })
+
+  it('旧版随机状态失效，导出串省略随机字段', () => {
+    const save = createNewSave(1, 99)
+    save.rng.counter = 5
+    expect(deserialize(serialize({ ...save, version: 5 })).rng).toEqual({ seed: 0, counter: 0 })
+    expect(JSON.parse(atob(exportSave(save)))).not.toHaveProperty('rng')
+  })
+
+  it('首次读取会清理账号缓存的随机字段并保留旧档迁移通道', async () => {
+    const { LocalStorageAdapter } = await vi.importActual<typeof import('../../src/platform/storage.ts')>('../../src/platform/storage.ts')
+    const slot = accountSlotKey(11)
+    const prefix = ACCOUNT_STORAGE_KEYS.SAVE_SLOT_PREFIX
+    const legacySlot = ACCOUNT_STORAGE_KEYS.LEGACY_SAVE_SLOT
+    const old = serialize({ ...createNewSave(1, 99), version: 5 })
+    const data = new Map([[prefix + slot, old], [prefix + legacySlot, old]])
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => data.set(key, value),
+    })
+    try {
+      const adapter = new LocalStorageAdapter()
+      expect(await adapter.load(slot)).toMatchObject({ rng: { seed: 0, counter: 0 }, player: { crystals: 3000 } })
+      expect(JSON.parse(data.get(prefix + slot)!)).not.toHaveProperty('rng')
+      await adapter.load(legacySlot)
+      expect(data.get(prefix + legacySlot)).toBe(old)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 
@@ -136,9 +171,17 @@ describe('抽卡随机序列（铁律 #24 · 服务端持有）', () => {
     await harness.close()
   })
 
-  it('服务端建档时给一个非零随机种子（不得写死常量）', () => {
+  function storedRng() {
+    const row = harness.bundle.db.prepare('SELECT user_id FROM saves').get() as { user_id: number }
+    return deserialize(readSave(harness.bundle.db, row.user_id)!.payload).rng
+  }
+
+  it('新档随机状态只在服务端持久化，浏览器镜像与缓存无权威随机状态', () => {
     const store = useGameStore()
-    expect(store.save.rng.seed).not.toBe(0)
+    expect(storedRng().seed).not.toBe(0)
+    expect(store.save.rng).toEqual({ seed: 0, counter: 0 })
+    const [cached] = mem.values()
+    expect(JSON.parse(cached)).not.toHaveProperty('rng')
   })
 
   it('两次十连抽到的序列不同（不再是固定脚本）', async () => {
@@ -158,16 +201,18 @@ describe('抽卡随机序列（铁律 #24 · 服务端持有）', () => {
     const store = useGameStore()
     await store.pull('standard', 10)
     const first = store.save.gacha.history.slice(0, 9).map((h) => h.heroId)
-    const counter = store.save.rng.counter
+    const counter = storedRng().counter
     expect(counter).toBeGreaterThan(0)
 
     // 模拟刷新页面：重新载入（服务端存档里的计数器继续往前）
     store.invalidate()
     await store.load()
-    expect(store.save.rng.counter).toBe(counter)
+    expect(storedRng().counter).toBe(counter)
+    expect(store.save.rng.counter).toBe(0)
 
     await store.pull('standard', 10)
     const second = store.save.gacha.history.slice(10, 19).map((h) => h.heroId)
     expect(second).not.toEqual(first)
+    expect(storedRng().counter).toBeGreaterThan(counter)
   })
 })

@@ -444,43 +444,68 @@ export function settleIdleLedger(save: SaveData, ctx: ActionContext, upperLimit:
     save.idle.measuredAt = ctx.now
   }
   const budgetMs = save.idle.effectiveMs ?? 0
-  const battles = Math.min(Math.floor((budgetMs + 0.000001) / (BATTLE.SECONDS_PER_BATTLE * 1000)), upperLimit, IDLE.MAX_REPLAY_BATTLES)
+  const battleMs = BATTLE.SECONDS_PER_BATTLE * 1000
+  const battles = Math.min(Math.floor((budgetMs + 0.000001) / battleMs), upperLimit, IDLE.MAX_REPLAY_BATTLES)
   if (team.length === 0) {
     if (elapsedMs > 0) save.lastTickAt = ctx.now
     return null
   }
   if (battles <= 0) return null
-  // 每场固定消耗同一条持久化序列；分十次领与一次领十场必须完全一致。
+  // 刷取胜场和重试进度都随档保存，结算分批不会提前重试挑战。
   const pve = buildPveContext(save)
-  const run = { battles: 0, rewards: {} as RewardBundle, reachedStage: save.campaign.clearedStage,
-    lastClearedStage: null as number | null, nextTargetStage: Math.min(save.idle.currentStage, save.campaign.clearedStage + 1),
-    blockedAtStage: null as number | null, newRelics: [] as string[] }
+  const run: OfflineSettlementResult = {
+    battles: 0,
+    rewards: {},
+    reachedStage: save.campaign.clearedStage,
+    lastClearedStage: null,
+    nextTargetStage: Math.min(save.idle.currentStage, save.campaign.clearedStage + 1),
+    blockedAtStage: null,
+    newRelics: [],
+    elapsedSeconds: elapsedMs / 1000,
+    cappedSeconds: budgetMs / 1000,
+    efficiency: 1,
+  }
+  let farm = save.idle.farm
   for (let i = 0; i < battles; i++) {
-    const one = runIdle(team, run.nextTargetStage, 1, ctx.rng.nextSeed(), undefined, pve, save.idle.autoAdvance)
+    const farmStage = farm && farm.winsUntilRetry > 0 ? farm.stage : null
+    const stage = farmStage ?? run.nextTargetStage
+    const one = runIdle(team, stage, 1, ctx.rng.nextSeed(), undefined, pve, farmStage === null && save.idle.autoAdvance)
+    run.battles += one.battles
+    if (one.blockedAtStage !== null) {
+      run.blockedAtStage ??= one.blockedAtStage
+      if (farmStage === 1) break
+      const fallback = farmStage !== null
+        ? farmStage - 1
+        : farm?.stage ?? Math.min(run.reachedStage, stage - 1)
+      farm = { stage: fallback || null, winsUntilRetry: fallback ? IDLE.FARM_WINS_BEFORE_RETRY : 0 }
+      // 尚无可刷关卡，保留余额，避免本次结算连续撞同一场战斗。
+      if (farm.stage === null) break
+      continue
+    }
+
     applyRewardBundle(save, one.rewards, ctx.rng, ctx.now)
     for (const key of ['silver', 'exp', 'skillStones', 'relicStones', 'emblems'] as const) {
       if (one.rewards[key] !== undefined) run.rewards[key] = (run.rewards[key] ?? 0) + one.rewards[key]!
     }
-    if (one.rewards.relics) run.rewards.relics = [...(run.rewards.relics ?? []), ...one.rewards.relics]
-    run.battles += one.battles
-    run.lastClearedStage = one.lastClearedStage ?? run.lastClearedStage
-    run.reachedStage = run.lastClearedStage ?? run.reachedStage
-    run.nextTargetStage = one.nextTargetStage
+    if (one.rewards.relics) (run.rewards.relics ??= []).push(...one.rewards.relics)
+    run.lastClearedStage = Math.max(run.lastClearedStage ?? 0, stage)
+    run.reachedStage = Math.max(run.reachedStage, stage)
     run.newRelics.push(...one.newRelics)
-    run.blockedAtStage = one.blockedAtStage
-    if (one.blockedAtStage !== null) break
+    if (farm && farmStage !== null) {
+      farm.winsUntilRetry--
+    } else {
+      farm = undefined
+      run.nextTargetStage = one.nextTargetStage
+    }
   }
   save.idle.currentStage = run.nextTargetStage
-  if (run.lastClearedStage !== null) save.campaign.clearedStage = Math.max(save.campaign.clearedStage, run.lastClearedStage)
-  // 战败消耗本次预算，避免同一段过去时间反复roll战斗结果；未消费的请求上限仍保留。
-  const consumed = run.blockedAtStage === null ? run.battles : Math.floor(budgetMs / (BATTLE.SECONDS_PER_BATTLE * 1000))
-  save.idle.effectiveMs = Math.max(0, budgetMs - consumed * BATTLE.SECONDS_PER_BATTLE * 1000)
+  save.idle.farm = farm
+  save.campaign.clearedStage = run.reachedStage
+  save.idle.effectiveMs = Math.max(0, budgetMs - run.battles * battleMs)
   // 兼容旧水位展示；实际计量由measuredAt + effectiveMs负责。
   save.lastTickAt = Math.max(save.lastTickAt, (save.idle.measuredAt ?? ctx.now) - save.idle.effectiveMs)
-  save.idle.totalIdleSeconds += consumed * BATTLE.SECONDS_PER_BATTLE
-  return {
-    ...run, elapsedSeconds: elapsedMs / 1000, cappedSeconds: budgetMs / 1000, efficiency: 1,
-  }
+  save.idle.totalIdleSeconds += run.battles * BATTLE.SECONDS_PER_BATTLE
+  return run
 }
 
 /** 推进挂机：客户端场次数只是上限，不能创造时间。 */
@@ -525,6 +550,7 @@ function actionIdleSetTarget(
     return fail(GAME_ERROR_CODES.NOT_FOUND, '关卡不存在')
   }
   save.idle.currentStage = stageId
+  delete save.idle.farm
   return ok<{ stageId: number }>({ stageId }, '挂机目标已更新')
 }
 

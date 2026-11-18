@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp, type AppBundle } from '../../../server/src/app.ts'
+import { SAVE_VERSION } from '../../../src/core/save/schema.ts'
 
 let bundle: AppBundle
 
@@ -63,7 +64,8 @@ describe('云存档', () => {
     expect(get.statusCode).toBe(200)
     const body = get.json()
     const save = JSON.parse(body.payload)
-    expect(save.version).toBe(5)
+    expect(save.version).toBe(SAVE_VERSION)
+    expect(save).not.toHaveProperty('rng')
     expect(save.player.crystals).toBe(3000)
     expect(body.savedAt).toBeGreaterThan(0)
   })

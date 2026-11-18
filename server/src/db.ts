@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS saves (
 `
 
 /** 当前表结构版本 */
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 export function openDb(path: string): Db {
   if (path !== ':memory:') {
@@ -76,7 +76,14 @@ function migrate(db: Db): void {
         value   INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (user_id, key));
     `)
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
+    db.exec('PRAGMA user_version = 2')
+  }
+  if (row.user_version < 3) {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS action_log_replayable
+        ON action_log (user_id, created_at) WHERE result <> '';
+      PRAGMA user_version = ${SCHEMA_VERSION};
+    `)
   }
 }
 

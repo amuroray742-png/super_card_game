@@ -12,9 +12,8 @@
  *
  * ── 幂等 ────────────────────────────────────────────────────────────
  * 每次动作带一个 `actionId`（客户端生成，服务端不信任其内容，只当去重键）。
- * 服务端为每个账号保留最近若干条 `actionId → 结果`：
- * 同一个 `actionId` 重放时**直接回放上次的结果，不重复扣费**。
- * 网络抖动导致的「客户端以为失败、其实服务端已经扣了」因此不会变成双重消费。
+ * 除心跳外，已成功动作在保留期内回放结果，超期只返回已执行状态。
+ * 已记账的 `actionId` 在账号存续期间均不会再次执行。
  *
  * ── 失败语义 ────────────────────────────────────────────────────────
  * - **业务失败**（余额不足 / 目标不存在 / 状态不合法）→ HTTP 200 + `{ ok: false, code }`，
@@ -36,7 +35,7 @@ export interface ActionRequest {
 
 /** 存档快照（服务端 → 客户端） */
 export interface SaveSnapshot {
-  /** 序列化后的存档文本 */
+  /** 序列化后的客户端存档投影 */
   payload: string
   /** 存档版本时间戳（越大越新） */
   savedAt: number
@@ -62,7 +61,7 @@ export interface ActionResponse {
   save?: SaveSnapshot
   /** 本次入口触发的离线结算明细（客户端据此弹结算窗）；null = 本次没有离线收益 */
   offline?: OfflineSettlementResult | null
-  /** 该 actionId 命中幂等日志：结果是**重放**，未重复执行 */
+  /** 该 actionId 已执行，本次未重复执行 */
   replayed?: boolean
 }
 

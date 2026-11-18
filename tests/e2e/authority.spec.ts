@@ -6,10 +6,15 @@ import {
   loginAccount,
   registerAccount,
   seedSession,
+  settleIdleThroughUi,
   skipGachaReveal,
   uniqueUsername,
 } from './helpers'
 import { ACCOUNT_STORAGE_KEYS } from '../../src/core/config/account.ts'
+import { createNewSave } from '../../src/core/save/schema.ts'
+import { exportSave } from '../../src/core/save/serialize.ts'
+import { createHeroState } from '../../src/core/systems/growth.ts'
+import { getStage } from '../../src/core/config/stages.ts'
 
 /**
  * 服务端权威端到端用例（AGENTS.md 铁律 #28 / #29）。
@@ -204,6 +209,7 @@ test.describe('离线只读', () => {
     await page.waitForLoadState('networkidle')
     await pullTen(page)
     expect((await cachedSaveOf(page, session.user.id))?.stats?.totalPulls).toBe(10)
+    expect(await cachedSaveOf(page, session.user.id)).not.toHaveProperty('rng')
 
     // 抽完之后迁移通道仍然干净
     const legacyAfter = await page.evaluate((key) => localStorage.getItem(key), LEGACY_SLOT_KEY)
@@ -228,6 +234,14 @@ test.describe('离线只读', () => {
     await expect(page.getByText('离线模式，只能查看进度')).toBeVisible({ timeout: 10_000 })
     expect((await cachedSaveOf(page, session.user.id))?.stats?.totalPulls).toBe(10)
 
+    await page.goto('/#/settings')
+    await page.getByRole('button', { name: '注销账号', exact: true }).click()
+    await page.getByRole('button', { name: '确认注销', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('无法连接服务器')
+    expect(await cachedSaveOf(page, session.user.id)).not.toBeNull()
+    await page.getByRole('button', { name: '取消', exact: true }).click()
+    await page.goto('/#/gacha')
+
     // 网络恢复后无需刷新：已 loaded 的游戏镜像也必须重新拉取权威档。
     await page.evaluate((base) => localStorage.setItem('sgw.apiBase', base), E2E_API_BASE)
     await page.getByTestId('reconnect').click()
@@ -236,4 +250,34 @@ test.describe('离线只读', () => {
     await expect.poll(async () => (await cachedSaveOf(page, session.user.id))?.stats?.totalPulls)
       .toBe(20)
   })
+})
+
+test('挑战 BOSS 战败后页面显示刷取关卡，后续推征继续发放战利品', async ({ page }) => {
+  const account = await registerAccount(uniqueUsername('farm'))
+  const token = await accessTokenOf(account)
+  const now = Date.now()
+  const save = createNewSave(now)
+  const ids = ['jeannedarc', 'nangdengel', 'huatuo', 'bianque']
+  for (const [slot, id] of ids.entries()) {
+    save.heroes[id] = { ...createHeroState(id, now), level: 44 }
+    save.team.slots[slot] = id
+  }
+  save.campaign.clearedStage = 61
+  save.idle.currentStage = 62
+  const imported = await postAction(token, 'farm-fixture', { type: 'save.import', payload: exportSave(save) })
+  expect(imported.ok).toBe(true)
+  await seedSession(page, await loginAccount(account.user.username))
+  await page.goto('/#/expedition')
+  await expect(page.getByText(getStage(62).name, { exact: true })).toBeVisible()
+  const offline = page.locator('.dialog').filter({ hasText: '离线推征结算' })
+  if (await offline.isVisible()) await offline.getByRole('button', { name: '收下' }).click()
+
+  await settleIdleThroughUi(page, account.user.id, 1)
+  await expect(page.getByText('当前挑战受阻')).toBeVisible()
+  await expect(page.getByText(`正在刷取「${getStage(61).name}」`, { exact: false })).toBeVisible()
+  const farmed = await settleIdleThroughUi(page, account.user.id, 1)
+  expect(farmed.rewards.exp).toBeGreaterThan(0)
+  expect(farmed.rewards.relics).toHaveLength(1)
+  expect(farmed.reachedStage).toBe(61)
+  await expect(page.getByText(getStage(62).name, { exact: true })).toBeVisible()
 })

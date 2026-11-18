@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAccountStore } from '../../src/presentation/stores/account.ts'
 import { AccountError, accountClient } from '../../src/platform/account.ts'
-import { ACCOUNT_STORAGE_KEYS } from '../../src/core/config/account.ts'
+import { ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../src/core/config/account.ts'
+import { storage } from '../../src/platform/storage.ts'
 
 class MemoryStorage {
   private map = new Map<string, string>()
@@ -210,5 +211,43 @@ describe('401 自动续期', () => {
     expect(cloud?.savedAt).toBe(7)
     expect(store.accessToken).toBe('at-2')
     expect(pullSave).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('注销账号', () => {
+  it('离线恢复只有缓存时拒绝注销，保留本机会话与缓存', async () => {
+    localStorage.setItem(ACCOUNT_STORAGE_KEYS.SESSION, JSON.stringify({ refreshToken: 'rt-1', user: AUTH.user }))
+    vi.spyOn(accountClient, 'refresh').mockRejectedValue(new AccountError('NETWORK', 0))
+    const remove = vi.spyOn(accountClient, 'deleteAccount')
+    const clear = vi.spyOn(storage, 'clear')
+    const store = useAccountStore()
+    await store.ensureRestored()
+    expect(store.offline).toBe(true)
+    expect(store.accessToken).toBeNull()
+
+    expect(await store.deleteAccount()).toBe(false)
+    expect(store.isAuthenticated).toBe(true)
+    expect(store.error).toContain('无法连接服务器')
+    expect(remove).not.toHaveBeenCalled()
+    expect(clear).not.toHaveBeenCalled()
+    expect(localStorage.getItem(ACCOUNT_STORAGE_KEYS.SESSION)).toContain('rt-1')
+  })
+
+  it('注销遇到过期令牌时续期，服务端确认后才清理正确的账号槽位', async () => {
+    vi.spyOn(accountClient, 'login').mockResolvedValue(AUTH)
+    vi.spyOn(accountClient, 'refresh').mockResolvedValue({ ...AUTH, accessToken: 'at-2', refreshToken: 'rt-2' })
+    const remove = vi.spyOn(accountClient, 'deleteAccount')
+      .mockRejectedValueOnce(new AccountError('UNAUTHORIZED', 401))
+      .mockResolvedValueOnce(undefined)
+    const clear = vi.spyOn(storage, 'clear')
+    const store = useAccountStore()
+    await store.login('tester', 'correct-horse-1')
+
+    expect(await store.deleteAccount()).toBe(true)
+    expect(remove.mock.calls).toEqual([['at-1'], ['at-2']])
+    expect(clear).toHaveBeenCalledExactlyOnceWith(accountSlotKey(AUTH.user.id))
+    expect(remove.mock.invocationCallOrder[1]).toBeLessThan(clear.mock.invocationCallOrder[0])
+    expect(store.isAuthenticated).toBe(false)
+    expect(localStorage.getItem(ACCOUNT_STORAGE_KEYS.SESSION)).toBeNull()
   })
 })

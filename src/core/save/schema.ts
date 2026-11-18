@@ -9,7 +9,7 @@ import { arenaWeekIndex } from '../time.ts'
 import { RELIC_DEFS, RELIC_SETS } from '../systems/relic.ts'
 import '../config/relics.ts'
 
-export const SAVE_VERSION = 5
+export const SAVE_VERSION = 6
 
 export type Migration = (save: SaveData) => SaveData
 
@@ -43,9 +43,14 @@ export const MIGRATIONS: Record<number, Migration> = {
   },
   // v4 → v5：补齐随机数状态快照（种子 + 计数器）
   //
-  // 种子留 0（= 未设置）：由表现层在载入时补一个**平台随机**种子。
+  // 种子留 0（= 未设置）：由服务端在载入时补一个随机种子。
   // 若在这里用常量种子兜底，所有旧档玩家会共用同一条抽卡序列（铁律 #24）。
   4: (save) => {
+    save.rng = { seed: 0, counter: 0 }
+    return save
+  },
+  // v5 → v6：旧版曾把权威随机状态发给客户端，载入后轮换该序列。
+  5: (save) => {
     save.rng = { seed: 0, counter: 0 }
     return save
   },
@@ -72,7 +77,7 @@ export function emptyArena(now = 0): SaveData['arena'] {
  * @param now  创建时间（毫秒）
  * @param seed 随机数种子。**不得写死常量**——写死会让所有玩家抽到
  *             完全相同的序列（铁律 #24）。传 0 表示「未设置」，
- *             由表现层在载入时补平台随机种子。
+ *             由服务端在载入时补种子。
  */
 export function createNewSave(now: number, seed = 0): SaveData {
   return {

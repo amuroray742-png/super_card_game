@@ -25,21 +25,19 @@ import type {
   RelicInstance,
   RewardBundle,
   BattleResult,
-  Rarity,
   ArenaMatch,
 } from '../../core/model/types.ts'
 import { createNewSave, normalizeSave } from '../../core/save/schema.ts'
-import { deserialize, serialize } from '../../core/save/serialize.ts'
+import { deserializePublicSave } from '../../core/save/serialize.ts'
 import { storage } from '../../platform/storage.ts'
-import { newActionId } from '../../platform/random.ts'
+import { newActionId, randomSeed } from '../../platform/random.ts'
 import { systemClock } from '../../core/time.ts'
-import { hashSeed } from '../../core/rng.ts'
 import { HEROES, HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { STAGES } from '../../core/config/stages.ts'
 import { computeBondState, isTeamEmpty } from '../../core/systems/team.ts'
 import { type OfflineSettlementResult } from '../../core/systems/idle.ts'
 import { getEquippedRelics, equippedOwnerMap, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
-import { getPool, groupByRarity, resolvePoolHeroIds } from '../../core/config/pools.ts'
+import { getPool } from '../../core/config/pools.ts'
 import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, generateRelic, RELIC_SETS } from '../../core/systems/relic.ts'
 import { type RelicAdvice } from '../../core/systems/relic-advice.ts'
 import {
@@ -53,7 +51,7 @@ import {
   atRealmGate,
   applyRealmBreak,
 } from '../../core/systems/growth.ts'
-import { computeEffectiveRates } from '../../core/systems/gachaRates.ts'
+import { ratesForPool as computePoolRates } from '../../core/systems/gacha.ts'
 import { previewRebirth, performRebirth } from '../../core/systems/rebirth.ts'
 import { arenaSnapshotHash, resolveArenaMatch, arenaContext, resolveArenaRewards, type ArenaReward } from '../../core/systems/arena.ts'
 import { DAILY, LEVEL, REDEEM_CODES } from '../../core/config/economy.ts'
@@ -214,7 +212,7 @@ export const useGameStore = defineStore('game', () => {
   /** 把服务端返回的存档覆盖到本地镜像，并顺手写缓存 */
   async function applyServerSave(snapshot: SaveSnapshot | undefined): Promise<void> {
     if (!snapshot) return
-    const next = normalizeSave(deserialize(snapshot.payload))
+    const next = deserializePublicSave(snapshot.payload)
     next.savedAt = snapshot.savedAt
     save.value = next
     // 回放倍速跟随服务端设置（设置本身也是服务端权威的）
@@ -397,7 +395,7 @@ export const useGameStore = defineStore('game', () => {
 
     if (cloud) {
       // 服务端有存档 → 以服务端为准
-      const server = normalizeSave(deserialize(cloud.payload))
+      const server = deserializePublicSave(cloud.payload)
       server.savedAt = cloud.savedAt
       save.value = server
       battleSpeed.value = server.settings.speed ?? 1
@@ -574,30 +572,12 @@ export const useGameStore = defineStore('game', () => {
    */
   const currentPoolId = ref('standard')
 
-  const poolRarities = computed<Rarity[]>(() => {
-    const pool = getPool(currentPoolId.value)
-    const byRarity = groupByRarity(resolvePoolHeroIds(pool))
-    return (['SSR', 'SR', 'R', 'N'] as Rarity[]).filter((r) => (byRarity[r]?.length ?? 0) > 0)
-  })
-
-  const rates = computed(() =>
-    computeEffectiveRates(
-      { pitySSR: save.value.gacha.pitySSR, pity10: save.value.gacha.pity10 },
-      poolRarities.value,
-    ),
-  )
+  const rates = computed(() => ratesForPool(currentPoolId.value))
 
   /** 指定卡池的概率公示快照（合规页需要逐池公示） */
   function ratesForPool(poolId: string) {
-    const pool = getPool(poolId)
-    const byRarity = groupByRarity(resolvePoolHeroIds(pool))
-    const rarities = (['SSR', 'SR', 'R', 'N'] as Rarity[]).filter(
-      (r) => (byRarity[r]?.length ?? 0) > 0,
-    )
-    return computeEffectiveRates(
-      { pitySSR: save.value.gacha.pitySSR, pity10: save.value.gacha.pity10 },
-      rarities,
-    )
+    const { gacha } = save.value
+    return computePoolRates(getPool(poolId), gacha, !loaded.value || gacha.newbieUsed === true)
   }
 
   // ─────────────────────────── 养成 ───────────────────────────
@@ -733,17 +713,9 @@ export const useGameStore = defineStore('game', () => {
     return res.match
   }
 
-  /**
-   * 战斗种子：**观战预览**用的派生种子。
-   *
-   * ⚠ 服务端权威后客户端不再持有随机序列（铁律 #24 / #28），
-   *   这里用 `hashSeed(seed, 'preview', n)` 做**域分离**派生：
-   *   与服务端的抽卡序列互不干扰，也不会让预览消耗服务端的随机数。
-   */
-  let previewCounter = 0
+  /** 观战预览只使用独立的平台种子。 */
   function nextBattleSeed(): number {
-    previewCounter += 1
-    return hashSeed(`${save.value.rng.seed}:preview:${previewCounter}`)
+    return randomSeed()
   }
 
   /**

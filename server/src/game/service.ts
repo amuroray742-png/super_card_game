@@ -20,7 +20,7 @@
  */
 import { randomInt } from 'node:crypto'
 import type { SaveData } from '../../../src/core/model/types.ts'
-import { deserialize, serialize } from '../../../src/core/save/serialize.ts'
+import { deserialize, serialize, serializePublicSave } from '../../../src/core/save/serialize.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
 import { Rng } from '../../../src/core/rng.ts'
 import { ACCOUNT, LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
@@ -37,11 +37,15 @@ import type { OfflineSettlementResult } from '../../../src/core/systems/idle.ts'
 import type { ActionRequest, ActionResponse, SaveSnapshot } from '../../../src/core/systems/action-protocol.ts'
 import type { Db } from '../db.ts'
 import { UserLock } from './lock.ts'
-import { readActionLog, readFlag, readSave, trimActionLogs, writeActionLog, writeFlag, writeSave } from './repo.ts'
+import { expireActionResults, readActionLog, readFlag, readSave, writeActionLog, writeFlag, writeSave } from './repo.ts'
 
 /** 服务端随机种子（密码学随机源；**不得**用常量种子——所有玩家会抽到同一串） */
 export function serverSeed(): number {
-  return randomInt(0, 0x1_0000_0000)
+  return randomInt(1, 0x1_0000_0000)
+}
+
+function publicSnapshot(save: SaveData): SaveSnapshot {
+  return { payload: serializePublicSave(save), savedAt: save.savedAt }
 }
 
 /** 幂等日志里存的内容（只存成功动作的结果） */
@@ -94,14 +98,12 @@ export class GameService {
 
       const save = deserialize(row.payload)
       const prepared = this.prepare(save, now)
-      let payload = serialize(save)
       if (prepared.dirty) {
         save.savedAt = now
-        payload = serialize(save)
-        writeSave(this.db, userId, payload, save.savedAt, now)
+        writeSave(this.db, userId, serialize(save), save.savedAt, now)
       }
       return {
-        save: { payload, savedAt: save.savedAt },
+        save: publicSnapshot(save),
         offline: prepared.offline,
       }
     })
@@ -111,12 +113,25 @@ export class GameService {
 
   private executeSync(userId: number, request: ActionRequest): ActionResponse {
     const now = Date.now()
+    const isHeartbeat = request.action.type === 'idle.heartbeat'
+    const expiresBefore = now - ACCOUNT.ACTION_REPLAY_WINDOW_MS
 
-    // ① 幂等：命中日志 → 直接回放上次结果（**不重复扣费**）
-    const logged = readActionLog(this.db, userId, request.actionId)
+    // ① 成功动作 ID 永久防重，心跳只按服务端时间续约。
+    const logged = isHeartbeat ? undefined : readActionLog(this.db, userId, request.actionId)
     if (logged) {
-      const stored = JSON.parse(logged.result) as StoredOutcome
       const row = readSave(this.db, userId)
+      const save = row ? publicSnapshot(deserialize(row.payload)) : undefined
+      if (!logged.result || logged.created_at <= expiresBefore) {
+        return {
+          ok: false,
+          actionId: request.actionId,
+          code: GAME_ERROR_CODES.ACTION_REPLAY_EXPIRED,
+          message: GAME_ERROR_MESSAGES.ACTION_REPLAY_EXPIRED,
+          replayed: true,
+          save,
+        }
+      }
+      const stored = JSON.parse(logged.result) as StoredOutcome
       return {
         ok: stored.ok,
         actionId: request.actionId,
@@ -126,7 +141,7 @@ export class GameService {
         messageKind: stored.messageKind,
         silent: stored.silent,
         replayed: true,
-        save: row ? { payload: row.payload, savedAt: row.saved_at } : undefined,
+        save,
       }
     }
 
@@ -164,11 +179,10 @@ export class GameService {
     const save = row ? deserialize(row.payload) : createNewSave(now, serverSeed())
 
     // ③ 挂机动作自己消费账本，避免入口预结算吞掉其上限与返回结果。
-    const prepared = this.prepare(save, now, request.action.type !== 'idle.tick' && request.action.type !== 'idle.claimOffline' && request.action.type !== 'idle.heartbeat')
-    let dirty = prepared.dirty
+    const prepared = this.prepare(save, now, request.action.type !== 'idle.tick' && request.action.type !== 'idle.claimOffline' && !isHeartbeat)
 
     // ④ 执行动作（规则全在 core 里）
-    const seedBefore = save.rng.seed
+    const rngBefore = save.rng
     const rng = Rng.fromSnapshot(save.rng.seed, save.rng.counter)
     const outcome = applyAction<GameActionType>(
       save,
@@ -178,30 +192,23 @@ export class GameService {
 
     // ⑤ 失败：动作没改存档（core 保证先校验后修改），但离线收益要落库
     if (!outcome.ok) {
-      if (dirty) {
+      if (prepared.dirty) {
         save.savedAt = now
         writeSave(this.db, userId, serialize(save), save.savedAt, now)
       }
-      const current = readSave(this.db, userId)
       return {
         ok: false,
         actionId: request.actionId,
         code: outcome.code,
         message: outcome.message,
         silent: outcome.silent,
-        save: current ? { payload: current.payload, savedAt: current.saved_at } : undefined,
+        save: row ? publicSnapshot(save) : undefined,
         offline: prepared.offline,
       }
     }
 
     // ⑥ 随机数计数器写回存档（序列只前进不复现）
-    if (save.rng.seed !== seedBefore) {
-      // 动作换了整条随机序列（重置 / 导入）→ 用新种子重建，不回写旧计数器
-      if (!save.rng.seed) {
-        save.rng.seed = serverSeed()
-        save.rng.counter = 0
-      }
-    } else {
+    if (save.rng === rngBefore) {
       syncRngState(save, rng)
     }
 
@@ -217,8 +224,10 @@ export class GameService {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       writeSave(this.db, userId, payload, save.savedAt, now)
-      writeActionLog(this.db, userId, request.actionId, JSON.stringify(stored), now)
-      trimActionLogs(this.db, userId, ACCOUNT.ACTION_LOG_LIMIT)
+      if (!isHeartbeat) {
+        writeActionLog(this.db, userId, request.actionId, JSON.stringify(stored), now)
+        expireActionResults(this.db, userId, expiresBefore)
+      }
       // 存量旧档迁移：记一笔账号标记（同一份旧档不会被迁给第二个账号）
       if (isImport) {
         writeFlag(this.db, userId, LEGACY_MIGRATED_FLAG, 1)
@@ -235,7 +244,7 @@ export class GameService {
       result: outcome.result,
       message: outcome.message,
       messageKind: outcome.messageKind,
-      save: { payload, savedAt: save.savedAt },
+      save: publicSnapshot(save),
       offline: prepared.offline,
     }
   }

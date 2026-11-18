@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import {
   E2E_API_BASE,
   E2E_PASSWORD,
+  cachedSaveOf,
   loginViaUi,
   registerAccount,
   registerViaUi,
@@ -130,9 +131,15 @@ test.describe('登录系统', () => {
     await page.goto('/#/settings')
     await page.waitForLoadState('networkidle')
 
+    expect(await cachedSaveOf(page, session.user.id)).not.toBeNull()
     await page.getByRole('button', { name: '注销账号' }).click()
     await page.getByRole('button', { name: '确认注销' }).click()
     await page.waitForURL(/#\/login/)
     await expect(page.getByRole('button', { name: '登录', exact: true }).first()).toBeVisible()
+    expect(await cachedSaveOf(page, session.user.id)).toBeNull()
+    const response = await page.request.post(`${E2E_API_BASE}/api/auth/login`, {
+      data: { username, password: E2E_PASSWORD },
+    })
+    expect(response.status()).toBe(401)
   })
 })

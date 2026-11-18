@@ -211,8 +211,11 @@ const DUPLICATE_ROWS: { rarity: Rarity; note: string }[] = [
         十连保底规则保证十连内至少 1 个 SR 及以上，故对应行显示
         {{ formatRate(100 / 100) }} 个百分点；有区分度的是 SSR 行与下方「当前保底进度下单抽概率」。
       </p>
+      <p v-if="rates.newbieGuarantee" class="tiny muted" style="margin: 4px 0 0; line-height: 1.7">
+        综合概率已计入首次十连保底。
+      </p>
       <p v-if="!allInPool" class="tiny muted" style="margin: 4px 0 0; line-height: 1.7">
-        本池未收录的稀有度，其概率已并入池内最低稀有度（{{ mergedInto }}），故对应行显示 0.00%。
+        本池未收录稀有度的单抽概率已并入池内最低稀有度（{{ mergedInto }}）。
       </p>
       <div class="tiny muted" style="margin-top: 6px">
         当前保底进度下单抽概率：{{ singleRates.join(' · ') }}

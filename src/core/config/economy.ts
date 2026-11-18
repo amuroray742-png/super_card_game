@@ -206,6 +206,8 @@ export const IDLE = {
   HEARTBEAT_INTERVAL_MS: 5_000,
   /** 离线回放的最大场次（防卡顿） */
   MAX_REPLAY_BATTLES: 2000,
+  /** 挑战战败后先完成这些刷取胜场，再自动重试原目标。 */
+  FARM_WINS_BEFORE_RETRY: 10,
   /**
    * 离线结算的触发阈值（秒）。
    *

@@ -8,8 +8,8 @@
  *   3. 保底英雄必须属于当前卡池，否则会抽到池外角色
  */
 import { describe, it, expect } from 'vitest'
-import { executePull } from '../../src/core/systems/gacha.ts'
-import { POOL_STANDARD, POOL_CHINA, POOL_NEWBIE } from '../../src/core/config/pools.ts'
+import { executePull, ratesForPool } from '../../src/core/systems/gacha.ts'
+import { POOLS, POOL_STANDARD, POOL_CHINA, POOL_NEWBIE } from '../../src/core/config/pools.ts'
 import { Rng } from '../../src/core/rng.ts'
 import type { HeroState } from '../../src/core/model/types.ts'
 
@@ -18,6 +18,19 @@ function emptyOwned(): Record<string, HeroState> {
 }
 
 describe('新手保底', () => {
+  it('每个卡池的首次十连公示都含新手保底，单抽概率与常规十连口径独立', () => {
+    const pity = { pitySSR: 0, pity10: 0 }
+    for (const pool of POOLS) {
+      const first = ratesForPool(pool, pity, false)
+      const later = ratesForPool(pool, pity, true)
+      expect(first.newbieGuarantee).toBe(true)
+      expect(first.rows[0]).toMatchObject({ rarity: 'SSR', baseRate: 0.6, singleEffective: 0.6, tenPullEffective: 100 })
+      expect(later.newbieGuarantee).toBe(false)
+      expect(later.rows[0].tenPullEffective).toBeLessThan(100)
+    }
+    expect(ratesForPool(POOL_STANDARD, pity, true).rows[0].tenPullEffective).toBe(11.69)
+  })
+
   it('首次十连含 1 个 SSR，且新手资格被消耗', () => {
     for (let seed = 0; seed < 50; seed++) {
       const outcome = executePull(

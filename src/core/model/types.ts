@@ -606,7 +606,10 @@ export interface SaveData {
     chapterProgress: number
   }
   idle: {
+    /** 玩家选定或自动推进的挑战目标。 */
     currentStage: number
+    /** 挑战受阻时的刷取关卡及下次重试前所需的胜场。 */
+    farm?: { stage: number | null; winsUntilRetry: number }
     autoAdvance: boolean
     totalIdleSeconds: number
     /** 服务端已计量水位/有效预算；旧档缺失时惰性迁移。 */

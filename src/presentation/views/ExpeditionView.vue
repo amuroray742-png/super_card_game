@@ -5,13 +5,11 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
-import { STAGES } from '../../core/config/stages.ts'
+import { STAGES, STAGE_INDEX } from '../../core/config/stages.ts'
 import { getEnemy } from '../../core/config/enemies.ts'
 import { DROP_TABLES } from '../../core/config/economy.ts'
 import { runBattle } from '../../core/systems/battle.ts'
 import { buildPveContext } from '../../core/systems/derive.ts'
-import { getHeroSetMods } from '../../core/systems/relic.ts'
-import { getHeroPassiveMods } from '../../core/systems/growth.ts'
 import { formatNumber, formatPower } from '../utils/format'
 import BattleCanvas from '../components/BattleCanvas.vue'
 import BattleResultPanel from '../components/BattleResultPanel.vue'
@@ -27,6 +25,8 @@ const battle = ref<BattleResult | null>(null)
 const stage = computed(() => store.currentStage)
 const chapter = computed(() => Math.ceil(stage.value.id / 31))
 const stageName = computed(() => stage.value.name)
+const farm = computed(() => store.save.idle.farm)
+const farmStage = computed(() => STAGE_INDEX.get(farm.value?.stage ?? 0))
 
 /** 当前关卡的掉落表（战后结算展示） */
 const drops = computed(() => DROP_TABLES[stage.value.dropTableId])
@@ -81,6 +81,10 @@ async function idle(battles: number) {
   }
   const res = await store.tickIdle(battles)
   if (res) {
+    if (res.battles === 0) {
+      store.notify('当前可用的挂机时间尚不足一场', 'info')
+      return
+    }
     const r = res.rewards
     const parts = [
       r.silver ? `银两 ${formatNumber(r.silver)}` : '',
@@ -89,7 +93,11 @@ async function idle(battles: number) {
       r.relicStones ? `强化石 ${r.relicStones}` : '',
       r.relics && r.relics.length > 0 ? `遗物 ${r.relics.length}` : '',
     ].filter(Boolean)
-    store.notify(parts.length ? parts.join(' · ') : '推征完成')
+    if (res.blockedAtStage !== null) {
+      const lost = STAGE_INDEX.get(res.blockedAtStage)?.name
+      parts.unshift(`${lost ?? '当前关卡'}战败`)
+    }
+    store.notify(parts.length ? parts.join(' · ') : '推征完成', res.blockedAtStage !== null ? 'warn' : 'ok')
   }
 }
 </script>
@@ -124,10 +132,19 @@ async function idle(battles: number) {
           {{
             powerGap.empty
               ? '尚未编队，无法推征'
-              : powerGap.enough
+              : farm
+                ? '当前挑战受阻'
+                : powerGap.enough
                 ? '战力充足，可推进'
                 : `战力不足，尚需 ×${(1 / powerGap.ratio).toFixed(2)}`
           }}
+        </div>
+        <div v-if="farm" class="tiny muted" style="margin-top: 6px">
+          <template v-if="farmStage && farm.winsUntilRetry > 0">
+            正在刷取「{{ farmStage.name }}」，再胜 {{ farm.winsUntilRetry }} 场后重试。
+          </template>
+          <template v-else-if="farmStage">下次推征将重试当前挑战。</template>
+          <template v-else>尚无可刷关卡，可调整阵容后重试。</template>
         </div>
       </div>
 

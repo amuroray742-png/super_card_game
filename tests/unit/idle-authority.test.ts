@@ -6,6 +6,8 @@ import { Rng } from '../../src/core/rng.ts'
 import { runIdle, settleOffline } from '../../src/core/systems/idle.ts'
 import { buildPveContext, buildTeam, buildTeamPower } from '../../src/core/systems/derive.ts'
 import { maxedHero } from './helpers.ts'
+import { BATTLE, IDLE } from '../../src/core/config/economy.ts'
+import { getStage } from '../../src/core/config/stages.ts'
 
 const NOW = 1700000000000
 function fixture() {
@@ -14,6 +16,18 @@ function fixture() {
   save.team.slots[0] = 'xiangyu'
   const rng = new Rng(123)
   return { save, rng, ctx: { now: NOW, rng, randomSeed: () => 456 } }
+}
+
+function bossFixture() {
+  const save = createNewSave(NOW, 1)
+  const ids = ['jeannedarc', 'nangdengel', 'huatuo', 'bianque']
+  ids.forEach((id, slot) => {
+    save.heroes[id] = { ...createHeroState(id, NOW), level: 44 }
+    save.team.slots[slot] = id
+  })
+  save.campaign.clearedStage = 60
+  save.idle.currentStage = 61
+  return { save, ctx: { now: NOW, rng: new Rng(1), randomSeed: () => 2 } }
 }
 
 describe('挂机权威时间账本', () => {
@@ -73,6 +87,48 @@ describe('挂机权威时间账本', () => {
     const win = runIdle([maxedHero('xiangyu')], 1, 1, 9)
     expect(win.lastClearedStage).toBe(1)
     expect(win.nextTargetStage).toBe(2)
+  })
+  it('过门槛却败于 BOSS 时只结算实际场次，保留挑战并改刷已通关关卡', () => {
+    const { save, ctx } = bossFixture()
+    expect(buildTeamPower(save)).toBeGreaterThanOrEqual(getStage(62).powerRequired)
+    const battleMs = BATTLE.SECONDS_PER_BATTLE * 1000
+    ctx.now += 12 * battleMs + 500
+    const before = settleIdleLedger(save, ctx, 1)
+    expect(before).toMatchObject({ lastClearedStage: 61, nextTargetStage: 62 })
+
+    const lost = settleIdleLedger(save, ctx, 1)
+    expect(lost).toMatchObject({ battles: 1, blockedAtStage: 62, rewards: {}, lastClearedStage: null })
+    expect(save.idle.effectiveMs).toBeCloseTo(10 * battleMs + 500)
+    expect(save.idle.farm).toEqual({ stage: 61, winsUntilRetry: IDLE.FARM_WINS_BEFORE_RETRY })
+
+    const farmed = settleIdleLedger(save, ctx, 2)
+    expect(farmed).toMatchObject({ battles: 2, lastClearedStage: 61, reachedStage: 61, nextTargetStage: 62 })
+    expect(farmed?.rewards.relics).toHaveLength(2)
+    expect(save.idle.currentStage).toBe(62)
+    expect(save.idle.farm).toEqual({ stage: 61, winsUntilRetry: IDLE.FARM_WINS_BEFORE_RETRY - 2 })
+    expect(save.idle.effectiveMs).toBeCloseTo(8 * battleMs + 500)
+  })
+
+  it('分批领取与一次领取的刷取收益一致，凑够胜场才重试原关', () => {
+    const one = bossFixture()
+    const split = bossFixture()
+    const battles = 2 + IDLE.FARM_WINS_BEFORE_RETRY
+    const elapsed = battles * BATTLE.SECONDS_PER_BATTLE * 1000
+    one.ctx.now += elapsed
+    split.ctx.now += elapsed
+    const full = settleIdleLedger(one.save, one.ctx, battles)
+    expect(full?.rewards.relics).toHaveLength(1 + IDLE.FARM_WINS_BEFORE_RETRY)
+    for (let i = 0; i < battles; i++) settleIdleLedger(split.save, split.ctx, 1)
+    expect(split.save.idle.farm).toEqual({ stage: 61, winsUntilRetry: 0 })
+    expect(split.save.idle).toEqual(one.save.idle)
+    expect(split.save.player).toEqual(one.save.player)
+    expect(split.ctx.rng.snapshot()).toEqual(one.ctx.rng.snapshot())
+
+    split.ctx.now += BATTLE.SECONDS_PER_BATTLE * 1000
+    expect(settleIdleLedger(split.save, split.ctx, 1)).toMatchObject({ blockedAtStage: 62 })
+    expect(split.save.idle.farm?.winsUntilRetry).toBe(IDLE.FARM_WINS_BEFORE_RETRY)
+    expect(applyAction(split.save, { type: 'idle.setTarget', stageId: 61 }, split.ctx).ok).toBe(true)
+    expect(split.save.idle.farm).toBeUndefined()
   })
   it('频繁领取与一次领取使用相同的线性时间预算', () => {
     const { save, ctx } = fixture()

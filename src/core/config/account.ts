@@ -40,13 +40,8 @@ export const ACCOUNT = {
   ACTION_MAX_PER_WINDOW: 120,
   /** 动作限流窗口（毫秒） */
   ACTION_WINDOW_MS: 60 * 1000,
-  /**
-   * 每个账号保留的幂等 `actionId` 条数。
-   *
-   * 只保留最近若干条：客户端重试窗口是秒级，不需要永久留档；
-   * 同时避免日志表无限增长。
-   */
-  ACTION_LOG_LIMIT: 64,
+  /** 成功动作的结果保留 24 小时，过期后仍保留动作 ID 防止重复执行。 */
+  ACTION_REPLAY_WINDOW_MS: 24 * 60 * 60 * 1000,
   /** 默认后端地址（前端在未配置时使用） */
   DEFAULT_API_BASE: 'http://127.0.0.1:8787',
 } as const

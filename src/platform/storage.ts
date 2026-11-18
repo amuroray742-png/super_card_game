@@ -4,7 +4,7 @@
  * presentation 层禁止直接访问 localStorage，一律经此接口（§12.3 铁律 #6）。
  */
 import type { SaveData } from '../core/model/types.ts'
-import { deserialize, exportSave, importSave, serialize } from '../core/save/serialize.ts'
+import { deserializePublicSave, exportSave, importSave, serializePublicSave } from '../core/save/serialize.ts'
 import { ACCOUNT_STORAGE_KEYS } from '../core/config/account.ts'
 
 export interface StorageAdapter {
@@ -28,17 +28,23 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async load(slot: string): Promise<SaveData | null> {
-    const text = localStorage.getItem(this.key(slot))
+    const key = this.key(slot)
+    const text = localStorage.getItem(key)
     if (!text) return null
     try {
-      return deserialize(text)
+      const save = deserializePublicSave(text)
+      if (slot !== ACCOUNT_STORAGE_KEYS.LEGACY_SAVE_SLOT && Object.hasOwn(JSON.parse(text) ?? {}, 'rng')) {
+        // 清理旧版账号缓存，保留迁移通道中的原始旧档。
+        try { localStorage.setItem(key, serializePublicSave(save)) } catch { /* 仍可只读查看 */ }
+      }
+      return save
     } catch {
       return null
     }
   }
 
   async save(slot: string, data: SaveData): Promise<void> {
-    localStorage.setItem(this.key(slot), serialize(data))
+    localStorage.setItem(this.key(slot), serializePublicSave(data))
   }
 
   async export(data: SaveData): Promise<string> {
@@ -71,14 +77,14 @@ export class MemoryStorageAdapter implements StorageAdapter {
     const text = this.store.get(slot)
     if (!text) return null
     try {
-      return deserialize(text)
+      return deserializePublicSave(text)
     } catch {
       return null
     }
   }
 
   async save(slot: string, data: SaveData): Promise<void> {
-    this.store.set(slot, serialize(data))
+    this.store.set(slot, serializePublicSave(data))
   }
 
   async export(data: SaveData): Promise<string> {
