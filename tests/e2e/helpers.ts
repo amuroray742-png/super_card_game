@@ -219,6 +219,12 @@ export async function pauseFarming(page: Page): Promise<void> {
   await page.waitForLoadState('networkidle')
   const slots = page.locator('.slot')
   const picker = page.locator('.dialog').filter({ hasText: '选择英灵' })
+  // ⚠ 必须等阵位**渲染出来**再数：
+  //   `page.goto('/#/formation')` 从另一个 hash 出发属于**同文档导航**，
+  //   页面不会重载，`networkidle` 立刻满足 —— 此时 Vue 可能还没重渲染完，
+  //   直接 `count()` 会读到 0（曾误报成「阵位页挂了」，实际页面稍后就正常了）。
+  //   用 locator 自带的自动等待，语义也不变：等阵位渲染出来。
+  await expect(slots.first()).toBeVisible()
   const total = await slots.count()
   expect(total).toBeGreaterThan(0)
   for (let i = 0; i < total; i++) {
