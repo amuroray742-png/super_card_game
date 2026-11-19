@@ -101,9 +101,42 @@ test.describe('抽卡入口可达（核心闭环）', () => {
     await expect(page.getByRole('button', { name: '前往召唤', exact: true })).toBeVisible()
   })
 
-  test('顶部资源条的圣杯结晶可直达召唤页', async ({ page }) => {
+  test('顶部资源条只显示图标与数量，不再显示资源名称', async ({ page }) => {
     await gotoApp(page, '#/expedition')
-    await page.locator('.res-link', { hasText: '圣杯结晶' }).first().click()
+    const bar = page.locator('.res-bar')
+    await expect(bar).toBeVisible()
+    // 名称已移到点击后的弹窗里（铁律 #8：名称取 core 的资源登记表）
+    await expect(bar).not.toContainText('银两')
+    await expect(bar).not.toContainText('圣杯结晶')
+    // 六项资源，每项一个图标 + 一个数量
+    const items = bar.locator('.res-item')
+    await expect(items).toHaveCount(6)
+    for (let i = 0; i < 6; i++) {
+      await expect(items.nth(i).locator('img.res-icon')).toHaveCount(1)
+    }
+  })
+
+  test('点击顶栏资源弹出名称与作用描述', async ({ page }) => {
+    await gotoApp(page, '#/expedition')
+    await page.locator('.res-item[data-res="skillStones"]').click()
+    const dialog = page.getByTestId('resource-dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('术式结晶')
+    // 作用描述里有实质内容（不是空壳弹窗）
+    await expect(dialog).toContainText('技能')
+    // 点遮罩关闭
+    await page.locator('.mask').click({ position: { x: 5, y: 5 } })
+    await expect(dialog).toHaveCount(0)
+  })
+
+  test('点击顶栏资源弹出说明，弹窗可直达召唤页', async ({ page }) => {
+    await gotoApp(page, '#/expedition')
+    await page.locator('.res-item[data-res="crystals"]').click()
+    const dialog = page.getByTestId('resource-dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('圣杯结晶')
+    // 抽卡是核心循环，入口必须仍在（铁律 #10）——现在收在弹窗里
+    await dialog.getByRole('button', { name: '前往召唤' }).click()
     await expect(page).toHaveURL(/#\/gacha/)
   })
 

@@ -226,7 +226,21 @@ select {
 
 .res-bar {
   display: flex;
-  gap: 12px;
+  /**
+   * ⚠ 6 项资源在手机宽度（约 360px）放不下一行。
+   *
+   * 原先这里是横向滚动条（`overflow-x: auto` + 隐藏滚动条），
+   * 资源图标加进来后每项又宽了 22px → 手机上只露得出 3 项，
+   * 而且滚动条被藏起来后玩家**看不出右边还有东西**（图标放大了「藏起来」的成本）。
+   *
+   * 现在改为**换行**：宁可让顶栏占两行，也不裁掉任何一项资源。
+   * `flex: 1 1 auto` + `min-width: 0` 是关键——
+   * 不给宽度的话，换行容器会被撑成「每行一项」的窄条。
+   */
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px 10px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -235,13 +249,27 @@ select {
   display: none;
 }
 
+/**
+ * 顶栏资源项：**图标 + 数量**（名称在点击后的弹窗里给）。
+ *
+ * ⚠ 它是一个 `<button>`：点按区不小于 34px —— 22px 的图标在手机上是指不准的，
+ *   而「看不清/点不到」比「少一行字」严重得多。
+ */
 .res-item {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--c-text-dim);
+  font: inherit;
   font-size: 12px;
   white-space: nowrap;
-  color: var(--c-text-dim);
+  cursor: pointer;
 }
 
 .res-item b {
@@ -250,18 +278,57 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-/* 顶部资源条中可点击跳转的资源（圣杯结晶 / 抽卡券 → 召唤页） */
-.res-link {
-  padding: 0;
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
+/* 资源图标：与文字基线对齐，18px 显示尺寸（源图 256px，覆盖 3x 高刷屏有余量） */
+.res-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  object-fit: cover;
+  flex: none;
 }
 
-.res-link b {
-  color: var(--c-gold-2);
+/**
+ * 顶栏里的图标放大到 22px。
+ *
+ * 名称去掉后，图标成了玩家识别资源的**唯一**线索，
+ * 18px 在窄机型上已经认不出是银锭还是石头。
+ */
+.res-bar .res-icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* 图标 + 文字并排的标签（结算面板 / 奖励列表） */
+.res-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.res-label .res-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* 资源说明弹窗：大图标 + 当前数量 */
+.res-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.res-info-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: none;
+}
+
+.res-info b {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── 头像 ───────────────────────────────────────────── */

@@ -8,7 +8,8 @@
 import { computed } from 'vue'
 import type { BattleResult } from '../../core/model/types.ts'
 import type { DropTableDef } from '../../core/config/economy.ts'
-import { portraitPath, enemyArtPath } from '../../core/config/art.ts'
+import { portraitPath, enemyArtPath, resourceIconPath } from '../../core/config/art.ts'
+import { RESOURCE_DEFS } from '../../core/config/resources.ts'
 import { formatNumber } from '../utils/format'
 
 const props = defineProps<{
@@ -89,26 +90,37 @@ const aliveCount = computed(() => props.battle.survivors.length)
     </div>
 
     <!-- 掉落预览 -->
+    <!-- ⚠ 资源名称一律取 `core/config/resources.ts` 的登记表，不就地写中文名（铁律 #8） -->
     <div v-if="drops" class="stats">
       <div class="tiny muted" style="margin-bottom: 4px">掉落</div>
       <div class="row-between tiny">
-        <span class="muted">银两</span>
+        <span class="muted res-label">
+          <img class="res-icon" :src="resourceIconPath('silver')" :alt="RESOURCE_DEFS.silver.name" width="16" height="16" />{{ RESOURCE_DEFS.silver.name }}
+        </span>
         <b>{{ formatNumber(drops.silver[0]) }} ~ {{ formatNumber(drops.silver[1]) }}</b>
       </div>
       <div class="row-between tiny">
-        <span class="muted">经验</span>
+        <span class="muted res-label">
+          <img class="res-icon" :src="resourceIconPath('exp')" :alt="RESOURCE_DEFS.exp.name" width="16" height="16" />{{ RESOURCE_DEFS.exp.name }}
+        </span>
         <b>{{ formatNumber(drops.exp[0]) }} ~ {{ formatNumber(drops.exp[1]) }}</b>
       </div>
       <div class="row-between tiny">
-        <span class="muted">术式结晶</span>
+        <span class="muted res-label">
+          <img class="res-icon" :src="resourceIconPath('skillStones')" :alt="RESOURCE_DEFS.skillStones.name" width="16" height="16" />{{ RESOURCE_DEFS.skillStones.name }}
+        </span>
         <b>{{ drops.skillStones[0] }} ~ {{ drops.skillStones[1] }}</b>
       </div>
       <div class="row-between tiny">
-        <span class="muted">遗物强化石</span>
+        <span class="muted res-label">
+          <img class="res-icon" :src="resourceIconPath('relicStones')" :alt="RESOURCE_DEFS.relicStones.name" width="16" height="16" />{{ RESOURCE_DEFS.relicStones.name }}
+        </span>
         <b>{{ drops.relicStones[0] }} ~ {{ drops.relicStones[1] }}</b>
       </div>
       <div class="row-between tiny">
-        <span class="muted">英灵印记</span>
+        <span class="muted res-label">
+          <img class="res-icon" :src="resourceIconPath('emblems')" :alt="RESOURCE_DEFS.emblems.name" width="16" height="16" />{{ RESOURCE_DEFS.emblems.name }}
+        </span>
         <b>{{ drops.emblems[0] }} ~ {{ drops.emblems[1] }}</b>
       </div>
     </div>

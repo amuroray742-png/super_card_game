@@ -9,6 +9,13 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { IDLE } from '../core/config/economy.ts'
 import { STAGE_INDEX } from '../core/config/stages.ts'
+import { resourceIconPath } from '../core/config/art.ts'
+import {
+  RESOURCE_DEFS,
+  TOP_BAR_RESOURCE_KEYS,
+  resourceDesc,
+  type TopBarResourceKey,
+} from '../core/config/resources.ts'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from './stores/game'
 import { useAccountStore } from './stores/account'
@@ -35,18 +42,45 @@ const bare = computed(() => !account.isAuthenticated)
 
 const bareTitle = computed(() => (route.name === 'login' ? '登录' : '合规与概率公示'))
 
-const resources = computed(() => {
-  const p = store.save.player
-  return [
-    { label: '银两', value: p.silver },
-    // 圣杯结晶可点击直达召唤页——抽卡是核心循环，必须在任意页面一键可达
-    { label: '圣杯结晶', value: p.crystals, to: '/gacha' },
-    { label: '抽卡券', value: p.tickets, to: '/gacha' },
-    { label: '术式结晶', value: p.skillStones },
-    { label: '强化石', value: p.relicStones },
-    { label: '英灵印记', value: p.emblems },
-  ]
-})
+/**
+ * 顶部资源条（图标 + 数量）。
+ *
+ * ⚠ **名称不出现**在顶栏里：名称与作用描述统一放在
+ *   `core/config/resources.ts` 的登记表，点击图标才在弹窗里给（铁律 #8）。
+ *   资源清单与顶栏展示因此不会各写一套。
+ */
+const resources = computed(() =>
+  TOP_BAR_RESOURCE_KEYS.map((key) => ({
+    key,
+    name: RESOURCE_DEFS[key].name,
+    value: store.save.player[key],
+  })),
+)
+
+/** 当前打开的资源说明弹窗（null = 未打开） */
+const activeResource = ref<TopBarResourceKey | null>(null)
+
+/** 弹窗内容：登记表里的名称与描述 + 当前数量 */
+const activeDef = computed(() =>
+  activeResource.value ? RESOURCE_DEFS[activeResource.value] : null,
+)
+const activeValue = computed(() =>
+  activeResource.value ? store.save.player[activeResource.value] : 0,
+)
+const activeDesc = computed(() =>
+  activeResource.value ? resourceDesc(activeResource.value) : '',
+)
+
+/**
+ * 点「前往召唤」。
+ *
+ * 抽卡是核心循环，入口必须在任意页面一键可达（铁律 #10）——
+ * 顶栏图标点击改为弹窗后，这个入口收进弹窗里，不能整条丢掉。
+ */
+function goGacha() {
+  activeResource.value = null
+  router.push('/gacha')
+}
 
 const offlineRewards = computed(() => {
   const r = store.offlineReport?.rewards
@@ -76,6 +110,10 @@ function syncHeartbeat() {
   }, IDLE.HEARTBEAT_INTERVAL_MS)
 }
 watch(() => [store.loaded, store.offline, account.offline, account.user?.id], syncHeartbeat)
+// 切页时关掉资源弹窗：否则返回上一页时弹窗还挂着
+watch(() => route.path, () => {
+  activeResource.value = null
+})
 
 onMounted(() => {
   booted.value = true
@@ -144,17 +182,48 @@ function goBackBare() {
       <header class="top">
         <button class="top-back" v-if="route.meta.tab === undefined" @click="goBack">‹</button>
         <div class="res-bar">
-          <template v-for="r in resources" :key="r.label">
-            <button v-if="r.to" class="res-item res-link" @click="router.push(r.to)">
-              {{ r.label }}<b>{{ formatNumber(r.value) }}</b>
-            </button>
-            <span v-else class="res-item">
-              {{ r.label }}<b>{{ formatNumber(r.value) }}</b>
-            </span>
-          </template>
+          <!--
+            图标 + 数量，**不显示文字名称**（名称与作用描述在点击后的弹窗里给）。
+            名称仍通过 alt / aria-label / title 暴露给读屏与桌面 hover。
+          -->
+          <button
+            v-for="r in resources"
+            :key="r.key"
+            class="res-item"
+            :data-res="r.key"
+            :aria-label="`${r.name} ${formatNumber(r.value)}`"
+            :title="r.name"
+            @click="activeResource = r.key"
+          >
+            <img class="res-icon" :src="resourceIconPath(r.key)" :alt="r.name" width="22" height="22" />
+            <b>{{ formatNumber(r.value) }}</b>
+          </button>
         </div>
         <button class="top-extra" @click="router.push('/settings')">⋯</button>
       </header>
+
+      <!-- 资源说明（点击顶栏图标） -->
+      <div v-if="activeResource && activeDef" class="mask" @click.self="activeResource = null">
+        <div class="dialog" data-testid="resource-dialog">
+          <div class="panel-title">
+            <span>{{ activeDef.name }}</span>
+            <button class="btn btn-sm btn-ghost" @click="activeResource = null">关闭</button>
+          </div>
+          <div class="res-info">
+            <img class="res-info-icon" :src="resourceIconPath(activeResource)" :alt="activeDef.name" />
+            <b>{{ formatNumber(activeValue) }}</b>
+          </div>
+          <p class="tiny muted" style="margin: 8px 0 0; line-height: 1.8">{{ activeDesc }}</p>
+          <button
+            v-if="activeDef.gachaEntry"
+            class="btn btn-primary btn-block"
+            style="margin-top: 12px"
+            @click="goGacha"
+          >
+            前往召唤
+          </button>
+        </div>
+      </div>
 
       <!-- 内容 -->
       <main class="body" v-if="booted">
@@ -221,7 +290,9 @@ function goBackBare() {
 }
 
 .top {
-  height: var(--top-h);
+  /* ⚠ 用 min-height 而不是 height：资源条换行后顶栏要能长高，
+   *   固定高度会把第二行裁掉（铁律 #27：资源必须看得见）。 */
+  min-height: var(--top-h);
   flex: 0 0 auto;
   display: flex;
   align-items: center;
