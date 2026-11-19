@@ -62,6 +62,7 @@ import { chromium, webkit, type Browser, type BrowserContext, type Page } from '
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { assertSafeOrigin, ISOLATED_PREVIEW_URL } from './origin-guard.ts'
+import { buildRelicFixture, importRelicFixture } from './relic-fixture.ts'
 
 /** 隔离预览服务默认端口（与 dev server 刻意不同） */
 const DEFAULT_URL = ISOLATED_PREVIEW_URL
@@ -90,6 +91,8 @@ interface Options {
   compatOut: string
   /** 隔离后端地址（观战场景要注册账号） */
   api: string
+  /** 视口尺寸（`宽x高`）；不填用默认的手机尺寸 */
+  viewport: string
   /** 指定关卡 id（走关卡详情页的「战斗预览」；不填则走推征页的「观战」） */
   stage: string
   fullPage: boolean
@@ -118,11 +121,31 @@ function parseArgs(argv: string[]): Options {
     compat: argv.includes('--compat'),
     compatOut: get('--compat-out') ?? 'artifacts/baselines/browser-compat.json',
     api: get('--api') ?? '',
+    viewport: get('--viewport') ?? '',
     stage: get('--stage') ?? '',
     fullPage: argv.includes('--full-page'),
     scrollBottom: argv.includes('--scroll-bottom'),
     waitMs: Number(get('--wait') ?? 1200),
   }
+}
+
+/** 默认手机视口（常见机型逻辑宽度附近） */
+const DEFAULT_VIEWPORT = { width: 430, height: 932 }
+
+/**
+ * 解析 `--viewport 360x800`。
+ *
+ * ⚠ 为什么要能改视口：顶栏资源条是**按最窄的机型**设计的——
+ *   360px（低端 Android）比 430px 少 70px，
+ *   「6 项资源能不能全露出来」只在最窄机型上才验得出来。
+ */
+function parseViewport(raw: string): { width: number; height: number } {
+  const m = /^(\d{2,5})\s*[x×*]\s*(\d{2,5})$/.exec(raw.trim())
+  if (!m) return { ...DEFAULT_VIEWPORT }
+  const width = Number(m[1])
+  const height = Number(m[2])
+  if (width < 240 || height < 200) throw new Error(`视口尺寸不合法：${raw}（形如 360x800）`)
+  return { width, height }
 }
 
 /** origin 守卫：命中玩家可能正在使用的 origin 直接拒绝执行（实现见 origin-guard.ts） */
@@ -167,9 +190,16 @@ async function registerSession(api: string): Promise<ShotSession> {
  * 注入登录态。
  *
  * 会话与后端地址必须在**导航前**写入（路由守卫靠它们恢复登录态）。
+ *
+ * @param session 已有会话（截图场景要先用同一个会话导入前置存档时传进来）；
+ *                 不传就现注册一个。
  */
-async function injectSession(context: BrowserContext, opts: Options): Promise<ShotSession> {
-  const session = await registerSession(opts.api)
+async function injectSession(
+  context: BrowserContext,
+  opts: Options,
+  session?: ShotSession,
+): Promise<ShotSession> {
+  const sess = session ?? await registerSession(opts.api)
   await context.addInitScript(
     ({ apiBase, sess }: { apiBase: string; sess: ShotSession }) => {
       localStorage.setItem('sgw.apiBase', apiBase)
@@ -179,9 +209,9 @@ async function injectSession(context: BrowserContext, opts: Options): Promise<Sh
         localStorage.setItem('sgw.session', JSON.stringify(sess))
       }
     },
-    { apiBase: opts.api.replace(/\/$/, ''), sess: session },
+    { apiBase: opts.api.replace(/\/$/, ''), sess },
   )
-  return session
+  return sess
 }
 
 /**
@@ -367,16 +397,53 @@ async function runBattleScenario(
 }
 
 /**
- * 遗物场景：登录 → 十连 → 编队 → 推征挂机（产遗物）→ 铸造页 + 英灵页。
+ * 顶栏资源条：**6 项资源必须全部可见**（一项都不能被裁掉）。
+ *
+ * ⚠ 为什么把它做成断言：
+ *   资源图标让每项宽了 22px，窄机型上原本只露得出 3 项，
+ *   而横向滚动条的滚动条被藏着 → 玩家看不出右边还有资源。
+ *   这类问题**看截图容易漏**（第一屏刚好露出的那几项都正常），
+ *   所以改成「跑一次就量一次，露不全直接报错」。
+ */
+async function assertResourceBarFullyVisible(page: Page): Promise<void> {
+  const bar = page.locator('.res-bar')
+  if ((await bar.count()) === 0) return
+  const measured = await bar.evaluate((el) => {
+    const container = el as HTMLElement
+    const box = container.getBoundingClientRect()
+    const items = Array.from(container.querySelectorAll('.res-item')) as HTMLElement[]
+    const rows = new Set<number>()
+    let visible = 0
+    for (const item of items) {
+      const r = item.getBoundingClientRect()
+      rows.add(Math.round(r.top))
+      if (r.left >= box.left - 0.5 && r.right <= box.right + 0.5) visible += 1
+    }
+    return { total: items.length, visible, rows: rows.size, height: Math.round(box.height) }
+  })
+  console.log(
+    `[relic] 顶栏资源条：${measured.visible}/${measured.total} 项可见`
+    + `（${measured.rows} 行，高 ${measured.height}px）`,
+  )
+  if (measured.visible < measured.total) {
+    throw new Error(`顶栏资源条有 ${measured.total - measured.visible} 项被裁掉`)
+  }
+}
+
+/**
+ * 遗物场景：导入前置存档（60 件遗物 + 满编队伍）→ 铸造页 + 英灵页。
  *
  * 截图用于验收三件事：
- * 1. **遗物图标**：仓库里每件遗物都该有自己的徽章（不是一排同名文字）；
+ * 1. **遗物图标**：仓库里每件遗物都该有自己的实物立绘（不是一排同名文字）；
  * 2. **一键推荐装备**：英灵页的「一键推荐装备」按钮与战力增量；
  * 3. **套装效果可见**：2/4/6 件阶梯加成与「还差几件」的提示。
  *
- * ⚠ 为什么要先推征：遗物**只**从推征（挂机）与离线结算产出，
- *   新号仓库是空的 → 截出来的图只能看到空态。
- * ⚠ 满编 6 人：人不够会在第 1 关卡关，卡关后不再有掉落。
+ * ⚠ 为什么用「导入前置」而不是「推征挂机」：
+ *   遗物**只**从推征（挂机）与离线结算产出，而挂机一场要真实等 6 秒——
+ *   「推征 10 场」的 10 只是**领取上限**，客户端不创造时间。
+ *   原脚本点 3 次就等遗物出现，累计时间连一场都不够 → 仓库永远空 → `.relic-cell` 等不到。
+ *   导入前置一次到位，**60 张图标能在同一张仓库截图里全部验收**。
+ *   详见 `tools/capture/relic-fixture.ts`。
  */
 async function runRelicScenario(
   context: BrowserContext,
@@ -384,37 +451,28 @@ async function runRelicScenario(
   opts: Options,
   outPath: string,
 ): Promise<string> {
-  const base = await setupAccount(context, page, opts)
-
-  // 编队（满编 6 人，保证推征打得赢、掉得到遗物）
-  await page.goto(`${base}/#/formation`, { waitUntil: 'networkidle' })
-  for (const [slotText, index] of [
-    ['空位 1', 0],
-    ['空位 2', 1],
-    ['空位 3', 2],
-    ['空位 4', 3],
-    ['空位 5', 4],
-    ['空位 6', 5],
-  ] as const) {
-    await page.locator('.slot', { hasText: slotText }).click()
-    const dialog = page.locator('.dialog')
-    await dialog.waitFor({ state: 'visible' })
-    await dialog.locator('.pick-row').nth(index).click()
-    await dialog.waitFor({ state: 'detached' })
-  }
-
-  // 推征挂机 → 产遗物（每场必掉 1 件）
-  await page.goto(`${base}/#/expedition`, { waitUntil: 'networkidle' })
-  for (let i = 0; i < 3; i++) {
-    await page.locator('button', { hasText: '推征 10 场' }).click()
-    await page.waitForTimeout(700)
-  }
+  // ① 先导入前置存档
+  //    ⚠ 导入只对「服务端还没有存档」的账号开放 → 必须早于页面首屏建档，
+  //    否则页面先 `save.create` 建了档，导入就被 IMPORT_FORBIDDEN 永久拒绝。
+  const session = await registerSession(opts.api)
+  await importRelicFixture(opts.api, session.accessToken, buildRelicFixture())
+  await injectSession(context, opts, session)
+  const base = opts.url.replace(/\/$/, '')
 
   // 铸造页：遗物仓库（图标 + 套装名）
   await page.goto(`${base}/#/forge`, { waitUntil: 'networkidle' })
   await page.locator('.relic-cell').first().waitFor({ state: 'visible', timeout: 10_000 })
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(800)
+  await assertResourceBarFullyVisible(page)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-forge.png'), fullPage: opts.fullPage })
+
+  // 顶栏资源说明弹窗（图标 → 名称 + 作用描述）
+  await page.locator('.res-item[data-res="crystals"]').click()
+  await page.getByTestId('resource-dialog').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-resource.png') })
+  await page.getByTestId('resource-dialog').getByRole('button', { name: '关闭' }).click()
+  await page.getByTestId('resource-dialog').waitFor({ state: 'detached', timeout: 5_000 })
 
   // 铸造页：选中一件 → 详情面板（强化按钮 + 花费 + 下一级预览）
   await page.locator('.relic-cell').first().click()
@@ -830,7 +888,7 @@ async function main(): Promise<void> {
     browser = await chromium.launch()
     // 全新 context：localStorage 为空，与玩家存档完全隔离
     const context = await browser.newContext({
-      viewport: { width: 430, height: 932 },
+      viewport: parseViewport(opts.viewport),
       deviceScaleFactor: 2,
       isMobile: true,
       hasTouch: true,

@@ -692,8 +692,12 @@ async function toggleLock() {
 .relic-icon {
   width: 44px;
   height: 44px;
-  border-radius: 50%;
+  /* ⚠ 不再圆形裁切：AI 遗物图是方形满幅的实物立绘，
+     50% 圆裁会把长柄武器的杆与刃尖切掉（铁律 #8 换图不破的同类问题）。 */
+  border-radius: 6px;
+  object-fit: cover;
   display: block;
+  background: #0d0d14;
 }
 
 .relic-name {

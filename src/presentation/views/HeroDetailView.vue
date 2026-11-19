@@ -972,9 +972,12 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
 .relic-icon {
   width: 36px;
   height: 36px;
-  border-radius: 50%;
+  /* 同 ForgeView：AI 遗物图为方形满幅，圆裁会切掉器物。 */
+  border-radius: 5px;
+  object-fit: cover;
   display: block;
   flex: none;
+  background: #0d0d14;
 }
 
 .set-row {

@@ -36,5 +36,10 @@
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts"
+  ],
+  "exclude": [
+    "tools/artgen/local-out",
+    "node_modules",
+    "dist"
   ]
 }

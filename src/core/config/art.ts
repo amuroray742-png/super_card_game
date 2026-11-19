@@ -122,22 +122,78 @@ export function enemyArtPath(defId: string): string {
 /**
  * 遗物图标资源扩展名。
  *
- * 当前为程序化 SVG（`tools/relic-icons/generate.ts` 产出，60 张徽章）；
- * 后续若接 AI 生图，只改这里即可，界面与逻辑都不用动。
+ * ⚠ 已由程序化 SVG 徽章切换为 **AI 生图 WebP**（`tools/artgen/run-local-icons.ts` 产出）。
+ *   - 此前是确定性 SVG 徽章（60 张），只靠「稀有度配色 + 套装几何符号 + 主词条小徽」区分，
+ *     **60 件遗物在仓库里长得几乎一样**，玩家认不出哪件是哪件（只能靠解谜反推套装）。
+ *   - 现改为 AI 生图：每件遗物按「套装主题 × 器形 × 稀有度」出独立的实物立绘，
+ *     认物靠画面本身，不再靠解谜。
+ *   - 切换只需改这一处，界面与逻辑都不用动（与英灵卡面同一套路）。
+ *
+ * 素材由 `npm run art:icons` → `npm run art:icons:run` → `npm run art:icons:publish` 产出，
+ * 提示词口径见 `tools/artgen/icon-prompt.ts`（铁律 #45）。
  */
-export const RELIC_ICON_EXT = '.svg'
+export const RELIC_ICON_EXT = '.webp'
 
 /**
  * 取遗物图标路径。
  *
- * 遗物素材按遗物**基础定义 id** 命名（`public/relics/<defId>.svg`），
+ * 遗物素材按遗物**基础定义 id** 命名（`public/relics/<defId>.webp`），
  * 与英灵卡面 / 敌人立绘共用「路径由 core 给出」的唯一口径（AGENTS.md 铁律 #8）——
- * 表现层不得自行拼接 `/relics/xxx.svg`。
+ * 表现层不得自行拼接 `/relics/xxx.webp`。
  *
  * @param defId 遗物定义 id（如 `set_zhanshen_1`）
  */
 export function relicIconPath(defId: string): string {
   return `/relics/${defId}${RELIC_ICON_EXT}`
+}
+
+/**
+ * 资源 / 货币图标资源扩展名。
+ *
+ * 与卡面（`AI_CARD_EXT`）同走 WebP：体积约为同画质 PNG 的 1/4，
+ * 而资源条在每个页面顶部常驻，流量敏感。
+ */
+export const RESOURCE_ICON_EXT = '.webp'
+
+/**
+ * **需要图标的资源 key 全集**（唯一口径）。
+ *
+ * key 与存档 / 收益包字段一一对应：
+ *   `player.silver` / `player.exp` / `player.crystals` / `player.tickets` /
+ *   `player.skillStones` / `player.relicStones` / `player.emblems` /
+ *   `player.shards` / `arena.medals` / `arena.arenaMaterials`。
+ *
+ * ⚠ 这份清单是**生图侧与表现层的共同契约**：
+ *   生图工具（`tools/artgen/icon-prompt.ts`）按它产出素材，
+ *   单元测试按它断言「每个 key 都有图标文件」——
+ *   新增资源却忘了出图，会被测试直接拦下（铁律 #22「配置齐全 ≠ 资源齐全」）。
+ */
+export const RESOURCE_ICON_KEYS = [
+  'silver',
+  'exp',
+  'crystals',
+  'tickets',
+  'skillStones',
+  'relicStones',
+  'emblems',
+  'shards',
+  'medals',
+  'arenaMaterials',
+] as const
+
+/** 资源 key 类型 */
+export type ResourceIconKey = (typeof RESOURCE_ICON_KEYS)[number]
+
+/**
+ * 取资源 / 货币图标路径。
+ *
+ * key 是**数据口径**，不是展示名——表现层拿字段名换图标，
+ * 禁止各页面自己拼字符串（AGENTS.md 铁律 #8）。
+ *
+ * @param key 资源字段名（如 `crystals`）
+ */
+export function resourceIconPath(key: string): string {
+  return `/resources/${key}${RESOURCE_ICON_EXT}`
 }
 
 /**

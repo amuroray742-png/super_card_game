@@ -5,17 +5,22 @@
  * 也不得自行剥敌人 id 的 `#序号` 后缀。
  */
 import { describe, expect, it } from 'vitest'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import sharp from 'sharp'
 import {
   portraitPath,
   enemyArtPath,
   relicIconPath,
   RELIC_ICON_EXT,
+  resourceIconPath,
+  RESOURCE_ICON_EXT,
+  RESOURCE_ICON_KEYS,
   AVATAR_CROP,
 } from '../../src/core/config/art.ts'
 import { RELICS } from '../../src/core/config/relics.ts'
+import { assertResourceIconCoverage } from '../../tools/artgen/icon-prompt.ts'
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
@@ -34,7 +39,7 @@ describe('美术路径约定', () => {
 
 describe('遗物图标约定', () => {
   it('按遗物定义 id 取图标路径', () => {
-    expect(relicIconPath('set_zhanshen_1')).toBe('/relics/set_zhanshen_1.svg')
+    expect(relicIconPath('set_zhanshen_1')).toBe('/relics/set_zhanshen_1.webp')
   })
 
   it('每一件遗物都有对应的图标文件（配置齐全 ≠ 资源齐全）', () => {
@@ -43,12 +48,41 @@ describe('遗物图标约定', () => {
     expect(missing.map((r) => r.id)).toEqual([])
   })
 
-  it('图标是独立文档（不共用渐变 id，避免同页多图串色）', () => {
+  it('图标是有效的 WebP，尺寸覆盖 3x 高刷屏（≥128px）', async () => {
     const dir = join(ROOT, 'public/relics')
-    const one = RELICS[0]
-    const svg = readFileSync(join(dir, `${one.id}${RELIC_ICON_EXT}`), 'utf8')
-    expect(svg).toContain('<svg')
-    expect(svg).toContain('viewBox="0 0 128 128"')
+    for (const relic of RELICS) {
+      const meta = await sharp(join(dir, `${relic.id}${RELIC_ICON_EXT}`)).metadata()
+      expect(meta.format, `${relic.id} 格式`).toBe('webp')
+      expect(meta.width, `${relic.id} 宽度`).toBeGreaterThanOrEqual(128)
+      expect(meta.height, `${relic.id} 高度`).toBeGreaterThanOrEqual(128)
+    }
+  })
+})
+
+describe('资源图标约定', () => {
+  it('按资源 key 取图标路径', () => {
+    expect(resourceIconPath('crystals')).toBe('/resources/crystals.webp')
+    expect(resourceIconPath('skillStones')).toBe('/resources/skillStones.webp')
+  })
+
+  it('每一个资源 key 都有对应的图标文件（配置齐全 ≠ 资源齐全）', () => {
+    const dir = join(ROOT, 'public/resources')
+    const missing = RESOURCE_ICON_KEYS.filter((k) => !existsSync(join(dir, `${k}${RESOURCE_ICON_EXT}`)))
+    expect(missing).toEqual([])
+  })
+
+  it('图标是有效的 WebP，尺寸覆盖 3x 高刷屏（≥128px）', async () => {
+    const dir = join(ROOT, 'public/resources')
+    for (const key of RESOURCE_ICON_KEYS) {
+      const meta = await sharp(join(dir, `${key}${RESOURCE_ICON_EXT}`)).metadata()
+      expect(meta.format, `${key} 格式`).toBe('webp')
+      expect(meta.width, `${key} 宽度`).toBeGreaterThanOrEqual(128)
+      expect(meta.height, `${key} 高度`).toBeGreaterThanOrEqual(128)
+    }
+  })
+
+  it('生图侧清单与 core 的资源 key 完全一致（两侧各写一套就对不上）', () => {
+    expect(() => assertResourceIconCoverage()).not.toThrow()
   })
 })
 

@@ -220,6 +220,12 @@ test.describe('遗物获取途径（挂机掉落入库）', () => {
  *
  * 遗物原本**完全没有图标**：仓库里 60 件遗物长得一模一样，
  * 玩家只能靠名字认——同套装同稀有度的几件根本分不清。
+ * 先补了程序化 SVG 徽章（靠「稀有度配色 + 套装符号」区分，仍需解谜），
+ * 现已换成 **AI 生图实物立绘**（`public/relics/<defId>.webp`）：
+ * 每件遗物按「套装主题 × 器形 × 稀有度」单独出图，**认物靠画面本身**。
+ *
+ * 这条用例守的是「素材真的到位且真的加载出来了」——
+ * 配置齐全 ≠ 资源齐全（铁律 #22）。
  */
 test.describe('遗物图标', () => {
   test('仓库里每件遗物都有自己的图标，路径由 core 给出', async ({ page }) => {
@@ -241,12 +247,12 @@ test.describe('遗物图标', () => {
     const cellCount = await page.locator('.relic-cell').count()
     expect(await icons.count()).toBe(cellCount)
 
-    // 路径口径：/relics/<遗物定义 id>.svg（表现层不自己拼，铁律 #8）
+    // 路径口径：/relics/<遗物定义 id>.webp（表现层不自己拼，铁律 #8）
     const srcs = await icons.evaluateAll((els) =>
       els.map((el) => (el as HTMLImageElement).getAttribute('src') ?? ''),
     )
     for (const src of srcs) {
-      expect(src).toMatch(/^\/relics\/set_[a-z]+_\d+\.svg$/)
+      expect(src).toMatch(/^\/relics\/set_[a-z]+_\d+\.webp$/)
     }
 
     // 图标真的加载出来了（不是 404 的空图）。
