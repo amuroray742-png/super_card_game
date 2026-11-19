@@ -5,6 +5,8 @@
 | 文件 | 说明 |
 |---|---|
 | [plan.md](plan.md) | 《超级圣杯战争》完整设计方案（19 章）及实施修正。工程约束同步记录在 [AGENTS.md](../AGENTS.md)。 |
+| [资源、背包与材料副本设计](resource-backpack-design.md) | 下一版玩法设计。含逐项产出与用途、三档强化石、主线首通、两类副本和背包操作。 |
+| [资源、背包与材料副本实现计划](resource-backpack-implementation.md) | 待实施的开发顺序、旧档迁移、数值标定和验收场景。 |
 | [art-style.md](art-style.md) | 英灵卡面的画风、生产和校验规范。 |
 | [roadmap.md](roadmap.md) | P1、P2 的执行顺序、交付物与验收条件。 |
 | [deploy.md](deploy.md) | 试玩部署手册：托管形态、持久化、备份恢复演练、回滚、HTTPS、兼容性实测、扩容边界。 |
