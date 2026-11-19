@@ -31,10 +31,19 @@
 8. **存档结构也必须有唯一约定**：装备槽位 key 格式、掉落表 id、卡池 id 等由 `core/systems/loadout.ts`
    与 `core/config/` 定义，表现层不得自行拼接（否则 core 与 UI 会各写一套 key 规则）。
    **美术路径与裁取约定同样只有一个来源**：`src/core/config/art.ts` 的 `portraitPath` / `enemyArtPath` /
-   `relicIconPath` / `AVATAR_CROP`。表现层禁止自己拼 `/enemies/<id>.svg`、也禁止自己算「头像裁哪一块」——
+   `relicIconPath` / `resourceIconPath` / `AVATAR_CROP`。表现层禁止自己拼 `/enemies/<id>.svg`、也禁止自己算「头像裁哪一块」——
    敌人 id 在战斗里带 `#序号` 后缀（`boss_abyss#0`），自行拼接会取不到图；
    裁取参数一旦两处各写一套，换美术资源就会集体错位。
-   遗物图标同理：路径只能是 `relicIconPath(defId)`，素材由 `npm run art:relic` 产出到 `public/relics/`。
+   遗物图标同理：路径只能是 `relicIconPath(defId)`，素材由 `npm run art:icons`（本地 qwen-image2.1）产出到 `public/relics/`；
+   资源 / 货币图标路径只能是 `resourceIconPath(key)`，素材在 `public/resources/`，
+   key 全集由 `RESOURCE_ICON_KEYS` 定义（新增资源必须同步出图，否则单测会拦下）。
+   - **资源名称与作用描述也只有一份**：`src/core/config/resources.ts` 的 `RESOURCE_DEFS`
+     （类型是 `Record<ResourceIconKey, ResourceDef>`，漏登记一个 key 就**编译不过**）。
+     界面上凡是「图标 + 名称」并排的地方，名称一律取这里，**禁止就地写中文名**；
+     生图提示词里的资源名同样从这张表取。
+     > 历史教训：资源名此前在**四处**各写一份（顶栏 / 结算面板 / 关卡页 / 生图提示词），
+     > 已经对不上——同一个「强化石」在结算面板里叫「遗物强化石」，在关卡页里叫「强化石」。
+     > 由 `tests/unit/resources.test.ts` 守护（登记齐全 / 名称不重 / 占位符不残留）。
 9. **禁用词表是单一数据源**：只改 `src/content/compliance/forbidden-words.md`，扫描器只解析该文件，
    不得在扫描器代码里硬编码词条。
 10. **核心循环入口必须可达**：抽卡 / 编队 / 推征等主循环页面必须在导航或主界面上有显式入口，
@@ -64,6 +73,36 @@
     origin（`localhost:5173`）等于共用玩家存档。截图 / 验证 / 抓取类脚本一律用
     `tools/capture/screenshot.ts`（内置 origin 守卫 + 全新隔离 context），
     目标地址只允许 `127.0.0.1:<隔离端口>`（如 4188）。禁止自写一次性脚本直连 `localhost:5173`。
+    - **验收脚本不得假设「点一下就有结果」**：`screenshot.ts` 的遗物场景原来只点 3 次
+      「推征 10 场」就等 `.relic-cell`——但按钮上的 10 只是**领取上限**，
+      挂机一场要真实等 `BATTLE.SECONDS_PER_BATTLE`（6 秒），三次点击连一场都不够 →
+      仓库永远是空的 → 截图卡在 `waitFor` 超时。
+      **此时后端日志全是 200**，看着像「后端坏了」，实际是脚本流程陈旧
+      （E2E 的 `collectRelics()` 为此写了 180 秒重试循环，截图脚本没有这一层）。
+      现改为用**玩家可用的 `save.import` 动作**导入前置存档
+      （`tools/capture/relic-fixture.ts`，走服务端动作层，不碰数据库）：
+      一次到位、不依赖真实时间与随机掉落，60 张图标能在同一张截图里全部验收。
+      ⚠ 导入只对「服务端还没有存档」的账号开放 → 必须**先导入、再打开页面**，
+      否则页面首屏先 `save.create` 建了档，导入就被 `IMPORT_FORBIDDEN` 永久拒绝。
+    - **截图前要量「有没有被裁掉」**：顶栏资源条这类横向排布，
+      第一屏露出的那几项看着都正常，被裁掉的那些根本不在视野里 → 看截图容易漏。
+      现由 `assertResourceBarFullyVisible()` 量一次（跑一次就量一次，露不全直接报错）。
+    - **视口宽度可指定**：`--viewport 360x800`。
+      窄机型才是布局的真考场（360px 比默认 430px 少 70px），
+      「能不能全放下」只在最窄机型上验得出来。
+    - **E2E 断言前必须等目标「渲染出来」**：SPA 走 hash 路由，
+      `page.goto('/#/xxx')` 从另一个 hash 出发属于**同文档导航**——页面不重载，
+      `waitForLoadState('networkidle')` 立刻满足，但 Vue 还没渲染新路由
+      （首次进入还要等路由 chunk 下载 + 组件挂载，比微任务慢得多）。
+      此时直接 `locator.count()` 会读到 0，报错看着像「页面挂了」，实际页面稍后正常。
+      现统一先 `await expect(locator.first()).toBeVisible()`（Playwright 自动等待）再断言。
+      > 历史教训：境界突破链路（`tests/e2e/growth.spec.ts`）稳定失败在 `pauseFarming`
+      > 的「阵位槽位数为 0」——同一文件另外 3 处 `pauseFarming` 却能过，
+      > 差别只在于**那 3 处之前访问过阵位页**（路由 chunk 已在模块缓存里，渲染只要几毫秒），
+      > 也就是说这条用例是全文件**唯一一次「首进阵位页」**，竞态只有它会命中。
+      > 排查这类失败要看 **trace**（`test-results/**/trace.zip`）：
+      > 里面有 `Navigate` → `Query count` → `expect` 的毫秒级时间线，
+      > 能直接看出「查询发在渲染之前」，而不是靠猜。
 14. **表现层不得直连后端接口**：所有认证 / 云存档请求一律经 `src/platform/account.ts`，
     `src/presentation/` 里禁止出现 `fetch('http…')` 这类直连（否则会出现两套令牌与错误处理）。
     令牌轮换、401 自动续期、会话落盘统一由 `presentation/stores/account.ts` 负责。
@@ -602,6 +641,56 @@
     > 教训：建了阀门却让**分解**变成印钞机，等于一边回收一边放水；
     > 而闸门看到「0.99995×」就报红，会让人去调经济参数——那恰恰是阀门在工作的证据。
 
+45. **图标素材（遗物 / 资源）的生成与挂载只有一条流水线**：
+    - **路径口径唯一**：`src/core/config/art.ts` 的 `relicIconPath()` / `resourceIconPath()`
+      独家产出路径；表现层禁止自行拼接 `/relics/xxx` 或 `/resources/xxx`（同铁律 #8）。
+      资源 key 的全集由 `RESOURCE_ICON_KEYS` 定义，**新增资源必须同步出图**，
+      否则 `tests/unit/art.test.ts` 的「每个 key 都有图标文件」会直接失败。
+    - **提示词唯一**：`tools/artgen/icon-prompt.ts` 是图标提示词的唯一产地，
+      与卡面提示词（`tools/artgen/prompt.ts`）同源同套路：
+      风格锁定段共用 + 排除项共用 + 个体描述按配置表落。
+      **禁止**在页面组件里自己拼提示词或自己找图。
+    - **生图执行者**：本地 qwen-image2.1（`tools/artgen/qwen-runner.py`，
+      一次加载权重循环出图，支持续跑），产出 PNG 后由 `run-local-icons.ts publish`
+      转 WebP 落到 `public/relics/` 与 `public/resources/`。
+      云端接口（`connector__matrix__generate_image`）是**卡面**的老流水线，
+      图标不再走它。
+    - **产物即契约**：图标文件必须存在且是有效 WebP（`tests/unit/art.test.ts` 断言
+      格式与尺寸），E2E 断言路径形态与「真的加载出来了」。
+      新增遗物 → `npm run art:icons` → `npm run art:icons:run` → `npm run art:icons:publish`。
+    - **图标进界面要算宽度预算**：资源图标让顶栏每项宽了 22px，
+      6 项资源在 360px 窄机型上只露得出 3 项——而横向滚动条的滚动条是**藏着的**，
+      玩家**看不出右边还有资源**（图标把「藏起来」的成本放大了）。
+      现在顶栏资源条改为**换行**（`.res-bar { flex-wrap: wrap; flex: 1 1 auto }`
+      + `.top` 用 `min-height` 而不是 `height`），6 项全部可见
+      （由 `assertResourceBarFullyVisible()` 每次跑截图时把关）。
+      ⚠ **显示尺寸必须真按 UI 的实际像素定**（顶栏 22px / 奖励列表 16px / 遗物 44px），
+      不能按源图尺寸想当然——256px 的源图放进 22px 的槽位，宽度是要算进去的。
+    - **顶栏资源条 = 图标 + 数量，名称只在弹窗里**：名称去掉后，图标成了玩家识别资源的
+      **唯一**线索，所以顶栏图标放大到 22px、点按区不小于 34px（22px 的图标在手机上指不准）。
+      点击图标弹出「名称 + 当前数量 + 作用描述」（描述取 `RESOURCE_DEFS`，数字由
+      `economy.ts` 填充）；抽卡类资源在弹窗里附「前往召唤」按钮——
+      **核心循环的入口不能因为改成弹窗就丢掉**（铁律 #10）。
+      新增资源必须同时登记名称与描述，否则 `tests/unit/resources.test.ts` 拦下。
+    - **背景必须干净（但要知道这条治不好什么）**：模型对「深色背景」有强烈的
+      加环境元素倾向，**实测 7/7 张全部**在右侧长出一条竖直细条。
+      提示词侧已试过 5 个变体（去「留边」措辞 / 禁左右竖直元素 / 纯黑平面 /
+      深蓝灰平面 / 强化排除项），**全部无效**——这是**模型层面的固有伪影**，
+      不是措辞问题，改提示词不要再指望它能消掉。
+      - **实测量化**：该竖条与背景的平均亮度差仅 ≈ **1.0/255**（极淡）；
+        在 UI 的真实显示尺寸（遗物 44px / 资源 18px）下**完全不可见**
+        （`npx tsx tools/artgen/icon-preview.ts` 可一键出拼版复核）。
+      - **不要改成纯黑背景**：实测纯黑底上这条反而**更明显**（对比度更高）。
+        保留深色径向渐变底。
+      - 提示词里的 `BACKGROUND_BLOCK` 与 `ICON_EXCLUSIONS` 仍保留（能压掉别的
+        环境元素），但**不要把它们当成治竖条的开关**。
+    > 教训：图标是玩家识别 60 件遗物与 10 种货币的第一眼信息。
+    > 「提示词写得挺细」不等于「图能用」——必须**真的跑一批出来看图**，
+    > 而且要看**多张**（只抽一张会漏掉系统性瑕疵：绿条是 7 张全中才暴露的）。
+    > 同样，**看了原图也别急着推翻整批**：要按**真实显示尺寸**再看一遍，
+    > 在 512px 下刺眼的东西在 44px 下可能根本不存在——
+    > 为不存在的问题返工 80 分钟是最贵的浪费。
+
 ## 数值调参的既定流程
 
 数值改动**只改** `src/core/config/economy.ts`（以及对应的配置表），然后按序执行：
@@ -722,7 +811,9 @@ npm run balance:ladder   # 三队天梯：逐层逐梯队实战通关率 + 三�
 npm run validate:config  # 配置完整性校验（id 唯一、引用存在、数值区间）
 npm run scan:forbidden   # 禁用词扫描（含 server/）
 npm run art:placeholder  # 生成占位头像
-npm run art:relic        # 生成遗物图标徽章（60 张 → public/relics/）
+npm run art:icons        # 本地 qwen-image2.1 图标任务清单（遗物 60 + 资源 10）
+npm run art:icons:run    # 跑本机出图（一次加载权重，支持续跑；需 qwen-image21 conda 环境）
+npm run art:icons:publish # PNG → WebP，落到 public/relics/ 与 public/resources/
 npm run art:transcode    # 卡面 JPEG → WebP 转码（体积 25.9MB → 3.9MB）
 npm run art:capture      # 界面截图（必须指向隔离 origin，见铁律 #13）
 npm run perf:long-hang   # 长挂 / 大档压测（12h 离线 + 2h 心跳 + 内存验收，见铁律 #30-#33）
@@ -753,6 +844,10 @@ npm run db:restore       # 整库恢复（必须停服，见铁律 #35）
 > 截图前先起隔离预览服务（**端口不要用 5173**，那是玩家可能在用的 dev server）：
 > `npm run build && npm run preview -- --port 4188 --host 127.0.0.1`，
 > 再 `npm run art:capture -- --url http://127.0.0.1:4188 --route /gacha --pull --out artifacts/art-preview/gacha.png`。
+>
+> 遗物场景（导入 60 件遗物的前置存档 → 铸造页 + 英灵页，一批验收全部图标）：
+> `npm run art:capture -- --relic --api http://127.0.0.1:8791 --url http://127.0.0.1:4188 --out artifacts/art-preview/relic.png`。
+> 加 `--viewport 360x800` 可按窄机型验收（顶栏资源条这类排布只在最窄机型上暴露问题）。
 
 > **本机坑（Windows + 非 ASCII 项目路径）**：Node 的 `fs.rmSync` 在**含中文的路径**下会静默失效
 > （不报错、文件也不删；同目录下 `fs.unlinkSync`、PowerShell 的 `Remove-Item` 都正常，ASCII 路径下 `rmSync` 也正常）。

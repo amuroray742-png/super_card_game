@@ -382,15 +382,43 @@
 > 于是「再凑 1 件就能开 4 件套」这条养成线等于隐形。
 > ①②则是全新功能。
 >
-> **① 遗物图标（60 张程序化 SVG 徽章）**
-> - 沿用项目既有的程序化占位美术管线（`tools/placeholder/generate.ts` → 72 英灵 + 30 敌人），
->   新增 `tools/relic-icons/generate.ts` → `npm run art:relic` → `public/relics/<defId>.svg`，
->   60 张 × ~2.4KB。
-> - 徽章构图：**底色 / 外环 / 角标 = 稀有度**；**中央大符号 + 内圈色 = 套装**（12 套各一个原创几何符号与专属色，
->   相邻两套刻意拉开色相，仓库里并排出现不会撞色）；**底部小徽 = 主词条类型**（攻/防/生/速/暴/暴伤）；
->   **外环装饰点 = 遗物 id 的确定性哈希**（同套装同稀有度的几件也要能区分）。
-> - 路径口径由 `core/config/art.ts` 的 `relicIconPath()` 独家产出（铁律 #8），
->   后续接 AI 生图只需改 `RELIC_ICON_EXT`，界面与逻辑都不用动。
+> **① 遗物图标（60 张）**
+> - **⚠ 已由程序化 SVG 徽章升级为 AI 生图实物立绘**：
+>   原方案是 `tools/relic-icons/generate.ts` → `npm run art:relic` → `public/relics/<defId>.svg`，
+>   60 张 × ~2.4KB 的确定性徽章（底色/外环/角标 = 稀有度，中央符号 = 套装，底部小徽 = 主词条）。
+>   **徽章的局限**：60 件遗物在仓库里长得几乎一样，玩家认不出哪件是哪件——
+>   只能靠「解谜」（读符号 → 反推套装）才能区分。
+>   现改为本地 qwen-image2.1 生图（`npm run art:icons` → `art:icons:run` → `art:icons:publish`），
+>   产出 `public/relics/<defId>.webp`（256×256 WebP），**认物靠画面本身**。
+> - 提示词口径由 `tools/artgen/icon-prompt.ts` 独家产出（套装主题 × 器形 × 稀有度 × 主词条点缀色），
+>   与卡面提示词同源同套路（风格锁定段共用 + 排除项共用）。
+> - 路径口径仍由 `core/config/art.ts` 的 `relicIconPath()` 独家产出（铁律 #8），界面与逻辑不用动。
+> - 资源 / 货币图标（10 张）走同一条流水线，落到 `public/resources/<key>.webp`，
+>   key 全集由 `core/config/art.ts` 的 `RESOURCE_ICON_KEYS` 定义。
+> - **顶栏资源条随之改为换行**：资源图标让每项宽了 22px，
+>   6 项资源在 360px 窄机型上原本只露得出 3 项——而横向滚动条的滚动条是**藏着的**，
+>   玩家**看不出右边还有资源**。现改为 `flex-wrap: wrap`（`.top` 同步用 `min-height`），
+>   6 项全部可见；
+>   由 `tools/capture/screenshot.ts` 的 `assertResourceBarFullyVisible()` 每次跑截图时把关。
+>
+> **实施修正（2026-11，顶栏资源条图标化 + 点击说明弹窗）**
+> - 顶栏每项改为**「图标 + 数量」，文字名称去掉**：图标成了玩家识别资源的唯一线索，
+>   因此顶栏图标放大到 22px、点按区不小于 34px（22px 的图标在手机上指不准）。
+>   名称仍通过 `alt` / `aria-label` / `title` 暴露给读屏与桌面 hover。
+> - 点击顶栏资源 → 弹出**名称 + 当前数量 + 作用描述**（`.mask` + `.dialog`，与工程既有弹层同一套）。
+>   描述里的数字由 `economy.ts` 通过 `{key}` 占位符填充 → **公示 = 实际**，改数值描述自动跟着改。
+> - **抽卡入口没有丢**：圣杯结晶 / 抽卡券改为「一律弹窗」，召唤入口收进弹窗内的「前往召唤」按钮
+>   ——顶栏图标单击不再直达（铁律 #10：核心循环入口必须仍然一键可达）。
+> - **资源名称与作用描述收敛成一份**：`core/config/resources.ts` 的 `RESOURCE_DEFS`
+>   （类型 `Record<ResourceIconKey, ResourceDef>`，漏登记即编译不过）。
+>   此前资源名在**四处**各写一份（顶栏 / 结算面板 / 关卡页 / 生图提示词），
+>   已经对不上——同一个「强化石」在结算面板里叫「遗物强化石」，在关卡页里叫「强化石」。
+>   由 `tests/unit/resources.test.ts` 守护（登记齐全 / 名称不重 / 占位符不残留 / 顶栏项必须是数值字段）。
+> - **验收期顺带修掉一处 E2E 竞态**（与顶栏无关，是 `tests/e2e/helpers.ts` 的老问题）：
+>   `pauseFarming()` 里 `page.goto('/#/formation')` 只改 hash → **同文档导航**，
+>   `networkidle` 立刻满足就 `count('.slot')` → 读到 0，境界突破链路因此稳定失败。
+>   改为先 `await expect(locator.first()).toBeVisible()` 再断言（Playwright 自动等待）。
+>   根因与取证方式见 AGENTS.md 铁律 #13。
 >
 > **② 一键推荐装备**
 > - 算法在 **core**：`core/systems/relic-advice.ts` 的 `recommendRelicLoadout()`。
