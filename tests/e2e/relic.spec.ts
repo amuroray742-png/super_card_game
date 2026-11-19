@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { RELIC } from '../../src/core/config/economy.ts'
+import { relicUpgradeCost } from '../../src/core/systems/relic.ts'
 import {
   cachedSaveOf,
   pauseFarming,
@@ -312,11 +312,13 @@ test.describe('遗物强化', () => {
     await expect(upgrade).toContainText('强化 +3')
 
     // 银两与强化石**精确**被扣（编队已清空，没有并发进来的挂机收益）
+    // ⚠ 花费取 core 的 `relicUpgradeCost`（强化价格随等级递增，断言不写死数字）。
+    const upgradeCost = relicUpgradeCost(1)!
     await expect.poll(async () => (await resourcesOf(page, accountId)).silver, { timeout: 8000 }).toBe(
-      before.silver - RELIC.SILVER_PER_LEVEL,
+      before.silver - upgradeCost.silver,
     )
     await expect.poll(async () => (await resourcesOf(page, accountId)).stones, { timeout: 8000 }).toBe(
-      before.stones - RELIC.STONES_PER_LEVEL,
+      before.stones - upgradeCost.stones,
     )
 
     // 落盘没丢：刷新后等级仍是 +2
@@ -477,11 +479,12 @@ test.describe('仓库批量操作与锁定', () => {
     await page.getByTestId('relic-batch-upgrade').click()
 
     // 银两与强化石被扣（正好一件遗物 +1 级）
+    const batchCost = relicUpgradeCost(1)!
     await expect
       .poll(async () => (await cachedSaveOf(page, accountId))?.player?.silver ?? 0, { timeout: 8000 })
-      .toBe(silverBefore - RELIC.SILVER_PER_LEVEL)
+      .toBe(silverBefore - batchCost.silver)
     await expect
       .poll(async () => (await cachedSaveOf(page, accountId))?.player?.relicStones ?? 0, { timeout: 8000 })
-      .toBe(stonesBefore - RELIC.STONES_PER_LEVEL)
+      .toBe(stonesBefore - batchCost.stones)
   })
 })

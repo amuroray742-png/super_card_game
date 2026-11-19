@@ -21,7 +21,7 @@ import { createHeroState } from '../../src/core/systems/growth.ts'
 import { relicUpgradeCost, getRelicMods } from '../../src/core/systems/relic.ts'
 import { getEquippedRelics } from '../../src/core/systems/loadout.ts'
 import { Rng } from '../../src/core/rng.ts'
-import { GACHA } from '../../src/core/config/economy.ts'
+import { GACHA, RELIC } from '../../src/core/config/economy.ts'
 
 const NOW = 1_700_000_000_000
 const SEED = 20241117
@@ -208,13 +208,14 @@ describe('动作层：成功路径', () => {
 
   it('遗物强化：满级后拒绝（不会越过 MAX_LEVEL）', () => {
     const rng = new Rng(7)
-    save.relics = [makeTestRelic('set_zhanshen_1', rng, 60)]
-    save.player.silver = 1_000_000
-    save.player.relicStones = 10_000
+    // ⚠ 上限取 core 配置，不写死数字（强化上限已由 60 提到 200）。
+    save.relics = [makeTestRelic('set_zhanshen_1', rng, RELIC.MAX_LEVEL)]
+    save.player.silver = 1_000_000_000
+    save.player.relicStones = 10_000_000
     const { ctx } = makeCtx(save)
     const res = applyAction(save, { type: 'relic.upgrade', uid: save.relics[0].uid }, ctx)
     expect(res.ok).toBe(false)
-    expect(save.relics[0].level).toBe(60)
+    expect(save.relics[0].level).toBe(RELIC.MAX_LEVEL)
   })
 
   it('抽卡：结晶被扣、英灵入库、保底计数推进', () => {

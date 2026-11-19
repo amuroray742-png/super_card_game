@@ -12,6 +12,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { RELIC_DEFS, RELIC_SETS, getRelicMods, getSetModsBySetIds, relicUpgradeCost } from '../../core/systems/relic.ts'
+import { relicTemperRuleHint } from '../utils/relic-hint.ts'
 import { RELIC } from '../../core/config/economy.ts'
 import { relicIconPath } from '../../core/config/art.ts'
 import { formatNumber } from '../utils/format'
@@ -261,6 +262,15 @@ function statText(mod: StatMod): string {
  */
 const upgradeCost = computed(() =>
   selected.value ? relicUpgradeCost(selected.value.level) : null,
+)
+
+/**
+ * 淬炼段规则提示（Lv60 以上价格递增、收益递减）。
+ *
+ * ⚠ 文案与数字走 `presentation/utils/relic-hint.ts` 的唯一一份（铁律 #4 / #27）。
+ */
+const temperHint = computed(() =>
+  selected.value ? relicTemperRuleHint(selected.value.level) : '',
 )
 
 /** 强化按钮的可用性与提示（银两 / 强化石不够就把差额写出来） */
@@ -513,6 +523,9 @@ async function toggleLock() {
       </div>
       <div v-if="upgradeCost" class="tiny muted" style="margin-top: 4px">
         强化消耗：银两 {{ formatNumber(upgradeCost.silver) }} · 强化石 {{ upgradeCost.stones }}
+      </div>
+      <div v-if="temperHint" class="tiny muted" style="margin-top: 2px">
+        {{ temperHint }}
       </div>
       <div v-if="upgradeCost && !upgradeHint.ok" class="tiny warn-text" style="margin-top: 2px">
         {{ upgradeHint.text }}

@@ -245,7 +245,10 @@ function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): Spe
     .map((e) => save.relics.find((r) => r.uid === e.relicId))
     .filter((r): r is NonNullable<typeof r> => !!r)
   let relicGuard = 0
-  while (relicGuard++ < 2000) {
+  // ⚠ 护栏按「满编 × 上限」给足：强化上限提到 200 之后，
+  //   36 件遗物各推到上限需要 7000+ 次升级，原来的 2000 会**中途截断**
+  //   （截断 = 模拟出来的养成进度偏小，结论直接失真）。
+  while (relicGuard++ < equipped.length * RELIC.MAX_LEVEL) {
     const candidates = equipped
       .filter((r) => r.level < RELIC.MAX_LEVEL)
       .sort((a, b) => a.level - b.level)

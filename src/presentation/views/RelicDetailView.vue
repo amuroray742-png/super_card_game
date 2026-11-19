@@ -9,6 +9,7 @@ import { useGameStore } from '../stores/game'
 import { RELIC } from '../../core/config/economy.ts'
 import { RELIC_DEFS, RELIC_SETS, decomposeValue, getRelicMods, relicUpgradeCost } from '../../core/systems/relic.ts'
 import { formatNumber } from '../utils/format'
+import { relicTemperRuleHint } from '../utils/relic-hint.ts'
 import type { RelicInstance, StatMod } from '../../core/model/types.ts'
 
 const store = useGameStore()
@@ -67,6 +68,15 @@ const subMods = computed<StatMod[]>(() => relic.value?.subStats ?? [])
 
 /** 强化消耗 */
 const cost = computed(() => (relic.value ? relicUpgradeCost(relic.value.level) : null))
+
+/**
+ * 淬炼段规则提示（Lv60 以上价格递增、收益递减）。
+ *
+ * ⚠ 文案与数字走 `presentation/utils/relic-hint.ts` 的唯一一份（铁律 #4 / #27）。
+ */
+const temperHint = computed(() =>
+  relic.value ? relicTemperRuleHint(relic.value.level) : '',
+)
 
 /** 分解返还 */
 const back = computed(() => (relic.value ? decomposeValue(relic.value) : null))
@@ -186,6 +196,7 @@ function decompose() {
           <b>银两 {{ formatNumber(cost.silver) }} · 强化石 {{ cost.stones }}</b>
         </div>
         <div v-else class="tiny muted">已达最高强化等级。</div>
+        <div v-if="temperHint" class="tiny muted" style="margin-top: 4px">{{ temperHint }}</div>
         <div v-if="back" class="row-between tiny" style="margin-top: 4px">
           <span class="muted">分解返还</span>
           <b>银两 {{ formatNumber(back.silver) }} · 强化石 {{ back.stones }}</b>

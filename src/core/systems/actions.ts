@@ -61,6 +61,7 @@ import {
   decomposeValue,
   generateRelic,
   nextRelicUid,
+  relicTotalCost,
   relicUpgradeCost,
   RELIC_DEFS,
   RELIC_SETS,
@@ -1047,11 +1048,13 @@ function actionUpgradeRelicBatch(
     if (to <= relic.level) {
       return fail(GAME_ERROR_CODES.NOT_FOUND, '目标强化等级不高于当前等级')
     }
-    const perLevel = relicUpgradeCost(relic.level)
-    if (!perLevel) return fail(GAME_ERROR_CODES.MAX_RELIC_LEVEL, '已达最高强化等级')
-    const steps = to - relic.level
-    silver += perLevel.silver * steps
-    stones += perLevel.stones * steps
+    // ⚠ 批量强化按**累计投入之差**计费，不是「单级价格 × 级数」：
+    //   强化价格随等级指数上升（铁律 #4：扣费口径只有一份，
+    //   与玩家逐级点的账必须逐位对得上）。
+    const from = relicTotalCost(relic.level)
+    const target = relicTotalCost(to)
+    silver += target.silver - from.silver
+    stones += target.stones - from.stones
     targets.push({ relic, to })
   }
 

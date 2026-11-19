@@ -55,47 +55,47 @@
   "emergentLadder": [
     35,
     60,
-    77,
-    101,
-    134,
-    171,
-    187,
-    216,
-    237
+    92,
+    110,
+    139,
+    168,
+    186,
+    219,
+    239
   ],
   "emergentLadderDays": [
     3,
     4,
-    6,
-    8,
-    12,
-    18,
+    9,
+    11,
+    16,
     21,
-    27,
-    30
+    24,
+    31,
+    34
   ],
   "chapterDays": [
     3,
     1,
+    5,
     2,
-    2,
-    4,
-    6,
+    5,
+    5,
     3,
-    6,
+    7,
     3,
-    10
+    6
   ],
   "velocity": [
     {
       "chapter": 1,
       "days": 3,
       "produced": {
-        "silver": 586881,
+        "silver": 637881,
         "exp": 706449,
-        "skillStones": 10344,
-        "relicStones": 22275,
-        "emblems": 7490,
+        "skillStones": 10374,
+        "relicStones": 22305,
+        "emblems": 7492,
         "relics": 4420
       },
       "spent": {
@@ -105,6 +105,20 @@
         "relicStones": 2550,
         "emblems": 0,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 0,
+        "silver": 381,
+        "skillStones": 10374,
+        "relicStones": 19755,
+        "emblems": 7492
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 500,
+        "skillStones": 12,
+        "relicStones": 2,
+        "emblems": 10
       }
     },
     {
@@ -119,172 +133,298 @@
         "relics": 1570
       },
       "spent": {
-        "silver": 693300,
+        "silver": 766562,
         "exp": 1150915,
-        "skillStones": 4032,
-        "relicStones": 1698,
+        "skillStones": 12,
+        "relicStones": 2778,
         "emblems": 60,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 0,
+        "silver": 591,
+        "skillStones": 16676,
+        "relicStones": 30191,
+        "emblems": 11439
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 1427,
+        "skillStones": 12,
+        "relicStones": 4,
+        "emblems": 10
       }
     },
     {
       "chapter": 3,
-      "days": 2,
+      "days": 5,
       "produced": {
-        "silver": 2037888,
-        "exp": 3825704,
-        "skillStones": 12970,
-        "relicStones": 27050,
-        "emblems": 7871,
-        "relics": 2858
+        "silver": 4336689,
+        "exp": 6957677,
+        "skillStones": 30066,
+        "relicStones": 63443,
+        "emblems": 18579,
+        "relics": 7139
       },
       "spent": {
-        "silver": 4800,
-        "exp": 3825704,
-        "skillStones": 72,
-        "relicStones": 0,
+        "silver": 4337196,
+        "exp": 6957677,
+        "skillStones": 144,
+        "relicStones": 6687,
         "emblems": 0,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 0,
+        "silver": 84,
+        "skillStones": 46598,
+        "relicStones": 86947,
+        "emblems": 30018
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 12774,
+        "skillStones": 12,
+        "relicStones": 15,
+        "emblems": 10
       }
     },
     {
       "chapter": 4,
       "days": 2,
       "produced": {
-        "silver": 4501226,
-        "exp": 11202547,
-        "skillStones": 16528,
-        "relicStones": 36333,
-        "emblems": 10578,
-        "relics": 2997
+        "silver": 4229573,
+        "exp": 10485775,
+        "skillStones": 15714,
+        "relicStones": 34310,
+        "emblems": 9958,
+        "relics": 2858
       },
       "spent": {
-        "silver": 0,
-        "exp": 11202547,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 4229343,
+        "exp": 10485775,
+        "skillStones": 156,
+        "relicStones": 4151,
         "emblems": 120,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 0,
+        "silver": 314,
+        "skillStones": 62156,
+        "relicStones": 117106,
+        "emblems": 39856
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 24893,
+        "skillStones": 12,
+        "relicStones": 22,
+        "emblems": 10
       }
     },
     {
       "chapter": 5,
-      "days": 4,
+      "days": 5,
       "produced": {
-        "silver": 16309318,
-        "exp": 44815470,
-        "skillStones": 38011,
-        "relicStones": 84940,
-        "emblems": 24828,
-        "relics": 5847
+        "silver": 19091941,
+        "exp": 52016663,
+        "skillStones": 46433,
+        "relicStones": 104068,
+        "emblems": 30245,
+        "relics": 7270
       },
       "spent": {
-        "silver": 0,
-        "exp": 44815470,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 19091674,
+        "exp": 52016663,
+        "skillStones": 1860,
+        "relicStones": 13133,
         "emblems": 0,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 0,
+        "silver": 581,
+        "skillStones": 106729,
+        "relicStones": 208041,
+        "emblems": 70101
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 71021,
+        "skillStones": 12,
+        "relicStones": 41,
+        "emblems": 10
       }
     },
     {
       "chapter": 6,
-      "days": 6,
+      "days": 5,
       "produced": {
-        "silver": 54646029,
-        "exp": 160178774,
-        "skillStones": 72542,
-        "relicStones": 158840,
-        "emblems": 45597,
-        "relics": 8709
+        "silver": 46789427,
+        "exp": 137085567,
+        "skillStones": 59323,
+        "relicStones": 131247,
+        "emblems": 38389,
+        "relics": 7139
       },
       "spent": {
-        "silver": 0,
-        "exp": 160178774,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 46644161,
+        "exp": 137085567,
+        "skillStones": 1932,
+        "relicStones": 21481,
         "emblems": 0,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 0,
+        "silver": 145847,
+        "skillStones": 164120,
+        "relicStones": 317807,
+        "emblems": 108490
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 202633,
+        "skillStones": 12,
+        "relicStones": 79,
+        "emblems": 10
       }
     },
     {
       "chapter": 7,
       "days": 3,
       "produced": {
-        "silver": 83664427,
-        "exp": 252197090,
-        "skillStones": 46391,
-        "relicStones": 102950,
-        "emblems": 30122,
+        "silver": 85700507,
+        "exp": 257212201,
+        "skillStones": 47180,
+        "relicStones": 103764,
+        "emblems": 30109,
         "relics": 4285
       },
       "spent": {
-        "silver": 0,
-        "exp": 252197090,
+        "silver": 85710373,
+        "exp": 257212201,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 28465,
         "emblems": 240,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 0,
+        "silver": 135981,
+        "skillStones": 211300,
+        "relicStones": 393106,
+        "emblems": 138359
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 434361,
+        "skillStones": 12,
+        "relicStones": 125,
+        "emblems": 10
       }
     },
     {
       "chapter": 8,
-      "days": 6,
+      "days": 7,
       "produced": {
-        "silver": 374873425,
-        "exp": 1145728563,
-        "skillStones": 116964,
-        "relicStones": 256879,
-        "emblems": 72013,
-        "relics": 8566
+        "silver": 426375792,
+        "exp": 1301729499,
+        "skillStones": 135521,
+        "relicStones": 298051,
+        "emblems": 83316,
+        "relics": 9994
       },
       "spent": {
-        "silver": 0,
-        "exp": 1145728563,
+        "silver": 426037592,
+        "exp": 1301729499,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 92328,
         "emblems": 0,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 0,
+        "silver": 474181,
+        "skillStones": 346821,
+        "relicStones": 598829,
+        "emblems": 221675
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 1499531,
+        "skillStones": 12,
+        "relicStones": 267,
+        "emblems": 10
       }
     },
     {
       "chapter": 9,
       "days": 3,
       "produced": {
-        "silver": 645133512,
-        "exp": 1976227327,
-        "skillStones": 81942,
-        "relicStones": 180569,
-        "emblems": 51679,
-        "relics": 4420
+        "silver": 616923174,
+        "exp": 1886204220,
+        "skillStones": 79433,
+        "relicStones": 175322,
+        "emblems": 49626,
+        "relics": 4284
       },
       "spent": {
-        "silver": 0,
-        "exp": 1025938210,
+        "silver": 615860837,
+        "exp": 878398976,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 92835,
         "emblems": 0,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 1007805244,
+        "silver": 1536518,
+        "skillStones": 426254,
+        "relicStones": 681316,
+        "emblems": 271301
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 3214379,
+        "skillStones": 12,
+        "relicStones": 426,
+        "emblems": 10
       }
     },
     {
       "chapter": 10,
-      "days": 10,
+      "days": 6,
       "produced": {
-        "silver": 3547993172,
-        "exp": 10888662376,
-        "skillStones": 307249,
-        "relicStones": 686170,
-        "emblems": 192111,
-        "relics": 14273
+        "silver": 2130683696,
+        "exp": 6532815389,
+        "skillStones": 184203,
+        "relicStones": 411011,
+        "emblems": 114592,
+        "relics": 8564
       },
       "spent": {
-        "silver": 0,
+        "silver": 2126894492,
         "exp": 0,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 225924,
         "emblems": 0,
         "relics": 0
+      },
+      "cumNet": {
+        "exp": 7540620633,
+        "silver": 5325722,
+        "skillStones": 610457,
+        "relicStones": 866403,
+        "emblems": 385893
+      },
+      "steps": {
+        "exp": 1000,
+        "silver": 9170998,
+        "skillStones": 12,
+        "relicStones": 808,
+        "emblems": 10
       }
     }
   ],
@@ -301,14 +441,15 @@
       "exp": 0,
       "silver": 87,
       "relics": 1421,
+      "relicLevel": 6.4,
       "battles": 1562,
       "blockedAtStage": 15,
       "produced": {
-        "silver": 46087,
+        "silver": 97087,
         "exp": 141650,
-        "skillStones": 2846,
-        "relicStones": 6400,
-        "emblems": 2143,
+        "skillStones": 2876,
+        "relicStones": 6430,
+        "emblems": 2145,
         "relics": 1421
       },
       "spent": {
@@ -318,6 +459,10 @@
         "relicStones": 388,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 500,
+        "relicStones": 2
       }
     },
     {
@@ -330,6 +475,7 @@
       "exp": 0,
       "silver": 28,
       "relics": 2850,
+      "relicLevel": 9,
       "battles": 1570,
       "blockedAtStage": 31,
       "produced": {
@@ -347,6 +493,10 @@
         "relicStones": 186,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 500,
+        "relicStones": 2
       }
     },
     {
@@ -359,6 +509,7 @@
       "exp": 0,
       "silver": 381,
       "relics": 3000,
+      "relicLevel": 36.4,
       "battles": 1570,
       "blockedAtStage": null,
       "produced": {
@@ -376,6 +527,10 @@
         "relicStones": 1976,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 500,
+        "relicStones": 2
       }
     },
     {
@@ -384,10 +539,11 @@
       "chapter": 3,
       "chapterAtStart": 2,
       "level": 70,
-      "power": 112274.00239546818,
+      "power": 113329.68449209728,
       "exp": 0,
-      "silver": 73853,
+      "silver": 591,
       "relics": 3000,
+      "relicLevel": 70.5,
       "battles": 1570,
       "blockedAtStage": null,
       "produced": {
@@ -399,12 +555,16 @@
         "relics": 1570
       },
       "spent": {
-        "silver": 693300,
+        "silver": 766562,
         "exp": 1150915,
-        "skillStones": 4032,
-        "relicStones": 1698,
+        "skillStones": 12,
+        "relicStones": 2778,
         "emblems": 60,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 1427,
+        "relicStones": 4
       }
     },
     {
@@ -413,10 +573,11 @@
       "chapter": 3,
       "chapterAtStart": 3,
       "level": 77,
-      "power": 132108.1455598349,
+      "power": 134368.14862753573,
       "exp": 0,
-      "silver": 763406,
+      "silver": 654,
       "relics": 3000,
+      "relicLevel": 79.2,
       "battles": 1570,
       "blockedAtStage": 93,
       "produced": {
@@ -428,331 +589,390 @@
         "relics": 1428
       },
       "spent": {
-        "silver": 4800,
+        "silver": 694290,
         "exp": 1034954,
-        "skillStones": 72,
-        "relicStones": 0,
+        "skillStones": 36,
+        "relicStones": 1548,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 3364,
+        "relicStones": 6
       }
     },
     {
       "day": 6,
-      "clearedStage": 123,
-      "chapter": 4,
+      "clearedStage": 92,
+      "chapter": 3,
       "chapterAtStart": 3,
-      "level": 90,
-      "power": 185686.5142504801,
+      "level": 82,
+      "power": 155215.69162716967,
       "exp": 0,
-      "silver": 2106941,
+      "silver": 649,
       "relics": 3000,
+      "relicLevel": 84.3,
       "battles": 1570,
       "blockedAtStage": 93,
       "produced": {
-        "silver": 1343535,
-        "exp": 2790750,
-        "skillStones": 7183,
-        "relicStones": 14929,
-        "emblems": 4270,
-        "relics": 1430
+        "silver": 769460,
+        "exp": 1042069,
+        "skillStones": 5768,
+        "relicStones": 12086,
+        "emblems": 3570,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 2790750,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 769465,
+        "exp": 1042069,
+        "skillStones": 24,
+        "relicStones": 1341,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 5417,
+        "relicStones": 9
       }
     },
     {
       "day": 7,
-      "clearedStage": 123,
-      "chapter": 4,
-      "chapterAtStart": 4,
-      "level": 101,
-      "power": 241757.004084454,
+      "clearedStage": 92,
+      "chapter": 3,
+      "chapterAtStart": 3,
+      "level": 87,
+      "power": 176440.83899285854,
       "exp": 0,
-      "silver": 3448075,
+      "silver": 193,
       "relics": 3000,
+      "relicLevel": 87.6,
       "battles": 1570,
-      "blockedAtStage": 124,
+      "blockedAtStage": 93,
       "produced": {
-        "silver": 1341134,
-        "exp": 2804889,
-        "skillStones": 7099,
-        "relicStones": 14964,
-        "emblems": 4153,
+        "silver": 765337,
+        "exp": 1038238,
+        "skillStones": 5668,
+        "relicStones": 12118,
+        "emblems": 3432,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 2804889,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 765793,
+        "exp": 1038238,
+        "skillStones": 48,
+        "relicStones": 1157,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 7210,
+        "relicStones": 10
       }
     },
     {
       "day": 8,
-      "clearedStage": 148,
-      "chapter": 5,
-      "chapterAtStart": 4,
-      "level": 122,
-      "power": 515004.86423600046,
+      "clearedStage": 92,
+      "chapter": 3,
+      "chapterAtStart": 3,
+      "level": 92,
+      "power": 197532.09864310318,
       "exp": 0,
-      "silver": 6608167,
+      "silver": 704,
       "relics": 3000,
+      "relicLevel": 90.2,
       "battles": 1570,
-      "blockedAtStage": null,
+      "blockedAtStage": 93,
       "produced": {
-        "silver": 3160092,
-        "exp": 8397658,
-        "skillStones": 9429,
-        "relicStones": 21369,
-        "emblems": 6425,
-        "relics": 1570
+        "silver": 763472,
+        "exp": 1035823,
+        "skillStones": 5705,
+        "relicStones": 12113,
+        "emblems": 3619,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 8397658,
-        "skillStones": 0,
-        "relicStones": 0,
-        "emblems": 120,
+        "silver": 762961,
+        "exp": 1035823,
+        "skillStones": 36,
+        "relicStones": 1006,
+        "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 9597,
+        "relicStones": 12
       }
     },
     {
       "day": 9,
-      "clearedStage": 154,
-      "chapter": 5,
-      "chapterAtStart": 5,
-      "level": 126,
-      "power": 579666.9995031776,
+      "clearedStage": 123,
+      "chapter": 4,
+      "chapterAtStart": 3,
+      "level": 102,
+      "power": 255460.34368140396,
       "exp": 0,
-      "silver": 9515135,
+      "silver": 84,
       "relics": 3000,
+      "relicLevel": 93.6,
       "battles": 1570,
-      "blockedAtStage": 155,
+      "blockedAtStage": 124,
       "produced": {
-        "silver": 2906968,
-        "exp": 7571729,
-        "skillStones": 8563,
-        "relicStones": 19206,
-        "emblems": 5754,
-        "relics": 1427
+        "silver": 1344067,
+        "exp": 2806593,
+        "skillStones": 7138,
+        "relicStones": 15005,
+        "emblems": 4357,
+        "relics": 1430
       },
       "spent": {
-        "silver": 0,
-        "exp": 7571729,
+        "silver": 1344687,
+        "exp": 2806593,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 1635,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 12774,
+        "relicStones": 15
       }
     },
     {
       "day": 10,
-      "clearedStage": 154,
-      "chapter": 5,
-      "chapterAtStart": 5,
-      "level": 130,
-      "power": 647742.085076692,
+      "clearedStage": 123,
+      "chapter": 4,
+      "chapterAtStart": 4,
+      "level": 110,
+      "power": 316178.64640062494,
       "exp": 0,
-      "silver": 12426723,
+      "silver": 734,
       "relics": 3000,
+      "relicLevel": 96.1,
       "battles": 1570,
-      "blockedAtStage": 155,
+      "blockedAtStage": 124,
       "produced": {
-        "silver": 2911588,
-        "exp": 7658690,
-        "skillStones": 8450,
-        "relicStones": 19252,
-        "emblems": 5693,
+        "silver": 1348322,
+        "exp": 2829095,
+        "skillStones": 7076,
+        "relicStones": 14857,
+        "emblems": 4270,
         "relics": 1428
       },
       "spent": {
-        "silver": 0,
-        "exp": 7658690,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 1347672,
+        "exp": 2829095,
+        "skillStones": 132,
+        "relicStones": 1426,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 17002,
+        "relicStones": 17
       }
     },
     {
       "day": 11,
       "clearedStage": 154,
       "chapter": 5,
-      "chapterAtStart": 5,
-      "level": 134,
-      "power": 719661.052969455,
+      "chapterAtStart": 4,
+      "level": 123,
+      "power": 554090.1544154519,
       "exp": 0,
-      "silver": 15302261,
+      "silver": 314,
       "relics": 3000,
+      "relicLevel": 100.1,
       "battles": 1570,
       "blockedAtStage": 155,
       "produced": {
-        "silver": 2875538,
-        "exp": 7633024,
-        "skillStones": 8625,
-        "relicStones": 19355,
-        "emblems": 5687,
-        "relics": 1427
+        "silver": 2881251,
+        "exp": 7656680,
+        "skillStones": 8638,
+        "relicStones": 19453,
+        "emblems": 5688,
+        "relics": 1430
       },
       "spent": {
-        "silver": 0,
-        "exp": 7633024,
-        "skillStones": 0,
-        "relicStones": 0,
-        "emblems": 0,
+        "silver": 2881671,
+        "exp": 7656680,
+        "skillStones": 24,
+        "relicStones": 2725,
+        "emblems": 120,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 24893,
+        "relicStones": 22
       }
     },
     {
       "day": 12,
-      "clearedStage": 177,
-      "chapter": 6,
+      "clearedStage": 154,
+      "chapter": 5,
       "chapterAtStart": 5,
-      "level": 143,
-      "power": 924214.8873639962,
+      "level": 128,
+      "power": 625038.8024892138,
       "exp": 0,
-      "silver": 22917485,
+      "silver": 97,
       "relics": 3000,
+      "relicLevel": 103,
       "battles": 1570,
       "blockedAtStage": 155,
       "produced": {
-        "silver": 7615224,
-        "exp": 21952027,
-        "skillStones": 12373,
-        "relicStones": 27127,
-        "emblems": 7694,
-        "relics": 1565
+        "silver": 2880270,
+        "exp": 7591316,
+        "skillStones": 8544,
+        "relicStones": 19233,
+        "emblems": 5673,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 21952027,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 2880487,
+        "exp": 7591316,
+        "skillStones": 84,
+        "relicStones": 2436,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 33132,
+        "relicStones": 26
       }
     },
     {
       "day": 13,
-      "clearedStage": 183,
-      "chapter": 6,
-      "chapterAtStart": 6,
-      "level": 151,
-      "power": 1146644.5367221723,
+      "clearedStage": 154,
+      "chapter": 5,
+      "chapterAtStart": 5,
+      "level": 132,
+      "power": 697308.198735229,
       "exp": 0,
-      "silver": 30668794,
+      "silver": 311,
       "relics": 3000,
+      "relicLevel": 105.3,
       "battles": 1570,
-      "blockedAtStage": null,
+      "blockedAtStage": 155,
       "produced": {
-        "silver": 7751309,
-        "exp": 22555815,
-        "skillStones": 12724,
-        "relicStones": 27499,
-        "emblems": 7804,
-        "relics": 1570
+        "silver": 2900754,
+        "exp": 7605336,
+        "skillStones": 8533,
+        "relicStones": 19224,
+        "emblems": 5593,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 22555815,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 2900540,
+        "exp": 7605336,
+        "skillStones": 420,
+        "relicStones": 2208,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 40090,
+        "relicStones": 29
       }
     },
     {
       "day": 14,
-      "clearedStage": 185,
-      "chapter": 6,
-      "chapterAtStart": 6,
-      "level": 157,
-      "power": 1351029.4765238175,
+      "clearedStage": 154,
+      "chapter": 5,
+      "chapterAtStart": 5,
+      "level": 135,
+      "power": 769851.1596678961,
       "exp": 0,
-      "silver": 37755911,
+      "silver": 181,
       "relics": 3000,
+      "relicLevel": 107.1,
       "battles": 1570,
-      "blockedAtStage": 186,
+      "blockedAtStage": 155,
       "produced": {
-        "silver": 7087117,
-        "exp": 20558092,
-        "skillStones": 11417,
-        "relicStones": 24944,
-        "emblems": 7072,
-        "relics": 1427
+        "silver": 2889119,
+        "exp": 7542041,
+        "skillStones": 8594,
+        "relicStones": 19272,
+        "emblems": 5643,
+        "relics": 1428
       },
       "spent": {
-        "silver": 0,
-        "exp": 20558092,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 2889249,
+        "exp": 7542041,
+        "skillStones": 252,
+        "relicStones": 2035,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 48509,
+        "relicStones": 33
       }
     },
     {
       "day": 15,
-      "clearedStage": 185,
-      "chapter": 6,
-      "chapterAtStart": 6,
-      "level": 162,
-      "power": 1562612.4666592672,
+      "clearedStage": 154,
+      "chapter": 5,
+      "chapterAtStart": 5,
+      "level": 139,
+      "power": 845815.9945046442,
       "exp": 0,
-      "silver": 44888548,
+      "silver": 233,
       "relics": 3000,
+      "relicLevel": 108.7,
       "battles": 1570,
-      "blockedAtStage": 186,
+      "blockedAtStage": 155,
       "produced": {
-        "silver": 7132637,
-        "exp": 20412298,
-        "skillStones": 11464,
-        "relicStones": 25233,
-        "emblems": 6982,
+        "silver": 2907965,
+        "exp": 7582389,
+        "skillStones": 8494,
+        "relicStones": 19405,
+        "emblems": 5629,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 20412298,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 2907913,
+        "exp": 7582389,
+        "skillStones": 252,
+        "relicStones": 1933,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 53359,
+        "relicStones": 35
       }
     },
     {
       "day": 16,
-      "clearedStage": 185,
+      "clearedStage": 181,
       "chapter": 6,
-      "chapterAtStart": 6,
-      "level": 167,
-      "power": 1776664.2102770489,
+      "chapterAtStart": 5,
+      "level": 147,
+      "power": 1062048.948177296,
       "exp": 0,
-      "silver": 52026765,
+      "silver": 581,
       "relics": 3000,
+      "relicLevel": 112,
       "battles": 1570,
-      "blockedAtStage": 186,
+      "blockedAtStage": 155,
       "produced": {
-        "silver": 7138217,
-        "exp": 20514544,
-        "skillStones": 11392,
-        "relicStones": 24944,
-        "emblems": 6945,
-        "relics": 1428
+        "silver": 7513833,
+        "exp": 21695581,
+        "skillStones": 12268,
+        "relicStones": 26934,
+        "emblems": 7707,
+        "relics": 1561
       },
       "spent": {
-        "silver": 0,
-        "exp": 20514544,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 7513485,
+        "exp": 21695581,
+        "skillStones": 852,
+        "relicStones": 4521,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 71021,
+        "relicStones": 41
       }
     },
     {
@@ -760,231 +980,271 @@
       "clearedStage": 185,
       "chapter": 6,
       "chapterAtStart": 6,
-      "level": 171,
-      "power": 2001487.730477206,
+      "level": 153,
+      "power": 1271643.694373097,
       "exp": 0,
-      "silver": 59107336,
+      "silver": 118,
       "relics": 3000,
+      "relicLevel": 114.3,
       "battles": 1570,
       "blockedAtStage": 186,
       "produced": {
-        "silver": 7080571,
-        "exp": 20456974,
-        "skillStones": 11351,
-        "relicStones": 24966,
-        "emblems": 7228,
+        "silver": 7088548,
+        "exp": 20344230,
+        "skillStones": 11306,
+        "relicStones": 24886,
+        "emblems": 7262,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 20456974,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 7089011,
+        "exp": 20344230,
+        "skillStones": 1080,
+        "relicStones": 3856,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 94530,
+        "relicStones": 49
       }
     },
     {
       "day": 18,
-      "clearedStage": 216,
-      "chapter": 7,
+      "clearedStage": 185,
+      "chapter": 6,
       "chapterAtStart": 6,
-      "level": 180,
-      "power": 2623420.3035572357,
+      "level": 159,
+      "power": 1495363.7780701483,
       "exp": 0,
-      "silver": 77563514,
+      "silver": 46301,
       "relics": 3000,
+      "relicLevel": 116.2,
       "battles": 1570,
-      "blockedAtStage": 217,
+      "blockedAtStage": 186,
       "produced": {
-        "silver": 18456178,
-        "exp": 55681051,
-        "skillStones": 14194,
-        "relicStones": 31254,
-        "emblems": 9566,
-        "relics": 1430
+        "silver": 7124669,
+        "exp": 20665555,
+        "skillStones": 11361,
+        "relicStones": 24899,
+        "emblems": 7165,
+        "relics": 1428
       },
       "spent": {
-        "silver": 0,
-        "exp": 55681051,
-        "skillStones": 0,
-        "relicStones": 0,
+        "silver": 7078486,
+        "exp": 20665555,
+        "skillStones": 852,
+        "relicStones": 3537,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 114381,
+        "relicStones": 55
       }
     },
     {
       "day": 19,
-      "clearedStage": 216,
-      "chapter": 7,
-      "chapterAtStart": 7,
-      "level": 184,
-      "power": 3705496.038534862,
+      "clearedStage": 185,
+      "chapter": 6,
+      "chapterAtStart": 6,
+      "level": 164,
+      "power": 1716697.6234595277,
       "exp": 0,
-      "silver": 96094493,
+      "silver": 33496,
       "relics": 3000,
+      "relicLevel": 117.9,
       "battles": 1570,
-      "blockedAtStage": 217,
+      "blockedAtStage": 186,
       "produced": {
-        "silver": 18530979,
-        "exp": 54871644,
-        "skillStones": 14212,
-        "relicStones": 31442,
-        "emblems": 9616,
+        "silver": 7090252,
+        "exp": 20324337,
+        "skillStones": 11330,
+        "relicStones": 25045,
+        "emblems": 7494,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 54871644,
+        "silver": 7103057,
+        "exp": 20324337,
         "skillStones": 0,
-        "relicStones": 0,
-        "emblems": 240,
+        "relicStones": 3369,
+        "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 125819,
+        "relicStones": 59
       }
     },
     {
       "day": 20,
-      "clearedStage": 216,
-      "chapter": 7,
-      "chapterAtStart": 7,
-      "level": 187,
-      "power": 4011178.831240496,
+      "clearedStage": 185,
+      "chapter": 6,
+      "chapterAtStart": 6,
+      "level": 168,
+      "power": 1941401.326377879,
       "exp": 0,
-      "silver": 114529649,
+      "silver": 137250,
       "relics": 3000,
+      "relicLevel": 119.3,
       "battles": 1570,
-      "blockedAtStage": 217,
+      "blockedAtStage": 186,
       "produced": {
-        "silver": 18435156,
-        "exp": 54891208,
-        "skillStones": 14092,
-        "relicStones": 31358,
-        "emblems": 9065,
-        "relics": 1428
+        "silver": 7085454,
+        "exp": 20348017,
+        "skillStones": 11282,
+        "relicStones": 24921,
+        "emblems": 6943,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 54891208,
+        "silver": 6981700,
+        "exp": 20348017,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 3121,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 152241,
+        "relicStones": 66
       }
     },
     {
       "day": 21,
-      "clearedStage": 247,
-      "chapter": 8,
-      "chapterAtStart": 7,
-      "level": 193,
-      "power": 4814153.112326591,
+      "clearedStage": 216,
+      "chapter": 7,
+      "chapterAtStart": 6,
+      "level": 178,
+      "power": 2589190.9258272727,
       "exp": 0,
-      "silver": 161227941,
+      "silver": 145847,
       "relics": 3000,
+      "relicLevel": 122.2,
       "battles": 1570,
       "blockedAtStage": 217,
       "produced": {
-        "silver": 46698292,
-        "exp": 142434238,
-        "skillStones": 18087,
-        "relicStones": 40150,
-        "emblems": 11441,
+        "silver": 18400504,
+        "exp": 55403428,
+        "skillStones": 14044,
+        "relicStones": 31496,
+        "emblems": 9525,
         "relics": 1430
       },
       "spent": {
-        "silver": 0,
-        "exp": 142434238,
+        "silver": 18391907,
+        "exp": 55403428,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 7598,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 202633,
+        "relicStones": 79
       }
     },
     {
       "day": 22,
-      "clearedStage": 247,
-      "chapter": 8,
-      "chapterAtStart": 8,
-      "level": 199,
-      "power": 5692006.097621469,
+      "clearedStage": 216,
+      "chapter": 7,
+      "chapterAtStart": 7,
+      "level": 184,
+      "power": 3824697.7102218717,
       "exp": 0,
-      "silver": 210970779,
+      "silver": 191580,
       "relics": 3000,
+      "relicLevel": 124.6,
       "battles": 1570,
-      "blockedAtStage": 248,
+      "blockedAtStage": 217,
       "produced": {
-        "silver": 49742838,
-        "exp": 150826397,
-        "skillStones": 18613,
-        "relicStones": 40554,
-        "emblems": 11452,
+        "silver": 18647413,
+        "exp": 55450470,
+        "skillStones": 14350,
+        "relicStones": 31389,
+        "emblems": 9205,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 150826397,
+        "silver": 18601680,
+        "exp": 55450470,
         "skillStones": 0,
-        "relicStones": 0,
-        "emblems": 0,
+        "relicStones": 6960,
+        "emblems": 240,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 245185,
+        "relicStones": 88
       }
     },
     {
       "day": 23,
-      "clearedStage": 247,
-      "chapter": 8,
-      "chapterAtStart": 8,
-      "level": 204,
-      "power": 6619764.09251683,
+      "clearedStage": 216,
+      "chapter": 7,
+      "chapterAtStart": 7,
+      "level": 186,
+      "power": 4141907.4643338704,
       "exp": 0,
-      "silver": 259957115,
+      "silver": 83369,
       "relics": 3000,
+      "relicLevel": 126.5,
       "battles": 1570,
-      "blockedAtStage": 248,
+      "blockedAtStage": 217,
       "produced": {
-        "silver": 48986336,
-        "exp": 150306714,
-        "skillStones": 18541,
-        "relicStones": 40926,
-        "emblems": 11501,
-        "relics": 1427
+        "silver": 18567551,
+        "exp": 55875210,
+        "skillStones": 14254,
+        "relicStones": 31564,
+        "emblems": 9356,
+        "relics": 1428
       },
       "spent": {
-        "silver": 0,
-        "exp": 150306714,
+        "silver": 18675762,
+        "exp": 55875210,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 6475,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 296674,
+        "relicStones": 99
       }
     },
     {
       "day": 24,
       "clearedStage": 247,
       "chapter": 8,
-      "chapterAtStart": 8,
-      "level": 208,
-      "power": 7497320.27650265,
+      "chapterAtStart": 7,
+      "level": 193,
+      "power": 5028985.210957415,
       "exp": 0,
-      "silver": 308856294,
+      "silver": 135981,
       "relics": 3000,
+      "relicLevel": 130.3,
       "battles": 1570,
-      "blockedAtStage": 248,
+      "blockedAtStage": 217,
       "produced": {
-        "silver": 48899179,
-        "exp": 148383063,
-        "skillStones": 18472,
-        "relicStones": 40557,
-        "emblems": 11660,
-        "relics": 1427
+        "silver": 48485543,
+        "exp": 145886521,
+        "skillStones": 18576,
+        "relicStones": 40811,
+        "emblems": 11548,
+        "relics": 1430
       },
       "spent": {
-        "silver": 0,
-        "exp": 148383063,
+        "silver": 48432931,
+        "exp": 145886521,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 15030,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 434361,
+        "relicStones": 125
       }
     },
     {
@@ -992,28 +1252,33 @@
       "clearedStage": 247,
       "chapter": 8,
       "chapterAtStart": 8,
-      "level": 212,
-      "power": 8434322.659165937,
+      "level": 199,
+      "power": 5943739.242615685,
       "exp": 0,
-      "silver": 357567558,
+      "silver": 158557,
       "relics": 3000,
+      "relicLevel": 133,
       "battles": 1570,
       "blockedAtStage": 248,
       "produced": {
-        "silver": 48711264,
-        "exp": 149442723,
-        "skillStones": 18773,
-        "relicStones": 40750,
-        "emblems": 11283,
-        "relics": 1428
+        "silver": 48449921,
+        "exp": 149639107,
+        "skillStones": 18505,
+        "relicStones": 40699,
+        "emblems": 11455,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 149442723,
+        "silver": 48427345,
+        "exp": 149639107,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 13388,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 578134,
+        "relicStones": 149
       }
     },
     {
@@ -1021,260 +1286,305 @@
       "clearedStage": 247,
       "chapter": 8,
       "chapterAtStart": 8,
-      "level": 216,
-      "power": 9424378.449958637,
+      "level": 204,
+      "power": 6887980.182564234,
       "exp": 0,
-      "silver": 406244928,
+      "silver": 139519,
       "relics": 3000,
+      "relicLevel": 135.2,
       "battles": 1570,
       "blockedAtStage": 248,
       "produced": {
-        "silver": 48677370,
-        "exp": 148186418,
-        "skillStones": 18452,
-        "relicStones": 40741,
-        "emblems": 11239,
+        "silver": 48706116,
+        "exp": 148549438,
+        "skillStones": 18582,
+        "relicStones": 40798,
+        "emblems": 11210,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 148186418,
+        "silver": 48725154,
+        "exp": 148549438,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 12247,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 699542,
+        "relicStones": 168
       }
     },
     {
       "day": 27,
-      "clearedStage": 278,
-      "chapter": 9,
+      "clearedStage": 247,
+      "chapter": 8,
       "chapterAtStart": 8,
-      "level": 224,
-      "power": 12021978.77144366,
+      "level": 208,
+      "power": 7863885.79150242,
       "exp": 0,
-      "silver": 536101366,
+      "silver": 275155,
       "relics": 3000,
+      "relicLevel": 137.1,
       "battles": 1570,
       "blockedAtStage": 248,
       "produced": {
-        "silver": 129856438,
-        "exp": 398583248,
-        "skillStones": 24113,
-        "relicStones": 53351,
-        "emblems": 14878,
-        "relics": 1430
+        "silver": 49117596,
+        "exp": 149027107,
+        "skillStones": 18413,
+        "relicStones": 41009,
+        "emblems": 11413,
+        "relics": 1428
       },
       "spent": {
-        "silver": 0,
-        "exp": 398583248,
+        "silver": 48981960,
+        "exp": 149027107,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 11488,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 846446,
+        "relicStones": 188
       }
     },
     {
       "day": 28,
-      "clearedStage": 278,
-      "chapter": 9,
-      "chapterAtStart": 9,
-      "level": 231,
-      "power": 14792931.662595792,
+      "clearedStage": 247,
+      "chapter": 8,
+      "chapterAtStart": 8,
+      "level": 212,
+      "power": 8883479.056361498,
       "exp": 0,
-      "silver": 669069663,
+      "silver": 354190,
       "relics": 3000,
+      "relicLevel": 138.6,
       "battles": 1570,
-      "blockedAtStage": 279,
+      "blockedAtStage": 248,
       "produced": {
-        "silver": 132968297,
-        "exp": 404753053,
-        "skillStones": 24347,
-        "relicStones": 53123,
-        "emblems": 15058,
+        "silver": 49342201,
+        "exp": 150440974,
+        "skillStones": 18643,
+        "relicStones": 40968,
+        "emblems": 11339,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 404753053,
+        "silver": 49263166,
+        "exp": 150440974,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 10792,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 931091,
+        "relicStones": 200
       }
     },
     {
       "day": 29,
-      "clearedStage": 278,
-      "chapter": 9,
-      "chapterAtStart": 9,
-      "level": 237,
-      "power": 17676800.357993998,
+      "clearedStage": 247,
+      "chapter": 8,
+      "chapterAtStart": 8,
+      "level": 216,
+      "power": 9922944.045281675,
       "exp": 0,
-      "silver": 801859593,
+      "silver": 36390,
       "relics": 3000,
+      "relicLevel": 140,
       "battles": 1570,
-      "blockedAtStage": 279,
+      "blockedAtStage": 248,
       "produced": {
-        "silver": 132789930,
-        "exp": 406400306,
-        "skillStones": 24239,
-        "relicStones": 53107,
-        "emblems": 15204,
-        "relics": 1428
+        "silver": 49588674,
+        "exp": 149831247,
+        "skillStones": 18506,
+        "relicStones": 40897,
+        "emblems": 11502,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 406400306,
+        "silver": 49906474,
+        "exp": 149831247,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 10432,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 1024200,
+        "relicStones": 212
       }
     },
     {
       "day": 30,
-      "clearedStage": 307,
-      "chapter": 10,
-      "chapterAtStart": 9,
-      "level": 240,
-      "power": 19325063.6754056,
-      "exp": 950289117,
-      "silver": 1181234878,
+      "clearedStage": 247,
+      "chapter": 8,
+      "chapterAtStart": 8,
+      "level": 219,
+      "power": 10934223.644773435,
+      "exp": 0,
+      "silver": 589196,
       "relics": 3000,
+      "relicLevel": 141.2,
       "battles": 1570,
-      "blockedAtStage": 279,
+      "blockedAtStage": 248,
       "produced": {
-        "silver": 379375285,
-        "exp": 1165073968,
-        "skillStones": 33356,
-        "relicStones": 74339,
-        "emblems": 21417,
-        "relics": 1565
+        "silver": 48546818,
+        "exp": 150455461,
+        "skillStones": 18478,
+        "relicStones": 40512,
+        "emblems": 11195,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 214784851,
+        "silver": 47994012,
+        "exp": 150455461,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 9492,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 1239282,
+        "relicStones": 238
       }
     },
     {
       "day": 31,
-      "clearedStage": 309,
-      "chapter": 10,
-      "chapterAtStart": 10,
-      "level": 240,
-      "power": 19325063.6754056,
-      "exp": 2036309397,
-      "silver": 1536014672,
+      "clearedStage": 278,
+      "chapter": 9,
+      "chapterAtStart": 8,
+      "level": 227,
+      "power": 13823282.383953588,
+      "exp": 0,
+      "silver": 474181,
       "relics": 3000,
+      "relicLevel": 143.9,
       "battles": 1570,
-      "blockedAtStage": 310,
+      "blockedAtStage": 279,
       "produced": {
-        "silver": 354779794,
-        "exp": 1086020280,
-        "skillStones": 30882,
-        "relicStones": 68436,
-        "emblems": 19414,
-        "relics": 1427
+        "silver": 132624466,
+        "exp": 403786165,
+        "skillStones": 24394,
+        "relicStones": 53168,
+        "emblems": 15202,
+        "relics": 1431
       },
       "spent": {
-        "silver": 0,
-        "exp": 0,
+        "silver": 132739481,
+        "exp": 403786165,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 24489,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 1499531,
+        "relicStones": 267
       }
     },
     {
       "day": 32,
-      "clearedStage": 309,
-      "chapter": 10,
-      "chapterAtStart": 10,
-      "level": 240,
-      "power": 19325063.6754056,
-      "exp": 3129495917,
-      "silver": 1890762106,
+      "clearedStage": 278,
+      "chapter": 9,
+      "chapterAtStart": 9,
+      "level": 234,
+      "power": 16874661.356655188,
+      "exp": 0,
+      "silver": 1739278,
       "relics": 3000,
+      "relicLevel": 146,
       "battles": 1570,
-      "blockedAtStage": 310,
+      "blockedAtStage": 279,
       "produced": {
-        "silver": 354747434,
-        "exp": 1093186520,
-        "skillStones": 30843,
-        "relicStones": 68758,
-        "emblems": 19425,
+        "silver": 131649367,
+        "exp": 400008589,
+        "skillStones": 24514,
+        "relicStones": 52945,
+        "emblems": 14918,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 0,
+        "silver": 130384270,
+        "exp": 400008589,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 22023,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 1814433,
+        "relicStones": 300
       }
     },
     {
       "day": 33,
-      "clearedStage": 309,
-      "chapter": 10,
-      "chapterAtStart": 10,
-      "level": 240,
-      "power": 19325063.6754056,
-      "exp": 4226527375,
-      "silver": 2248223321,
+      "clearedStage": 278,
+      "chapter": 9,
+      "chapterAtStart": 9,
+      "level": 239,
+      "power": 19911521.431851912,
+      "exp": 0,
+      "silver": 769765,
       "relics": 3000,
+      "relicLevel": 147.8,
       "battles": 1570,
-      "blockedAtStage": 310,
+      "blockedAtStage": 279,
       "produced": {
-        "silver": 357461215,
-        "exp": 1097031458,
-        "skillStones": 30733,
-        "relicStones": 69231,
-        "emblems": 19718,
-        "relics": 1428
+        "silver": 131973984,
+        "exp": 408210276,
+        "skillStones": 24288,
+        "relicStones": 53144,
+        "emblems": 15414,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
-        "exp": 0,
+        "silver": 132943497,
+        "exp": 408210276,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 20847,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 2195464,
+        "relicStones": 337
       }
     },
     {
       "day": 34,
       "clearedStage": 309,
       "chapter": 10,
-      "chapterAtStart": 10,
+      "chapterAtStart": 9,
       "level": 240,
-      "power": 19325063.6754056,
-      "exp": 5299375645,
-      "silver": 2601896299,
+      "power": 20544288.012039043,
+      "exp": 1007805244,
+      "silver": 1536518,
       "relics": 3000,
+      "relicLevel": 151.4,
       "battles": 1570,
       "blockedAtStage": 310,
       "produced": {
-        "silver": 353672978,
-        "exp": 1072848270,
-        "skillStones": 30472,
-        "relicStones": 68856,
-        "emblems": 19147,
-        "relics": 1427
+        "silver": 353299823,
+        "exp": 1077985355,
+        "skillStones": 30631,
+        "relicStones": 69233,
+        "emblems": 19294,
+        "relics": 1430
       },
       "spent": {
-        "silver": 0,
-        "exp": 0,
+        "silver": 352533070,
+        "exp": 70180111,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 49965,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 3214379,
+        "relicStones": 426
       }
     },
     {
@@ -1283,27 +1593,32 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 19325063.6754056,
-      "exp": 6381304623,
-      "silver": 2954938387,
+      "power": 20570965.37594295,
+      "exp": 2087526203,
+      "silver": 251050,
       "relics": 3000,
+      "relicLevel": 154.1,
       "battles": 1570,
       "blockedAtStage": 310,
       "produced": {
-        "silver": 353042088,
-        "exp": 1081928978,
-        "skillStones": 30946,
-        "relicStones": 68514,
-        "emblems": 19302,
+        "silver": 353851962,
+        "exp": 1079720959,
+        "skillStones": 30630,
+        "relicStones": 68419,
+        "emblems": 19555,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
+        "silver": 355137430,
         "exp": 0,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 44844,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 4278338,
+        "relicStones": 507
       }
     },
     {
@@ -1312,27 +1627,32 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 19325063.6754056,
-      "exp": 7471398443,
-      "silver": 3311506117,
+      "power": 20589792.11845909,
+      "exp": 3176150029,
+      "silver": 4161760,
       "relics": 3000,
+      "relicLevel": 156.3,
       "battles": 1570,
       "blockedAtStage": 310,
       "produced": {
-        "silver": 356567730,
-        "exp": 1090093820,
-        "skillStones": 30491,
-        "relicStones": 68475,
-        "emblems": 18541,
-        "relics": 1427
+        "silver": 356830819,
+        "exp": 1088623826,
+        "skillStones": 30760,
+        "relicStones": 68591,
+        "emblems": 18460,
+        "relics": 1428
       },
       "spent": {
-        "silver": 0,
+        "silver": 352920109,
         "exp": 0,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 40722,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 5176789,
+        "relicStones": 570
       }
     },
     {
@@ -1341,27 +1661,32 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 19325063.6754056,
-      "exp": 8566680227,
-      "silver": 3668135208,
+      "power": 20608391.72763102,
+      "exp": 4276107435,
+      "silver": 3040084,
       "relics": 3000,
+      "relicLevel": 158.1,
       "battles": 1570,
       "blockedAtStage": 310,
       "produced": {
-        "silver": 356629091,
-        "exp": 1095281784,
-        "skillStones": 30802,
-        "relicStones": 68953,
-        "emblems": 19377,
-        "relics": 1428
+        "silver": 356180305,
+        "exp": 1099957406,
+        "skillStones": 30816,
+        "relicStones": 68782,
+        "emblems": 19611,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
+        "silver": 357301981,
         "exp": 0,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 38414,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 6263915,
+        "relicStones": 640
       }
     },
     {
@@ -1370,27 +1695,32 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 19325063.6754056,
-      "exp": 9651993549,
-      "silver": 4020933325,
+      "power": 20621362.132522654,
+      "exp": 5353867971,
+      "silver": 585541,
       "relics": 3000,
+      "relicLevel": 159.6,
       "battles": 1570,
       "blockedAtStage": 310,
       "produced": {
-        "silver": 352798117,
-        "exp": 1085313322,
-        "skillStones": 30510,
-        "relicStones": 68409,
-        "emblems": 19032,
+        "silver": 355214993,
+        "exp": 1077760536,
+        "skillStones": 30455,
+        "relicStones": 68480,
+        "emblems": 18698,
         "relics": 1427
       },
       "spent": {
-        "silver": 0,
+        "silver": 357669536,
         "exp": 0,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 36019,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 6890306,
+        "relicStones": 679
       }
     },
     {
@@ -1399,27 +1729,32 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 19325063.6754056,
-      "exp": 10740776877,
-      "silver": 4375421480,
+      "power": 20634817.736482907,
+      "exp": 6447289064,
+      "silver": 7412923,
       "relics": 3000,
+      "relicLevel": 160.9,
       "battles": 1570,
       "blockedAtStage": 310,
       "produced": {
-        "silver": 354488155,
-        "exp": 1088783328,
-        "skillStones": 30742,
-        "relicStones": 68593,
-        "emblems": 19074,
-        "relics": 1427
+        "silver": 352720756,
+        "exp": 1093421093,
+        "skillStones": 30727,
+        "relicStones": 68642,
+        "emblems": 19188,
+        "relics": 1428
       },
       "spent": {
-        "silver": 0,
+        "silver": 345893374,
         "exp": 0,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 33193,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 7579337,
+        "relicStones": 719
       }
     },
     {
@@ -1428,27 +1763,32 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 19325063.6754056,
-      "exp": 11838951493,
-      "silver": 4729228050,
+      "power": 20645223.62038065,
+      "exp": 7540620633,
+      "silver": 5325722,
       "relics": 3000,
+      "relicLevel": 162.1,
       "battles": 1570,
       "blockedAtStage": 310,
       "produced": {
-        "silver": 353806570,
-        "exp": 1098174616,
-        "skillStones": 30828,
-        "relicStones": 67945,
-        "emblems": 19081,
-        "relics": 1428
+        "silver": 355884861,
+        "exp": 1093331569,
+        "skillStones": 30815,
+        "relicStones": 68097,
+        "emblems": 19080,
+        "relics": 1427
       },
       "spent": {
-        "silver": 0,
+        "silver": 357972062,
         "exp": 0,
         "skillStones": 0,
-        "relicStones": 0,
+        "relicStones": 32732,
         "emblems": 0,
         "relics": 0
+      },
+      "maxAction": {
+        "silver": 9170998,
+        "relicStones": 808
       }
     }
   ]

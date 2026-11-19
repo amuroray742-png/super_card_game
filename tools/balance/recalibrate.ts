@@ -43,13 +43,16 @@ import { getEnemy } from '../../src/core/config/enemies.ts'
 import { HERO_INDEX } from '../../src/core/config/heroes/index.ts'
 import { POOL_NEWBIE } from '../../src/core/config/pools.ts'
 import { referenceTeam } from './reference-build.ts'
+import { judgeRecycle } from './recycle-verdict.ts'
 import {
   BATTLE,
   IDLE,
   LEVEL,
+  REALMS,
   RELIC,
   SKILL,
   STAGE,
+  START_RESOURCES,
 } from '../../src/core/config/economy.ts'
 import type {
   HeroDef,
@@ -352,8 +355,19 @@ function pickTeam(pool: HeroDef[]): HeroDef[] {
   return picked
 }
 
-/** 真实走一次新手池十连，然后按配额编队 */
-function obtainStartTeam(save: SaveData, ctx: ActionContext): string[] {
+/**
+ * 真实走一次新手池十连，然后按配额编队。
+ *
+ * ⚠ **十连的重复转化收益必须一并返回**：
+ *   新手池十连必然出重复（实测 10 张里 8 张是新角色），重复按合规口径转成
+ *   **银两 + 英灵印记 + 同名碎片**——那是**真实流入**，发生在第 1 章。
+ *   漏记它会让第 1 章的「产出 ÷ 消耗」凭空少一块（实测少 1,000 银两），
+ *   闸门会报一个**不存在的**卡手（银两 0.99906×）。
+ */
+function obtainStartTeam(
+  save: SaveData,
+  ctx: ActionContext,
+): { teamIds: string[]; gachaFlow: ResourceFlow } {
   const pulled = applyAction(save, { type: 'gacha.pull', poolId: POOL_NEWBIE.id, count: 10 }, ctx)
   if (!pulled.ok) throw new Error(`新手十连失败：${pulled.message}`)
 
@@ -365,7 +379,10 @@ function obtainStartTeam(save: SaveData, ctx: ActionContext): string[] {
   for (let slot = 0; slot < 6; slot++) {
     applyAction(save, { type: 'team.setSlot', index: slot, heroId: team[slot]?.id ?? null }, ctx)
   }
-  return team.map((h) => h.id)
+  const gachaFlow = emptyFlow()
+  gachaFlow.silver = pulled.result.silver
+  gachaFlow.emblems = pulled.result.emblems
+  return { teamIds: team.map((h) => h.id), gachaFlow }
 }
 
 // ─────────────────────────── 养成策略 ───────────────────────────
@@ -405,8 +422,19 @@ function addFlow(target: ResourceFlow, src: ResourceFlow): void {
  *   `RelicUpgradeResult.cost` / 境界突破成本），不复算一遍扣费口径——
  *   复算就会和游戏实际扣的钱对不上（铁律 #4）。
  */
-function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): ResourceFlow {
+function spendGrowth(
+  save: SaveData,
+  ctx: ActionContext,
+  teamIds: string[],
+): { spent: ResourceFlow; maxAction: { silver: number; relicStones: number } } {
   const spent = emptyFlow()
+  /**
+   * 本次养成里**最贵的单次消费动作**。
+   *
+   * ⚠ 这是回收比容差的来源：淬炼段的一次强化要几十万银两，
+   *   拿「基础 500」当粒度会把「差一步」误判成「缺一大截」。
+   */
+  const maxAction = { silver: 0, relicStones: 0 }
   let guard = 0
   while (save.player.exp > 0 && guard++ < 5000) {
     const states = teamIds.map((id) => save.heroes[id]).filter((s): s is NonNullable<typeof s> => !!s)
@@ -440,7 +468,10 @@ function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): Res
     .map((e) => save.relics.find((r) => r.uid === e.relicId))
     .filter((r): r is NonNullable<typeof r> => !!r)
   let relicGuard = 0
-  while (relicGuard++ < 3000) {
+  // ⚠ 护栏按「满编 × 上限」给足：强化上限提到 200 之后，
+  //   36 件遗物各推到上限需要 7000+ 次升级，原来的 3000 会中途截断
+  //   （截断 = 模拟出来的消耗偏小，速度口径的回收比直接失真）。
+  while (relicGuard++ < equipped.length * RELIC.MAX_LEVEL) {
     const candidates = equipped.filter((r) => r.level < RELIC.MAX_LEVEL).sort((a, b) => a.level - b.level)
     if (candidates.length === 0) break
     const relic = candidates[0]
@@ -451,6 +482,8 @@ function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): Res
     if (!up.ok) break
     spent.silver += up.result.cost.silver
     spent.relicStones += up.result.cost.stones
+    maxAction.silver = Math.max(maxAction.silver, up.result.cost.silver)
+    maxAction.relicStones = Math.max(maxAction.relicStones, up.result.cost.stones)
   }
 
   let skillGuard = 0
@@ -467,6 +500,7 @@ function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): Res
         if (up.ok) {
           spent.skillStones += SKILL.SKILL_STONES_PER_LEVEL
           spent.silver += SKILL.SILVER_PER_LEVEL
+          maxAction.silver = Math.max(maxAction.silver, SKILL.SILVER_PER_LEVEL)
           upgraded = true
           break
         }
@@ -475,7 +509,7 @@ function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): Res
     if (!upgraded) break
   }
 
-  return spent
+  return { spent, maxAction }
 }
 
 // ─────────────────────────── 推进模拟（节奏验证） ───────────────────────────
@@ -491,6 +525,8 @@ interface DaySnapshot {
   exp: number
   silver: number
   relics: number
+  /** 已装备遗物的**平均强化等级**（参考养成曲线的实测依据） */
+  relicLevel: number
   /** 当天实际回放的战斗场次 */
   battles: number
   /** 当天被卡住的关卡 */
@@ -499,6 +535,8 @@ interface DaySnapshot {
   produced: ResourceFlow
   /** 当天的养成消耗（真实动作结果累加） */
   spent: ResourceFlow
+  /** 当天做过的**最贵的一次消费动作**（回收比容差的来源） */
+  maxAction: { silver: number; relicStones: number }
 }
 
 interface SimulationResult {
@@ -540,7 +578,7 @@ function simulate(): SimulationResult {
     rng: new Rng(SEED),
     randomSeed: () => SEED,
   }
-  const teamIds = obtainStartTeam(save, ctx)
+  const { teamIds, gachaFlow } = obtainStartTeam(save, ctx)
   syncRngState(save, ctx.rng)
 
   const days: DaySnapshot[] = []
@@ -598,6 +636,20 @@ function simulate(): SimulationResult {
       produced.emblems += rewards.emblems ?? 0
       produced.relics += rewards.relics?.length ?? 0
     }
+    // ⚠ **新号启动资金 + 新手十连的重复转化计入第 1 章的产出**：
+    //   `createNewSave` 给的新号启动资金（银两 5 万 / 术式结晶 30 / 强化石 30）
+    //   是真实流入，只是发生在 t=0、不在挂机回包里；
+    //   新手十连的重复转化（银两 / 英灵印记）同理——它们都发生在第 1 章。
+    //   不计它们的话，第 1 章的「产出 ÷ 消耗」必然 <1（消耗把启动资金花掉了），
+    //   闸门会报一个**不存在的**卡手（实测：漏记十连转化时银两 0.99906×，
+    //   差额恰好是那 1,000 银两；补上后账是平的——余额 381 落在
+    //   「不足 500 银两、无法继续强化」的区间内，与实际一致）。
+    if (day === 1) {
+      produced.silver += START_RESOURCES.silver + gachaFlow.silver
+      produced.skillStones += START_RESOURCES.skillStones
+      produced.relicStones += START_RESOURCES.relicStones
+      produced.emblems += gachaFlow.emblems
+    }
 
     // 首次打通第 N 章 BOSS → 记录玩家当时的等级
     for (const stage of STAGES) {
@@ -613,12 +665,20 @@ function simulate(): SimulationResult {
     if (day === 1) {
       for (const heroId of teamIds) applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
     }
-    const spent = spendGrowth(save, ctx, teamIds)
+    const { spent, maxAction } = spendGrowth(save, ctx, teamIds)
     syncRngState(save, ctx.rng)
 
     const state = save.heroes[teamIds[0]]
     const level = state?.level ?? 1
     const power = getTeamPower(buildTeam(save), buildPveContext(save))
+    // 已装备遗物的平均强化等级：**参考养成曲线（reference-build）的实测依据**——
+    // 标准曲线写什么，取决于理性玩家实际养到什么程度，不能拍脑袋。
+    const equippedRelics = Object.values(save.equipped)
+      .map((e) => save.relics.find((r) => r.uid === e.relicId))
+      .filter((r): r is RelicInstance => !!r)
+    const relicLevel = equippedRelics.length > 0
+      ? equippedRelics.reduce((sum, r) => sum + r.level, 0) / equippedRelics.length
+      : 0
 
     days.push({
       day,
@@ -630,10 +690,12 @@ function simulate(): SimulationResult {
       exp: save.player.exp,
       silver: save.player.silver,
       relics: save.relics.length,
+      relicLevel: Math.round(relicLevel * 10) / 10,
       battles: idleResult?.battles ?? 0,
       blockedAtStage: idleResult?.blockedAtStage ?? null,
       produced,
       spent,
+      maxAction,
     })
 
     if (save.campaign.clearedStage >= STAGES.length) {
@@ -706,7 +768,7 @@ for (let c = 1; c <= STAGE.CHAPTERS; c++) {
 }
 
 console.log('\n【推进曲线】')
-console.log('  天 | 关卡 | 章 | 等级 | 战力 | 场次 | 卡关 | 经验池 | 银两 | 遗物')
+console.log('  天 | 关卡 | 章 | 等级 | 战力 | 场次 | 卡关 | 经验池 | 银两 | 遗物 | 遗物等级')
 for (const d of result.days) {
   console.log(
     `  ${String(d.day).padStart(2)} | ${String(d.clearedStage).padStart(4)} | ` +
@@ -714,7 +776,8 @@ for (const d of result.days) {
       `${Math.round(d.power).toString().padStart(9)} | ${String(d.battles).padStart(4)} | ` +
       `${String(d.blockedAtStage ?? '-').padStart(4)} | ` +
       `${Math.round(d.exp).toString().padStart(11)} | ` +
-      `${Math.round(d.silver).toString().padStart(12)} | ${String(d.relics).padStart(4)}`,
+      `${Math.round(d.silver).toString().padStart(12)} | ${String(d.relics).padStart(4)} | ` +
+      `${d.relicLevel.toString().padStart(6)}`,
   )
 }
 
@@ -734,23 +797,89 @@ interface ChapterVelocity {
   days: number
   produced: ResourceFlow
   spent: ResourceFlow
+  /** 本章做过的最贵的一次消费动作（回收比容差的来源） */
+  maxAction: { silver: number; relicStones: number }
 }
 
 const velocity: ChapterVelocity[] = Array.from({ length: STAGE.CHAPTERS }, () => ({
   days: 0,
   produced: emptyFlow(),
   spent: emptyFlow(),
+  maxAction: { silver: 0, relicStones: 0 },
 }))
 for (const d of result.days) {
   const v = velocity[d.chapterAtStart - 1]
   v.days += 1
   addFlow(v.produced, d.produced)
   addFlow(v.spent, d.spent)
+  v.maxAction.silver = Math.max(v.maxAction.silver, d.maxAction.silver)
+  v.maxAction.relicStones = Math.max(v.maxAction.relicStones, d.maxAction.relicStones)
 }
 
 function ratioCell(supply: number, need: number): string {
   if (need <= 0) return '—'
   return `${(supply / need).toFixed(2)}×`
+}
+
+/** 资源键 → 展示名（表格顺序） */
+const RESOURCE_ROWS = [
+  { key: 'exp', label: '经验' },
+  { key: 'silver', label: '银两' },
+  { key: 'skillStones', label: '术式结晶' },
+  { key: 'relicStones', label: '遗物强化石' },
+  { key: 'emblems', label: '英灵印记' },
+] as const
+
+type ResourceKey = (typeof RESOURCE_ROWS)[number]['key']
+
+/**
+ * 每个资源「**一次最小消费动作**」的成本——回收比的**容差**。
+ *
+ * ⚠ 容差**不是**随手取的小 epsilon，而是游戏自己的**决策粒度**：
+ *   产出与消耗都是离散动作（一次遗物强化 = 500 银两 + 2 石、一次喂经验 = 1,000 经验），
+ *   所以「差一次动作」不是缺钱，而是**出口已饱和**——
+ *   玩家的钱正好用来买了下一次升级，剩下的不够再买一次。
+ *   回收阀门建好之后，逐章比值会**贴着 1.0 上下摆动**（实测银两 0.99995×），
+ *   那正是「钱没有堆积」的签名，不是卡手。
+ *   超过一步长才是真的卡手（玩家攒不够一次升级，只能干等产出）。
+ *
+ * ⚠ 遗物强化的**单价随进度变贵**（淬炼段指数上升），
+ *   所以银两 / 强化石的粒度必须取**玩家在该章实际付过的最贵一次**，
+ *   不能用基础价 500 / 2 ——否则会把「差一步」误判成「缺一大截」。
+ */
+const STATIC_STEP: Record<ResourceKey, number> = {
+  exp: LEVEL.EXP_FEED_OPTIONS[0],
+  silver: RELIC.SILVER_PER_LEVEL,
+  skillStones: SKILL.SKILL_STONES_PER_LEVEL,
+  relicStones: RELIC.STONES_PER_LEVEL,
+  emblems: Math.min(
+    ...REALMS.map((r) => r.breakCost?.emblems ?? Number.POSITIVE_INFINITY),
+  ),
+}
+
+/** 该章该资源的「一次动作」粒度（取自本章实际发生过的最贵一次消费） */
+function stepOf(key: ResourceKey, chapterMaxAction: { silver: number; relicStones: number }): number {
+  if (key === 'silver') return Math.max(STATIC_STEP.silver, chapterMaxAction.silver)
+  if (key === 'relicStones') return Math.max(STATIC_STEP.relicStones, chapterMaxAction.relicStones)
+  return STATIC_STEP[key]
+}
+
+interface VelocityCell {
+  produced: number
+  spent: number
+  ratio: number
+  /** 本章净余额（正 = 盈余，负 = 欠账） */
+  net: number
+  /** 累计净余额（正 = 玩家至今仍有余额） */
+  cumNet: number
+  /** 该章该资源的「一次消费动作」粒度（容差） */
+  step: number
+  /** 本章只是「差一次动作」（出口饱和，不算卡手） */
+  saturated: boolean
+  /** 是否通过（玩家没有被资源卡住） */
+  ok: boolean
+  /** 不通过的原因 */
+  reason: string
 }
 
 console.log('\n【速度口径】产出速度 vs 消耗速度（按章聚合 · 真实链路收支）\n')
@@ -759,29 +888,43 @@ console.log(
     '术式结晶 比 | 强化石 比 | 印记 比',
 )
 console.log('  ' + '-'.repeat(104))
-const velocityRows: Array<{ resource: string; min: number }> = [
-  { resource: '经验', min: Infinity },
-  { resource: '银两', min: Infinity },
-  { resource: '术式结晶', min: Infinity },
-  { resource: '遗物强化石', min: Infinity },
-  { resource: '英灵印记', min: Infinity },
-]
-for (let c = 0; c < velocity.length; c++) {
-  const v = velocity[c]
+
+const cells: VelocityCell[][] = []
+const cumNet: Record<ResourceKey, number> = {
+  exp: 0,
+  silver: 0,
+  skillStones: 0,
+  relicStones: 0,
+  emblems: 0,
+}
+for (const v of velocity) {
+  const chapterRow: VelocityCell[] = RESOURCE_ROWS.map(({ key }) => {
+    const produced = v.produced[key]
+    const spent = v.spent[key]
+    const net = produced - spent
+    cumNet[key] += net
+    const step = stepOf(key, v.maxAction)
+    // ⚠ 判定口径只有一份：`tools/balance/recycle-verdict.ts`
+    //   （工具与单测共用，铁律 #4 / #29）。
+    const verdict = judgeRecycle({ produced, spent, cumNet: cumNet[key], step })
+    return {
+      produced,
+      spent,
+      ratio: verdict.ratio,
+      net,
+      cumNet: cumNet[key],
+      step,
+      saturated: verdict.saturated,
+      ok: verdict.ok,
+      reason: verdict.reason,
+    }
+  })
+  cells.push(chapterRow)
+
   const p = v.produced
   const s = v.spent
-  const expRatio = s.exp > 0 ? p.exp / s.exp : Infinity
-  const silverRatio = s.silver > 0 ? p.silver / s.silver : Infinity
-  const skillRatio = s.skillStones > 0 ? p.skillStones / s.skillStones : Infinity
-  const relicRatio = s.relicStones > 0 ? p.relicStones / s.relicStones : Infinity
-  const emblemRatio = s.emblems > 0 ? p.emblems / s.emblems : Infinity
-  velocityRows[0].min = Math.min(velocityRows[0].min, expRatio)
-  velocityRows[1].min = Math.min(velocityRows[1].min, silverRatio)
-  velocityRows[2].min = Math.min(velocityRows[2].min, skillRatio)
-  velocityRows[3].min = Math.min(velocityRows[3].min, relicRatio)
-  velocityRows[4].min = Math.min(velocityRows[4].min, emblemRatio)
   console.log(
-    `  ${String(c + 1).padStart(2)} | ${String(v.days).padStart(4)} | ` +
+    `  ${String(cells.length).padStart(2)} | ${String(v.days).padStart(4)} | ` +
       `${fmtFlow(p.exp).padStart(9)}/${fmtFlow(s.exp).padEnd(9)} ${ratioCell(p.exp, s.exp).padStart(7)} | ` +
       `${fmtFlow(p.silver).padStart(9)}/${fmtFlow(s.silver).padEnd(9)} ${ratioCell(p.silver, s.silver).padStart(7)} | ` +
       `${ratioCell(p.skillStones, s.skillStones).padStart(10)} | ` +
@@ -789,8 +932,51 @@ for (let c = 0; c < velocity.length; c++) {
       `${ratioCell(p.emblems, s.emblems).padStart(7)}`,
   )
 }
-console.log('\n  逐章最小回收比：' + velocityRows.map((r) => `${r.resource} ${r.min === Infinity ? '—' : r.min.toFixed(2) + '×'}`).join(' · '))
-console.log('  判定：' + (velocityRows.every((r) => r.min >= 1) ? '✓ 全部 ≥1（产出速度跟得上消耗速度）' : '✗ 存在 <1 的章（该章会卡手）'))
+
+// ── 累计净额：玩家该资源「至今还剩多少」 ──
+//
+// ⚠ 逐章流量比会因**离散粒度**在 1.0 附近摆动，而**跨章结转**又让它失真：
+//   某章产出略少于消耗，玩家完全可能靠上一章的结余撑过去（并没有卡住）。
+//   真正判「卡手」的是**累计净额转负**——那一刻玩家是真的入不敷出了。
+console.log('\n【累计净额】玩家该资源至今的余额（正 = 仍有余额；负 = 入不敷出）\n')
+console.log('  章 | ' + RESOURCE_ROWS.map((r) => r.label.padStart(12)).join(' | '))
+for (let c = 0; c < cells.length; c++) {
+  console.log(
+    `  ${String(c + 1).padStart(2)} | ` +
+      cells[c]
+        .map((cell, i) => {
+          const text = fmtFlow(cell.cumNet)
+          const mark = cell.cumNet < 0 ? '✗' : cell.saturated ? '○' : ' '
+          return `${text}${mark}`.padStart(12)
+        })
+        .join(' | '),
+  )
+}
+console.log('  （✗ 累计为负 = 入不敷出；○ 本章只差一次消费动作 = 出口饱和）')
+
+const failures: string[] = []
+const mins: Array<{ label: string; min: number }> = RESOURCE_ROWS.map((r) => ({
+  label: r.label,
+  min: Infinity,
+}))
+for (let c = 0; c < cells.length; c++) {
+  for (let r = 0; r < RESOURCE_ROWS.length; r++) {
+    const cell = cells[c][r]
+    const { label } = RESOURCE_ROWS[r]
+    mins[r].min = Math.min(mins[r].min, cell.ratio)
+    if (!cell.ok) failures.push(`第 ${c + 1} 章 ${label}${cell.reason}`)
+  }
+}
+console.log(
+  '\n  逐章最小回收比：' +
+    mins.map((m) => `${m.label} ${m.min === Infinity ? '—' : m.min.toFixed(2) + '×'}`).join(' · '),
+)
+console.log(
+  '  判定：' +
+    (failures.length === 0
+      ? '✓ 全部章节通过（累计净额全程 ≥0，且逐章欠账不超过一次消费动作）'
+      : `✗ ${failures.join('；')}`),
+)
 
 if (OUT_PATH && !values.dry) {
   mkdirSync(dirname(OUT_PATH), { recursive: true })
@@ -815,6 +1001,14 @@ if (OUT_PATH && !values.dry) {
           days: v.days,
           produced: v.produced,
           spent: v.spent,
+          /** 该章末的累计净额（正 = 玩家仍有余额；负 = 入不敷出） */
+          cumNet: Object.fromEntries(
+            RESOURCE_ROWS.map(({ key }, idx) => [key, cells[i][idx].cumNet]),
+          ),
+          /** 各资源的「一次最小消费动作」粒度（回收比的容差，按本章实际最贵一次计） */
+          steps: Object.fromEntries(
+            RESOURCE_ROWS.map(({ key }, idx) => [key, cells[i][idx].step]),
+          ),
         })),
         daysToClear: result.finalDay,
         clearedAll: result.clearedAll,

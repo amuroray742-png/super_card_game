@@ -1,10 +1,13 @@
 /**
  * 挂机与离线结算（§5.7）。
  *
- * 离线收益曲线：
- *   t ≤ 8h   → 100%
- *   8h < t ≤ 12h → 线性衰减 100% → 60%
- *   t > 12h  → 0（封顶 12h）
+ * 离线收益曲线（⚠ 数值一律读 `IDLE` 配置，此处只描述**结构**）：
+ *   t ≤ FULL_EFFICIENCY_HOURS → 100%
+ *   满效率 < t ≤ CAP_HOURS     → 线性衰减 100% → TAIL_RATE
+ *   t > CAP_HOURS              → 封顶（按 CAP_HOURS 的平均尾部效率结算）
+ *
+ * ⚠ 实施修正（roadmap P1-2 难度曲线重标定）：满效率由 8h 收窄到 1h、封顶由 12h 收到 3h。
+ *   原值下「一天的挂机预算」是整个游戏内容量的 4~5 倍 ⇒ 新号首日顶格、经济贬值。
  *
  * 在线效率恒定为离线的 3 倍（IDLE.ONLINE_MULTIPLIER）。
  * 收益通过**回放真实战斗**结算，而非按时长线性发放——
@@ -42,7 +45,7 @@ export function offlineEffectiveSeconds(seconds: number): number {
   return computeOfflineEfficiency(seconds) * 3600
 }
 
-/** 满效率上限：12 小时封顶，超出部分不再产出 */
+/** 满效率上限：CAP_HOURS（现 3 小时）封顶，超出部分不再产出 */
 export const OFFLINE_CAP_SECONDS = IDLE.CAP_HOURS * 3600
 
 export interface IdleRunResult {

@@ -28,6 +28,7 @@ import { resolve } from 'node:path'
 import { DROP_TABLES, LEVEL, REALMS, SKILL, RELIC, STAR, STAGE, BATTLE, DAILY, LADDER, LADDER_RETURN_REWARDS } from '../../src/core/config/economy.ts'
 import { STAGES } from '../../src/core/config/stages.ts'
 import { totalExpToReach, starUpCost, expToNext } from '../../src/core/systems/growth.ts'
+import { relicTotalCost } from '../../src/core/systems/relic.ts'
 import { referenceGearAt } from './reference-build.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
 import { DAILY_TASKS, WEEKLY_TASKS } from '../../src/core/config/tasks.ts'
@@ -442,15 +443,19 @@ function standardCost(fromLevel: number, toLevel: number): StandardCost {
   }
 
   const skillLevels = Math.max(0, skillTo - skillFrom)
-  const relicLevels = Math.max(0, relicTo - relicFrom)
+
+  // ⚠ 遗物强化成本随等级指数上升 ⇒ 标准消耗必须走 core 的**累计投入**，
+  //   不能写「单级价格 × 级数」（铁律 #4：扣费口径只有一份）。
+  const relicCost = relicTotalCost(relicTo)
+  const relicCostFrom = relicTotalCost(relicFrom)
 
   return {
     exp,
     silver:
       skillLevels * SKILL_COUNT * SKILL.SILVER_PER_LEVEL * TEAM_SIZE +
-      relicLevels * RELIC_SLOTS * TEAM_SIZE * RELIC.SILVER_PER_LEVEL,
+      (relicCost.silver - relicCostFrom.silver) * RELIC_SLOTS * TEAM_SIZE,
     skillStones: skillLevels * SKILL_COUNT * SKILL.SKILL_STONES_PER_LEVEL * TEAM_SIZE,
-    relicStones: relicLevels * RELIC_SLOTS * TEAM_SIZE * RELIC.STONES_PER_LEVEL,
+    relicStones: (relicCost.stones - relicCostFrom.stones) * RELIC_SLOTS * TEAM_SIZE,
     emblems,
   }
 }
