@@ -18,6 +18,7 @@ import { HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { getEnemy } from '../../core/config/enemies.ts'
 import { LADDER } from '../../core/config/economy.ts'
 import { formatNumber } from '../utils/format'
+import { rewardLines } from '../utils/reward-text'
 import type { LadderRoundResult } from '../../core/model/types.ts'
 import type { LadderChallengeResult } from '../../core/systems/actions.ts'
 
@@ -134,11 +135,10 @@ function squadResult(round: LadderRoundResult, index: number) {
 async function claimReturn() {
   const res = await store.claimReturnReward()
   if (!res) return
-  store.notify(
-    `回流奖励已领取（离线 ${res.days} 天）· 术式结晶 +${res.rewards.skillStones ?? 0}`
-    + ` · 强化石 +${res.rewards.relicStones ?? 0} · 勋章 +${res.medals}`,
-    'ok',
-  )
+  // ⚠ **实施修正（资源/背包版本 v10）**：回流奖励改发**通用经验书**（`items`），
+  //   竞技勋章停发（`medals` 恒为 0）——名称一律取登记表（铁律 #8）。
+  const parts = rewardLines(res.rewards).map((l) => `${l.label} +${formatNumber(l.value)}`)
+  store.notify(`回流奖励已领取（离线 ${res.days} 天）${parts.length ? ' · ' + parts.join(' · ') : ''}`, 'ok')
 }
 
 /** 敌方梯队里的敌人名 */
@@ -210,7 +210,7 @@ function enemyNames(squadId: string): string[] {
     <section v-if="store.returnPending" class="panel return">
       <div class="panel-title"><span>回流奖励</span></div>
       <p class="tiny" style="margin: 0; line-height: 1.8">
-        离线 {{ ladder.returnDays }} 天，欢迎回来！可领取术式结晶、遗物强化石与竞技勋章。
+        离线 {{ ladder.returnDays }} 天，欢迎回来！可领取通用经验书与竞技勋章。
       </p>
       <button
         class="btn btn-primary btn-block"

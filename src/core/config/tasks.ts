@@ -27,7 +27,7 @@
  *
  * 1. **不冲击抽卡间隔**：任务不发圣杯结晶与抽卡券，
  *    抽卡节奏仍然只由签到（每周 4,700 结晶）决定；
- * 2. **不冲击养成资源回收**：只发强化石与术式结晶，
+ * 2. **不冲击养成资源回收**：只发**通用经验书**（辅助养成投放），
  *    且总预算 ≤「一小时挂机产出」的 ~1.5%（见 `tools/balance/report.ts` 的日常投放段）；
  * 3. **不冲击竞技产出隔离**：任务不发竞技勋章 / 竞技材料 / 竞技兑换券，
  *    竞技产出仍然只有竞技场一个来源。
@@ -45,14 +45,22 @@ export type TaskMetric = 'battle' | 'pull' | 'relicUpgrade' | 'signIn'
 /**
  * 任务奖励。
  *
- * ⚠ **只允许养成材料**：字段里刻意没有圣杯结晶 / 抽卡券 / 银两 / 印记 / 竞技资源。
+ * ⚠ **只允许通用经验书**：字段里刻意没有圣杯结晶 / 抽卡券 / 银两 /
+ *   印记 / 竞技资源 / 副本材料。
  *   这是编译期护栏，不是注释——见文件头的「奖励口径」三条红线。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：术式结晶与遗物强化石退役后，
+ *   「只发养成材料」这条红线落到**通用经验书**上
+ *   （设计稿 §3「日常、周目标、回流｜建议用少量通用经验书承接辅助养成奖励」）。
+ *   五行技能材料与三档强化石是**副本专属产出**，任务不投放
+ *   ——否则「定向副本」这条主线就被白送的日常奖励稀释掉了。
  */
 export interface TaskReward {
-  /** 术式结晶（技能升级消耗） */
-  skillStones?: number
-  /** 遗物强化石（遗物强化消耗） */
-  relicStones?: number
+  /** 通用经验书（辅助养成投放） */
+  expBooks?: {
+    small?: number
+    large?: number
+  }
 }
 
 /** 单条任务定义 */
@@ -92,7 +100,7 @@ export const DAILY_TASKS: readonly TaskDef[] = [
     metric: 'battle',
     period: 'daily',
     target: 30,
-    rewards: { relicStones: 10, skillStones: 4 },
+    rewards: { expBooks: { small: 3, large: 1 } },
     route: 'expedition',
   },
   {
@@ -101,7 +109,7 @@ export const DAILY_TASKS: readonly TaskDef[] = [
     metric: 'pull',
     period: 'daily',
     target: 1,
-    rewards: { relicStones: 6, skillStones: 2 },
+    rewards: { expBooks: { small: 2 } },
     route: 'gacha',
   },
   {
@@ -110,7 +118,7 @@ export const DAILY_TASKS: readonly TaskDef[] = [
     metric: 'relicUpgrade',
     period: 'daily',
     target: 2,
-    rewards: { relicStones: 6, skillStones: 2 },
+    rewards: { expBooks: { small: 2 } },
     route: 'forge',
   },
   {
@@ -119,7 +127,7 @@ export const DAILY_TASKS: readonly TaskDef[] = [
     metric: 'signIn',
     period: 'daily',
     target: 1,
-    rewards: { relicStones: 2, skillStones: 2 },
+    rewards: { expBooks: { small: 1 } },
     // 签到就在这一页，不需要跳转
     route: '',
   },
@@ -139,7 +147,7 @@ export const WEEKLY_TASKS: readonly TaskDef[] = [
     metric: 'battle',
     period: 'weekly',
     target: 200,
-    rewards: { relicStones: 40, skillStones: 20 },
+    rewards: { expBooks: { small: 12, large: 4 } },
     route: 'expedition',
   },
   {
@@ -148,7 +156,7 @@ export const WEEKLY_TASKS: readonly TaskDef[] = [
     metric: 'pull',
     period: 'weekly',
     target: 5,
-    rewards: { relicStones: 30, skillStones: 15 },
+    rewards: { expBooks: { small: 6, large: 2 } },
     route: 'gacha',
   },
   {
@@ -157,7 +165,7 @@ export const WEEKLY_TASKS: readonly TaskDef[] = [
     metric: 'relicUpgrade',
     period: 'weekly',
     target: 15,
-    rewards: { relicStones: 30, skillStones: 15 },
+    rewards: { expBooks: { small: 6, large: 2 } },
     route: 'forge',
   },
 ] as const

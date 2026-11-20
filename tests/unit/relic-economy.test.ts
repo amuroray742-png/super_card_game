@@ -35,6 +35,23 @@ import type { SaveData } from '../../src/core/model/types.ts'
 
 const NOW = 1_700_000_000_000
 
+/** 三档强化石的道具 id（口径取自 RELIC.STONE_TIERS，不写死字符串） */
+const TIER1 = RELIC.STONE_TIERS[0].id
+const TIER2 = RELIC.STONE_TIERS[1].id
+const TIER3 = RELIC.STONE_TIERS[2].id
+
+/** 强化石消耗（按档位拆分的 map）里取某一档的数量 */
+function stonesOf(stones: Partial<Record<string, number>>, tierId: string): number {
+  return stones[tierId] ?? 0
+}
+
+/** 强化石 map 的总量（跨档时逐档累加） */
+function sumStones(stones: Partial<Record<string, number>>): number {
+  let sum = 0
+  for (const n of Object.values(stones)) sum += n ?? 0
+  return sum
+}
+
 function makeCtx(save: SaveData): { ctx: ActionContext } {
   const rng = new Rng(99)
   return {
@@ -63,7 +80,9 @@ describe('遗物强化：价格随等级指数上升（回收阀门）', () => {
     for (let level = RELIC.MIN_LEVEL; level < RELIC.OVER_SEGMENT_START; level++) {
       const cost = relicUpgradeCost(level)!
       expect(cost.silver, `Lv${level} 应仍是基准价`).toBe(RELIC.SILVER_PER_LEVEL)
-      expect(cost.stones, `Lv${level} 应仍是基准价`).toBe(RELIC.STONES_PER_LEVEL)
+      // ⚠ 资源/背包版本 v10：强化石分三档，Lv ≤ 60 的目标等级落在初阶
+      expect(stonesOf(cost.stones, TIER1), `Lv${level} 应仍是基准价`).toBe(RELIC.STONES_PER_LEVEL)
+      expect(sumStones(cost.stones), `Lv${level} 只该消耗一档强化石`).toBe(RELIC.STONES_PER_LEVEL)
     }
   })
 
@@ -79,12 +98,15 @@ describe('遗物强化：价格随等级指数上升（回收阀门）', () => {
       const cost = relicUpgradeCost(level)!
       expect(cost.silver, `Lv${level} 的银两价格应高于 Lv${level - 1}`).toBeGreaterThan(prev.silver)
       // ⚠ 强化石价格会取整，早期几级可能持平 → 断言「不下降」而不是「严格递增」
-      expect(cost.stones, `Lv${level} 的强化石价格不应低于 Lv${level - 1}`).toBeGreaterThanOrEqual(prev.stones)
+      const prevStones = sumStones(prev.stones)
+      const curStones = sumStones(cost.stones)
+      expect(curStones, `Lv${level} 的强化石价格不应低于 Lv${level - 1}`).toBeGreaterThanOrEqual(prevStones)
       const overSteps = level - (RELIC.OVER_SEGMENT_START - RELIC.MIN_LEVEL)
       expect(cost.silver).toBe(
         Math.round(RELIC.SILVER_PER_LEVEL * Math.pow(RELIC.COST_GROWTH, overSteps)),
       )
-      expect(cost.stones).toBe(
+      // Lv61~130 的目标等级落在**中阶**石
+      expect(stonesOf(cost.stones, TIER2)).toBe(
         Math.max(1, Math.round(RELIC.STONES_PER_LEVEL * Math.pow(RELIC.STONE_COST_GROWTH, overSteps))),
       )
       prev = cost
@@ -93,15 +115,21 @@ describe('遗物强化：价格随等级指数上升（回收阀门）', () => {
 
   it('累计投入 = 逐级价格之和（与玩家逐级点的账逐位对得上）', () => {
     let silver = 0
-    let stones = 0
+    const stones: Record<string, number> = {}
     for (let level = RELIC.MIN_LEVEL; level < 150; level++) {
       const cost = relicUpgradeCost(level)!
       silver += cost.silver
-      stones += cost.stones
+      for (const [id, n] of Object.entries(cost.stones)) {
+        stones[id] = (stones[id] ?? 0) + (n ?? 0)
+      }
     }
     const total = relicTotalCost(150)
     expect(total.silver).toBe(silver)
-    expect(total.stones).toBe(stones)
+    // 逐档累加：Lv1~60 初阶、61~130 中阶、131~149 高阶
+    expect(total.stones).toEqual(stones)
+    expect(stonesOf(total.stones, TIER1)).toBeGreaterThan(0)
+    expect(stonesOf(total.stones, TIER2)).toBeGreaterThan(0)
+    expect(stonesOf(total.stones, TIER3)).toBeGreaterThan(0)
   })
 
   it('强化石的价格底数比银两平缓（石头产出只 1.3×/章，银两 2.7×/章）', () => {
@@ -159,10 +187,6 @@ describe('遗物分解：返还不超过累计投入（不是造币漏洞）', (
           back.silver - invested.silver,
           `${rarity} Lv${level}：升级后分解的净收益不应高于直接分解`,
         ).toBeLessThanOrEqual(base.silver - baseInvested.silver)
-        expect(
-          back.stones - invested.stones,
-          `${rarity} Lv${level}：升级后分解的净收益不应高于直接分解`,
-        ).toBeLessThanOrEqual(base.stones - baseInvested.stones)
       }
     }
   })
@@ -170,9 +194,10 @@ describe('遗物分解：返还不超过累计投入（不是造币漏洞）', (
   it('1 级遗物的返还与旧口径一致（低等级经济不受影响）', () => {
     const relic = relicAt('SSR', 1)
     const back = decomposeValue(relic)
-    // 旧口径：500 × 1 × 5 × 0.5 = 1250；石头 floor(1 × 5 × 0.5) = 2
+    // 旧口径：500 × 1 × 5 × 0.5 = 1250
     expect(back.silver).toBe(1250)
-    expect(back.stones).toBe(2)
+    // ⚠ 资源/背包版本 v10：分解**只返银两**，不返强化石（设计稿 §2）
+    expect(back).not.toHaveProperty('stones')
   })
 
   it('高等级遗物分解是净亏（强化 → 分解不能循环刷资源）', () => {
@@ -180,7 +205,6 @@ describe('遗物分解：返还不超过累计投入（不是造币漏洞）', (
     const back = decomposeValue(relic)
     const invested = relicTotalCost(120)
     expect(back.silver).toBeLessThan(invested.silver)
-    expect(back.stones).toBeLessThan(invested.stones)
   })
 })
 
@@ -190,7 +214,9 @@ describe('批量强化：扣费与逐级强化同一口径', () => {
     const relic = relicAt('SSR', 30)
     save.relics = [relic]
     save.player.silver = 1_000_000_000
-    save.player.relicStones = 1_000_000
+    save.items[TIER1] = 1_000_000
+    save.items[TIER2] = 1_000_000
+    save.items[TIER3] = 1_000_000
     const { ctx } = makeCtx(save)
 
     const from = relicTotalCost(30)
@@ -203,7 +229,10 @@ describe('批量强化：扣费与逐级强化同一口径', () => {
     expect(res.ok).toBe(true)
     if (!res.ok) return
     expect(save.player.silver).toBe(1_000_000_000 - (to.silver - from.silver))
-    expect(save.player.relicStones).toBe(1_000_000 - (to.stones - from.stones))
+    // 逐档扣：30 → 40 全程落在初阶石
+    expect(save.items[TIER1]).toBe(1_000_000 - stonesOf(to.stones, TIER1) + stonesOf(from.stones, TIER1))
+    expect(save.items[TIER2]).toBe(1_000_000)
+    expect(save.items[TIER3]).toBe(1_000_000)
     expect(relic.level).toBe(40)
   })
 
@@ -212,7 +241,7 @@ describe('批量强化：扣费与逐级强化同一口径', () => {
     const relic = relicAt('SSR', 100)
     save.relics = [relic]
     save.player.silver = 1
-    save.player.relicStones = 1
+    save.items[TIER2] = 1
     const { ctx } = makeCtx(save)
     const res = applyAction(
       save,
@@ -221,7 +250,7 @@ describe('批量强化：扣费与逐级强化同一口径', () => {
     )
     expect(res.ok).toBe(false)
     expect(save.player.silver).toBe(1)
-    expect(save.player.relicStones).toBe(1)
+    expect(save.items[TIER2]).toBe(1)
     expect(relic.level).toBe(100)
   })
 })

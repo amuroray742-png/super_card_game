@@ -15,6 +15,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { startServerHarness, type ServerHarness } from './helpers/server-harness.ts'
 import { readServerSave } from './helpers/server-save.ts'
 import { registerAndLoad, TEST_PASSWORD } from './helpers/store-harness.ts'
+import { GACHA, START_RESOURCES } from '../../src/core/config/economy.ts'
 
 /** 模拟存储：key = slot */
 const mem = vi.hoisted(() => new Map<string, string>())
@@ -101,7 +102,7 @@ describe('槽位按账号隔离', () => {
 
     expect(store.slot).not.toBe(slotA)
     // 新账号是全新的档，不是上一个账号的进度
-    expect(store.save.player.crystals).toBe(3000)
+    expect(store.save.player.crystals).toBe(START_RESOURCES.crystals)
   })
 })
 
@@ -116,7 +117,7 @@ describe('多设备一致', () => {
     await store.load()
     expect(store.save.stats.totalPulls).toBe(10)
     expect(store.save.gacha.history).toHaveLength(10)
-    expect(store.save.player.crystals).toBe(0)
+    expect(store.save.player.crystals).toBe(START_RESOURCES.crystals - GACHA.COST_SINGLE * 10)
   })
 
   it('存档在服务端落库（本地缓存删掉也能恢复）', async () => {
@@ -203,7 +204,7 @@ describe('恢复连接', () => {
     release()
     await pending
     expect(store.slot).toBe(ownerSlot)
-    expect(store.save.player.crystals).toBe(3000)
+    expect(store.save.player.crystals).toBe(START_RESOURCES.crystals)
     expect(store.loaded).toBe(true)
   })
 

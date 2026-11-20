@@ -6,8 +6,10 @@
  * - 星级被动   → skill 乘区
  * - 境界       → realm 乘区
  */
-import type { HeroRuntime, HeroState, StatMod } from '../model/types.ts'
+import type { Element, HeroRuntime, HeroState, StatMod } from '../model/types.ts'
+import type { ItemId } from '../config/items.ts'
 import { LEVEL, REALMS, SKILL, STAR } from '../config/economy.ts'
+import { ITEM_BY_ELEMENT } from '../config/items.ts'
 import { getRealm, nextRealm } from './stats.ts'
 
 // ─────────────────────────── 等级 ───────────────────────────
@@ -47,7 +49,7 @@ export interface LevelUpResult {
  * 消耗经验提升等级。
  *
  * 境界门槛：达到本境界上限（凡阶 Lv60 / 名阶 Lv120 / 圣阶 Lv180）时停下，
- * 需玩家先完成**境界突破**（消耗英灵印记）才能继续（§5.4）。
+ * 需玩家先完成**境界突破**（消耗**银两**）才能继续（§5.4）。
  * 停在门槛上时，已投入但没用完的经验保留在 `hero.exp`，突破后立刻兑现。
  */
 export function applyExp(hero: HeroState, expGain: number): LevelUpResult {
@@ -78,10 +80,73 @@ export function applyExp(hero: HeroState, expGain: number): LevelUpResult {
   return { levelsGained: levels, expConsumed: consumed, expRemaining: exp, blockedByRealm: blocked }
 }
 
+/**
+ * 喂经验书的**预览**（纯计算，不改存档）。
+ *
+ * ⚠ 界面用它显示「喂 N 本会升几级 / 会不会被境界门槛卡住」——
+ *   表现层不得自己算（铁律 #4：口径只有一份）。
+ *
+ * @param bookExp 单本经验书的经验值
+ * @param count   想喂的本数
+ */
+export function previewFeed(hero: HeroState, bookExp: number, count: number): FeedBooksResult {
+  const want = Math.max(0, Math.floor(count))
+  if (want <= 0 || hero.level >= LEVEL.MAX) {
+    return { applied: 0, booksUsed: 0, expRemaining: hero.exp, levelsGained: 0, blockedByRealm: false }
+  }
+  const clone: HeroState = { ...hero, skillLevels: [...hero.skillLevels] }
+  const res = applyExp(clone, bookExp * want)
+  return {
+    applied: want * bookExp,
+    booksUsed: want,
+    expRemaining: res.expRemaining,
+    levelsGained: res.levelsGained,
+    blockedByRealm: res.blockedByRealm,
+  }
+}
+
+/** 喂经验书的结果 */
+export interface FeedBooksResult {
+  /**
+   * **本次投入**的经验（= `booksUsed × 单本面值`）。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：原先写成 `expConsumed + expRemaining`，
+   *   而 `expRemaining` 是英灵**全部**存量经验 —— 于是每次喂书都把存量重报一遍
+   *   （喂 10 次虚报 10 倍），界面上「投入 6232 经验」而玩家只喂了 1000。
+   *   「本次投入」只能是这次喂进去的那部分；存量另走 `expRemaining`。
+   */
+  applied: number
+  /** 实际消耗的书本数 */
+  booksUsed: number
+  /** 喂完之后英灵身上**存着**的经验（卡在境界门槛上时不为 0） */
+  expRemaining: number
+  levelsGained: number
+  blockedByRealm: boolean
+}
+
+/**
+ * 执行喂经验书（**只改英灵状态，不动资源**）。
+ *
+ * ⚠ 资源扣减由动作层（`core/systems/actions.ts`）负责——
+ *   与 `applySkillUp` / `applyStarUp` 一致，避免两处各写一套扣费规则。
+ */
+export function applyFeedBooks(hero: HeroState, bookExp: number, count: number): FeedBooksResult {
+  const preview = previewFeed(hero, bookExp, count)
+  if (preview.booksUsed <= 0) return preview
+  const res = applyExp(hero, bookExp * preview.booksUsed)
+  return {
+    applied: preview.booksUsed * bookExp,
+    booksUsed: preview.booksUsed,
+    expRemaining: res.expRemaining,
+    levelsGained: res.levelsGained,
+    blockedByRealm: res.blockedByRealm,
+  }
+}
+
 /** 境界突破：消耗材料提升境界上限 */
 export interface RealmBreakCost {
-  /** 消耗的**英灵印记**数量 */
-  emblems: number
+  /** 突破消耗的**银两**数量 */
+  silver: number
   /** 突破后进入的境界 id */
   realmId: string
   /** 突破后达到的等级（即新境界的第 1 级） */
@@ -91,13 +156,14 @@ export interface RealmBreakCost {
 /**
  * 下一个境界的突破消耗；已在最高境界返回 null。
  *
- * ⚠ 消耗的是**英灵印记**（emblems）——通用养成资源，复用现有经济体系，
- *   不需要为境界另造一套道具 id / 掉落表 / 图鉴。
+ * ⚠ **实施修正（资源/背包版本 v10）**：消耗品从「英灵印记」改为**银两**
+ *   （设计稿 §2「建议 Lv60、120、180 的境界突破改扣银两，
+ *   维持低星英灵通往满级的路线」）。印记已随钱包收敛而退役。
  */
 export function realmBreakCost(level: number): RealmBreakCost | null {
   const next = nextRealm(level)
   if (!next || !next.breakCost) return null
-  return { emblems: next.breakCost.emblems, realmId: next.id, targetLevel: next.minLevel }
+  return { silver: next.breakCost.silver, realmId: next.id, targetLevel: next.minLevel }
 }
 
 /**
@@ -112,12 +178,12 @@ export function atRealmGate(level: number): boolean {
   return level >= next.minLevel - 1
 }
 
-/** 印记是否足够突破（且确实卡在门槛上） */
-export function canBreakRealm(level: number, emblems: number): boolean {
+/** 银两是否足够突破（且确实卡在门槛上） */
+export function canBreakRealm(level: number, silver: number): boolean {
   const cost = realmBreakCost(level)
   if (!cost) return false
   if (!atRealmGate(level)) return false
-  return emblems >= cost.emblems
+  return silver >= cost.silver
 }
 
 /**
@@ -147,24 +213,30 @@ export function realmUnlocked(level: number): boolean {
 // ─────────────────────────── 星级 ───────────────────────────
 
 export interface StarUpCost {
+  /**
+   * 升星所需的**同名碎片**数量。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：印记需求已取消——
+   *   设计稿 §2「升星只扣同名碎片」。重复抽卡**不**直接提升星级数值（合规 §2.1），
+   *   重复卡统一转化为同名碎片，碎片再兑换星级。
+   */
   shards: number
-  emblems: number
 }
 
 /**
- * 升星消耗。同名碎片来自卡池重复转化，印记来自通用回收。
- * 注意：重复抽卡**不**直接提升星级数值（合规 §2.1），
- * 重复英灵统一转化为印记，印记再兑换养成材料。
+ * 升星消耗。同名碎片来自卡池重复转化。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：只扣同名碎片（不再扣印记）。
  */
 export function starUpCost(currentStar: number): StarUpCost | null {
   if (currentStar >= STAR.MAX) return null
-  return { shards: STAR.SHARDS_PER_STAR, emblems: STAR.SHARDS_PER_STAR * 2 }
+  return { shards: STAR.SHARDS_PER_STAR }
 }
 
-export function canStarUp(hero: HeroState, shards: number, emblems: number): boolean {
+export function canStarUp(hero: HeroState, shards: number): boolean {
   const cost = starUpCost(hero.star)
   if (!cost) return false
-  return shards >= cost.shards && emblems >= cost.emblems
+  return shards >= cost.shards
 }
 
 export function applyStarUp(hero: HeroState): boolean {
@@ -192,19 +264,29 @@ export function getHeroPassiveMods(hero: HeroRuntime): StatMod[] {
 
 export interface SkillUpCost {
   /**
-   * 消耗的**术式结晶**数量。
+   * 消耗的**五行技能材料**数量。
    *
-   * ⚠ 字段名不叫 `crystals`——本项目里 `crystals` 专指**圣杯结晶**（抽卡资源），
-   *   两者混用正是「技能升级提示资源不足」的成因（实现扣错了资源）。
+   * ⚠ **实施修正（资源/背包版本 v10）**：术式结晶（单一通用材料）已退役，
+   *   改为按英灵五行匹配的材料（金→金系技能材料 …）。
+   *   材料 id 见 `core/config/items.ts` 的 `ITEM_BY_ELEMENT`（唯一口径）。
    */
-  skillStones: number
+  material: number
+  /** 材料道具 id（写入 / 扣费都用它，禁止各写一份） */
+  materialId: ItemId
   silver: number
 }
 
-export function skillUpCost(currentLevel: number): SkillUpCost | null {
+/**
+ * 技能升级消耗。
+ *
+ * @param currentLevel 当前技能等级
+ * @param element     英灵**五行**——决定用哪种材料
+ */
+export function skillUpCost(currentLevel: number, element: Element): SkillUpCost | null {
   if (currentLevel >= SKILL.MAX_LEVEL) return null
   return {
-    skillStones: SKILL.SKILL_STONES_PER_LEVEL,
+    material: SKILL.MATERIAL_PER_LEVEL,
+    materialId: ITEM_BY_ELEMENT[element],
     silver: SKILL.SILVER_PER_LEVEL,
   }
 }

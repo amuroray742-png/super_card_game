@@ -130,13 +130,45 @@ function heroIdFromUrl(page: Page): string {
   return page.url().split('/hero/')[1]?.split('?')[0]?.split('#')[0] ?? ''
 }
 
-/** 读取玩家当前的银两与强化石 */
+/**
+ * 真实刷到**强化石**（资源/背包版本 v10）。
+ *
+ * ⚠ 强化石**只从强化副本产出**（主线不再投放）——
+ *   所以玩家真实的强化链路是：
+ *   「推征 → 遗物 → 强化副本（初阶）→ 强化石 → 强化遗物」。
+ *   这里走的就是这条链路（切挂机去向 → 真实挂机 → 强化石到账），
+ *   不是导入、也不是直接改存档。
+ */
+async function farmRelicStones(page: Page, accountId: number): Promise<number> {
+  await page.goto('/#/dungeon?kind=enhance&tier=relicStoneTier1&difficulty=easy')
+  await page.waitForLoadState('networkidle')
+  // 初阶解锁线 = 持有任意遗物（前面已推征产到遗物）
+  await expect(page.getByTestId('dungeon-set-target')).toBeEnabled()
+  await page.getByTestId('dungeon-set-target').click()
+
+  await page.goto('/#/expedition')
+  await page.waitForLoadState('networkidle')
+  const run = await settleIdleThroughUi(page, accountId)
+  expect(run.dungeon, '强化副本去向的结算必须带回副本明细').toBeTruthy()
+  expect(run.dungeon!.itemId).toBe('relicStoneTier1')
+
+  const stones = (await cachedSaveOf(page, accountId))?.items?.relicStoneTier1 ?? 0
+  expect(stones, '真实挂机未拿到强化石').toBeGreaterThan(0)
+  return stones
+}
+
+/**
+ * 读取玩家当前的银两与**初阶强化石**。
+ *
+ * ⚠ 资源/背包版本 v10：强化石是背包堆叠物（`save.items`），
+ *   且分三档——Lv1→Lv2 的目标等级落在初阶，所以这里读初阶那一叠。
+ */
 async function resourcesOf(
   page: Page,
   accountId: number,
 ): Promise<{ silver: number; stones: number }> {
   const save = await cachedSaveOf(page, accountId)
-  return { silver: save?.player?.silver ?? 0, stones: save?.player?.relicStones ?? 0 }
+  return { silver: save?.player?.silver ?? 0, stones: save?.items?.relicStoneTier1 ?? 0 }
 }
 
 test.describe('遗物获取途径（挂机掉落入库）', () => {
@@ -293,6 +325,9 @@ test.describe('遗物强化', () => {
     await collectRelics(page, accountId)
     await expect(page.locator('.toast')).toContainText('遗物', { timeout: 6000 })
 
+    // ⚠ 资源/背包版本 v10：强化石**只从强化副本产出** → 先真实刷到石头
+    await farmRelicStones(page, accountId)
+
     // ⚠ 清空编队：挂机时间账本会在**下一次动作**里一次性结算掉攒下的战斗，
     //   玩家钱包在「扣费」的同时还在「进账」→ 扣了多少根本不可确定。
     //   清空编队后无编队 → 无战斗 → 无掉落，扣费口径才能精确断言。
@@ -324,7 +359,7 @@ test.describe('遗物强化', () => {
       before.silver - upgradeCost.silver,
     )
     await expect.poll(async () => (await resourcesOf(page, accountId)).stones, { timeout: 8000 }).toBe(
-      before.stones - upgradeCost.stones,
+      before.stones - (upgradeCost.stones.relicStoneTier1 ?? 0),
     )
 
     // 落盘没丢：刷新后等级仍是 +2
@@ -471,6 +506,9 @@ test.describe('仓库批量操作与锁定', () => {
     await page.waitForLoadState('networkidle')
     await collectRelics(page, accountId)
 
+    // ⚠ 资源/背包版本 v10：强化石**只从强化副本产出** → 先真实刷到石头
+    await farmRelicStones(page, accountId)
+
     // 清空编队 → 无并发挂机收益 → 扣费可精确断言
     await pauseFarming(page)
 
@@ -478,7 +516,7 @@ test.describe('仓库批量操作与锁定', () => {
     await page.waitForLoadState('networkidle')
 
     const silverBefore = (await cachedSaveOf(page, accountId))?.player?.silver ?? 0
-    const stonesBefore = (await cachedSaveOf(page, accountId))?.player?.relicStones ?? 0
+    const stonesBefore = (await cachedSaveOf(page, accountId))?.items?.relicStoneTier1 ?? 0
 
     const checks = page.getByTestId('relic-check')
     await checks.nth(0).check()
@@ -490,7 +528,7 @@ test.describe('仓库批量操作与锁定', () => {
       .poll(async () => (await cachedSaveOf(page, accountId))?.player?.silver ?? 0, { timeout: 8000 })
       .toBe(silverBefore - batchCost.silver)
     await expect
-      .poll(async () => (await cachedSaveOf(page, accountId))?.player?.relicStones ?? 0, { timeout: 8000 })
-      .toBe(stonesBefore - batchCost.stones)
+      .poll(async () => (await cachedSaveOf(page, accountId))?.items?.relicStoneTier1 ?? 0, { timeout: 8000 })
+      .toBe(stonesBefore - (batchCost.stones.relicStoneTier1 ?? 0))
   })
 })

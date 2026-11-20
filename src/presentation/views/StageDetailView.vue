@@ -10,10 +10,10 @@ import { CHAPTERS, STAGES } from '../../core/config/stages.ts'
 import { ENEMY_INDEX, getEnemy } from '../../core/config/enemies.ts'
 import { DROP_TABLES } from '../../core/config/economy.ts'
 import { resourceIconPath } from '../../core/config/art.ts'
-import { RESOURCE_DEFS } from '../../core/config/resources.ts'
 import { runBattle } from '../../core/systems/battle.ts'
 import { buildPveContext } from '../../core/systems/derive.ts'
 import { formatNumber, formatPower } from '../utils/format'
+import { dropTableLines } from '../utils/reward-text'
 import BattleCanvas from '../components/BattleCanvas.vue'
 import BattleResultPanel from '../components/BattleResultPanel.vue'
 import type { BattleResult, EnemyDef } from '../../core/model/types.ts'
@@ -34,6 +34,8 @@ const enemies = computed<EnemyDef[]>(() => {
 
 /** 掉落表预览 */
 const drops = computed(() => (stage.value ? DROP_TABLES[stage.value.dropTableId] : null))
+/** 掉落预览行（与战后结算共用同一份口径） */
+const dropRows = computed(() => dropTableLines(drops.value))
 
 /** 战力门槛对比 */
 const powerGap = computed(() => {
@@ -78,7 +80,9 @@ function onSpeedChange(v: number) {
 
 async function setIdleTarget() {
   if (!stage.value) return
-  const ok = await store.setIdleTarget(stage.value.id)
+  // ⚠ 挂机去向现在有三态（主线 / 技能副本 / 强化副本），
+  //   这里选的是**主线**去向（服务端会先结清旧去向再切换）。
+  const ok = await store.setIdleTarget({ kind: 'campaign', stageId: stage.value.id })
   if (ok) store.notify(`挂机目标已设为 ${stage.value.name}`, 'ok')
 }
 
@@ -163,37 +167,13 @@ function goStage(offset: number) {
       <!-- 掉落 -->
       <section class="panel">
         <div class="panel-title"><span>掉落预览</span></div>
-        <!-- ⚠ 资源名称一律取 `core/config/resources.ts` 的登记表，不就地写中文名（铁律 #8） -->
+        <!-- ⚠ 资源名称一律取登记表，不就地写中文名（铁律 #8）；掉落口径与战后结算共用一份 -->
         <div v-if="drops" class="drop-list">
-          <div class="row-between tiny">
+          <div v-for="row in dropRows" :key="row.key" class="row-between tiny">
             <span class="muted res-label">
-              <img class="res-icon" :src="resourceIconPath('silver')" :alt="RESOURCE_DEFS.silver.name" width="16" height="16" />{{ RESOURCE_DEFS.silver.name }}
+              <img class="res-icon" :src="resourceIconPath(row.iconKey ?? 'silver')" :alt="row.label" width="16" height="16" />{{ row.label }}
             </span>
-            <b>{{ formatNumber(drops.silver[0]) }} ~ {{ formatNumber(drops.silver[1]) }}</b>
-          </div>
-          <div class="row-between tiny">
-            <span class="muted res-label">
-              <img class="res-icon" :src="resourceIconPath('exp')" :alt="RESOURCE_DEFS.exp.name" width="16" height="16" />{{ RESOURCE_DEFS.exp.name }}
-            </span>
-            <b>{{ formatNumber(drops.exp[0]) }} ~ {{ formatNumber(drops.exp[1]) }}</b>
-          </div>
-          <div class="row-between tiny">
-            <span class="muted res-label">
-              <img class="res-icon" :src="resourceIconPath('skillStones')" :alt="RESOURCE_DEFS.skillStones.name" width="16" height="16" />{{ RESOURCE_DEFS.skillStones.name }}
-            </span>
-            <b>{{ drops.skillStones[0] }} ~ {{ drops.skillStones[1] }}</b>
-          </div>
-          <div class="row-between tiny">
-            <span class="muted res-label">
-              <img class="res-icon" :src="resourceIconPath('relicStones')" :alt="RESOURCE_DEFS.relicStones.name" width="16" height="16" />{{ RESOURCE_DEFS.relicStones.name }}
-            </span>
-            <b>{{ drops.relicStones[0] }} ~ {{ drops.relicStones[1] }}</b>
-          </div>
-          <div class="row-between tiny">
-            <span class="muted res-label">
-              <img class="res-icon" :src="resourceIconPath('emblems')" :alt="RESOURCE_DEFS.emblems.name" width="16" height="16" />{{ RESOURCE_DEFS.emblems.name }}
-            </span>
-            <b>{{ drops.emblems[0] }} ~ {{ drops.emblems[1] }}</b>
+            <b>{{ row.text }}</b>
           </div>
           <div class="row-between tiny">
             <span class="muted">遗物掉落</span>

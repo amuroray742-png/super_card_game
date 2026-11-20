@@ -5,7 +5,9 @@
  * 竞技模式下：只取套装效果（×0.7），随机词条与强化等级一律无效（§6.8）。
  */
 import type { RelicDef, RelicInstance, RelicSetDef, SaveData, StatMod } from '../model/types.ts'
+import type { ItemId } from '../config/items.ts'
 import { RELIC } from '../config/economy.ts'
+import type { RelicStoneTier } from '../config/economy.ts'
 import { Rng } from '../rng.ts'
 
 /** 遗物定义索引（由 config/relics.ts 在加载时注册） */
@@ -190,9 +192,34 @@ export function getSetModsBySetIds(setIds: (string | null)[]): StatMod[] {
 
 // ─────────────────────────── 强化 / 分解 ───────────────────────────
 
+/**
+ * 强化石消耗（**按档位拆分**）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：强化石分三档（初阶 / 中阶 / 高阶），
+ *   档位由「**目标等级**」决定（设计稿 §2「一次从 59 升到 62，
+ *   消耗 1 个初阶段升级步骤和 2 个中阶段升级步骤对应的石量」）。
+ *   单级升级恰好跨一档 → 本 map **只有一个 key**；批量跨档时按档累加。
+ */
+export type RelicStoneCosts = Partial<Record<ItemId, number>>
+
 export interface RelicUpgradeCost {
   silver: number
-  stones: number
+  /** 强化石（按档位拆分） */
+  stones: RelicStoneCosts
+}
+
+/**
+ * 目标等级落在哪一档强化石。
+ *
+ * ⚠ 档位区间与淬炼段边界**刻意不对齐**：淬炼段（成本指数段）从 Lv61 起算，
+ *   三档石从 Lv61~130 算——两者是**两套口径**（成本曲线 vs 材料种类）。
+ */
+export function relicStoneTierForLevel(targetLevel: number): RelicStoneTier | null {
+  const target = Math.floor(targetLevel)
+  for (const tier of RELIC.STONE_TIERS) {
+    if (target >= tier.minLevel && target <= tier.maxLevel) return tier
+  }
+  return null
 }
 
 /**
@@ -221,12 +248,15 @@ export function relicUpgradeCost(level: number): RelicUpgradeCost | null {
   //   升到 Lv61 的那一次（Lv60 → Lv61）是淬炼段的第一级，价格已经开始上涨；
   //   Lv1 → Lv60 的标准段升级价格**恒定**（早期经济逐位不变）。
   const overSteps = Math.max(0, steps + 1 - (RELIC.OVER_SEGMENT_START - RELIC.MIN_LEVEL))
+  const tier = relicStoneTierForLevel(Math.floor(level) + 1)
+  if (!tier) return null
+  const stoneCount = Math.max(
+    1,
+    Math.round(RELIC.STONES_PER_LEVEL * Math.pow(RELIC.STONE_COST_GROWTH, overSteps)),
+  )
   return {
     silver: Math.round(RELIC.SILVER_PER_LEVEL * Math.pow(RELIC.COST_GROWTH, overSteps)),
-    stones: Math.max(
-      1,
-      Math.round(RELIC.STONES_PER_LEVEL * Math.pow(RELIC.STONE_COST_GROWTH, overSteps)),
-    ),
+    stones: { [tier.id]: stoneCount },
   }
 }
 
@@ -237,17 +267,42 @@ export function relicUpgradeCost(level: number): RelicUpgradeCost | null {
  *   这样「批量强化扣多少」与「分解返还多少」与玩家逐级点的账**完全对得上**
  *   （铁律 #4：扣费口径只有一份）。
  */
-export function relicTotalCost(level: number): { silver: number; stones: number } {
+export function relicTotalCost(level: number): { silver: number; stones: RelicStoneCosts } {
   let silver = 0
-  let stones = 0
+  const stones: RelicStoneCosts = {}
   const target = Math.max(RELIC.MIN_LEVEL, Math.min(RELIC.MAX_LEVEL, Math.floor(level)))
   for (let l = RELIC.MIN_LEVEL; l < target; l++) {
     const cost = relicUpgradeCost(l)
     if (!cost) break
     silver += cost.silver
-    stones += cost.stones
+    for (const [id, n] of Object.entries(cost.stones)) {
+      const key = id as ItemId
+      stones[key] = (stones[key] ?? 0) + (n ?? 0)
+    }
   }
   return { silver, stones }
+}
+
+/**
+ * 从 `fromLevel` 强化到 `toLevel` 的**增量花费**（逐档差值）。
+ *
+ * ⚠ 批量强化跨档时（59 → 62）必须走这里：**逐档差值**
+ *   = Lv60 步初阶 + Lv61/Lv62 步中阶（铁律 #44：逐级点的账与批量按钮的账要对得上）。
+ */
+export function relicCostDelta(
+  fromLevel: number,
+  toLevel: number,
+): { silver: number; stones: RelicStoneCosts } {
+  const from = relicTotalCost(fromLevel)
+  const to = relicTotalCost(toLevel)
+  const stones: RelicStoneCosts = {}
+  const ids = new Set([...Object.keys(from.stones), ...Object.keys(to.stones)])
+  for (const id of ids) {
+    const key = id as ItemId
+    const diff = (to.stones[key] ?? 0) - (from.stones[key] ?? 0)
+    if (diff > 0) stones[key] = diff
+  }
+  return { silver: to.silver - from.silver, stones }
 }
 
 export function applyRelicUpgrade(instance: RelicInstance): boolean {
@@ -268,16 +323,19 @@ export function applyRelicUpgrade(instance: RelicInstance): boolean {
  * ⚠ 稀有度残值 = 「一件 1 级该稀有度遗物的价值」：
  *   ① 仓库溢出自动分解的**废件**仍有回收（不会变成纯惩罚）；
  *   ② 1 级遗物的分解返还与旧口径**逐位相同**（低等级经济不受影响）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：**只返银两**，不返强化石
+ *   （设计稿 §2「建议分解只返银两，获得遗物到满仓处理均不携带副本材料」）。
+ *   强化石是**副本专属产出**，分解若返还它就等于凭空造出副本材料。
  */
-export function decomposeValue(instance: RelicInstance): { silver: number; stones: number } {
+export function decomposeValue(instance: RelicInstance): { silver: number } {
   const def = RELIC_DEFS.get(instance.defId)
   const factor = def ? rarityWeight(def.rarity) : 1
   const invested = relicTotalCost(instance.level)
   const silver = Math.floor(
     (invested.silver + RELIC.SILVER_PER_LEVEL * factor) * RELIC.DECOMPOSE_RETURN_PCT,
   )
-  const stones = Math.floor((invested.stones + factor) * RELIC.DECOMPOSE_RETURN_PCT)
-  return { silver, stones }
+  return { silver }
 }
 
 function rarityWeight(rarity: string): number {

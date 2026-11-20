@@ -147,6 +147,9 @@ describe('任务计数：由真实动作累计', () => {
     const { ctx, rng } = makeCtx(save)
     const relic = makeTestRelic('set_jiangtun_1', rng)
     save.relics.push(relic)
+    // ⚠ 资源/背包版本 v10：强化要扣**按档位拆分**的强化石
+    save.items.relicStoneTier1 = 100
+    save.player.silver = 1_000_000
     const res = applyAction(save, { type: 'relic.upgrade', uid: relic.uid }, ctx)
     expect(res.ok).toBe(true)
     expect(save.daily.taskProgress[counterKey('relicUpgrade', 'daily')]).toBe(1)
@@ -155,7 +158,6 @@ describe('任务计数：由真实动作累计', () => {
   it('失败的召唤不消耗计数（失败即原子）', () => {
     const { ctx } = makeCtx(save)
     save.player.crystals = 0
-    save.player.tickets = 0
     const res = applyAction(save, { type: 'gacha.pull', poolId: 'standard', count: 1 }, ctx)
     expect(res.ok).toBe(false)
     expect(save.daily.taskProgress[counterKey('pull', 'daily')]).toBeUndefined()
@@ -181,10 +183,11 @@ describe('任务领取：先校验后修改', () => {
   it('完成后 → 发奖并标记已领取', () => {
     const { ctx } = makeCtx(save)
     completeTask(save, 'd_pull')
-    const before = save.player.relicStones
+    // ⚠ 资源/背包版本 v10：任务只发**通用经验书**（设计稿 §3）
+    const before = save.items.expBookSmall
     const res = applyAction(save, { type: 'daily.claimTask', taskId: 'd_pull' }, ctx)
     expect(res.ok).toBe(true)
-    expect(save.player.relicStones).toBe(before + 6)
+    expect(save.items.expBookSmall).toBe(before + 2)
     expect(save.daily.taskClaimed).toContain('d_pull')
   })
 
@@ -192,11 +195,11 @@ describe('任务领取：先校验后修改', () => {
     const { ctx } = makeCtx(save)
     completeTask(save, 'd_pull')
     applyAction(save, { type: 'daily.claimTask', taskId: 'd_pull' }, ctx)
-    const afterFirst = save.player.relicStones
+    const afterFirst = save.items.expBookSmall
     const res = applyAction(save, { type: 'daily.claimTask', taskId: 'd_pull' }, ctx)
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.code).toBe(GAME_ERROR_CODES.TASK_ALREADY_CLAIMED)
-    expect(save.player.relicStones).toBe(afterFirst)
+    expect(save.items.expBookSmall).toBe(afterFirst)
   })
 
   it('不存在的任务 → 拒绝', () => {
@@ -210,7 +213,7 @@ describe('任务领取：先校验后修改', () => {
     const { ctx } = makeCtx(save)
     completeTask(save, 'd_pull')
     applyAction(save, { type: 'daily.claimTask', taskId: 'd_pull' }, ctx)
-    const stones = save.player.relicStones
+    const stones = save.items.expBookSmall
 
     // 第二天：进度与领取记录都归位
     const { ctx: ctx2 } = makeCtx(save, NOW + DAY_MS)
@@ -223,7 +226,7 @@ describe('任务领取：先校验后修改', () => {
     applyAction(save, { type: 'gacha.pull', poolId: 'standard', count: 1 }, ctx2)
     const res = applyAction(save, { type: 'daily.claimTask', taskId: 'd_pull' }, ctx2)
     expect(res.ok).toBe(true)
-    expect(save.player.relicStones).toBe(stones + 6)
+    expect(save.items.expBookSmall).toBe(stones + 2)
   })
 
   it('周目标跨周归零后可以重新累计', () => {
@@ -243,7 +246,17 @@ describe('任务奖励口径', () => {
     for (const task of TASKS) {
       const reward = task.rewards as Record<string, unknown>
       for (const key of Object.keys(reward)) {
-        expect(['skillStones', 'relicStones']).toContain(key)
+        // ⚠ 资源/背包版本 v10：只允许通用经验书（副本材料是副本专属，设计稿 §3）
+        expect(['expBooks']).toContain(key)
+      }
+    }
+  })
+
+  it('任务奖励里的经验书只分小书 / 大书两种', () => {
+    for (const task of TASKS) {
+      const books = task.rewards.expBooks ?? {}
+      for (const key of Object.keys(books)) {
+        expect(['small', 'large']).toContain(key)
       }
     }
   })

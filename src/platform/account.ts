@@ -40,6 +40,13 @@ export interface RelicStats {
   total: number
   /** 遗物定义 id → 持有件数 */
   byDefId: Record<string, number>
+  /**
+   * 仓库里的**最高等级**。
+   *
+   * ⚠ 客户端镜像里 `save.relics` 只有**已装备**件（铁律 #8 分包），
+   *   仓库里那件 Lv60 的客户端看不见 → 强化副本的解锁线只能由服务端给。
+   */
+  maxLevel: number
 }
 
 /** 账号信息 */

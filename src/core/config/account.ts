@@ -124,6 +124,22 @@ export function accountSlotKey(accountId: number | string): string {
  */
 export const LEGACY_MIGRATED_FLAG = 'legacyMigrated'
 
+/**
+ * 「首通结晶一次性补发」已处理的账号标记（**服务端**账号标记的键名）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：本版新增「主线首通给结晶」，
+ *   老账号在版本上线前打过的关卡要**补发**一次
+ *   （实现文档 §2「建议按可信服务端通关进度补发本版新增的首通结晶，
+ *   并在同一事务登记」）。
+ *
+ * ⚠ **导入路径排除**：客户端导入的数据**不能**作为历史补偿凭证，
+ *   所以 `save.import` 会把本标记直接置为「已处理」——
+ *   导入档永远拿不到这笔补发（否则一次导入就能凭空刷出几千万结晶）。
+ *
+ * ⚠ 标记与存档**同一事务**写入：崩了重来不会重复发。
+ */
+export const FIRST_CLEAR_COMPENSATED_FLAG = 'firstClearCompensated'
+
 /** 用户名校验；返回中文错误文案，null 表示通过 */
 export function validateUsername(username: string): string | null {
   if (username.length < ACCOUNT.USERNAME_MIN) return `用户名至少 ${ACCOUNT.USERNAME_MIN} 位`

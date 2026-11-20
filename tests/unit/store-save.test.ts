@@ -13,7 +13,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { BATTLE, REBIRTH } from '../../src/core/config/economy.ts'
+import { BATTLE, GACHA, REBIRTH, START_RESOURCES } from '../../src/core/config/economy.ts'
 import { getStage } from '../../src/core/config/stages.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
 import { startServerHarness, type ServerHarness } from './helpers/server-harness.ts'
@@ -87,17 +87,19 @@ describe('服务端权威：载入', () => {
     const store = await registerAndLoad('saver')
     expect(store.loaded).toBe(true)
     expect(store.offline).toBe(false)
-    expect(store.save.player.crystals).toBe(3000)
+    expect(store.save.player.crystals).toBe(START_RESOURCES.crystals)
     // 本地缓存里也有同一份（首屏加速用）
     expect(cachedSlot()).not.toBe('')
-    expect((cached() as { player?: { crystals: number } }).player?.crystals).toBe(3000)
+    expect((cached() as { player?: { crystals: number } }).player?.crystals).toBe(
+      START_RESOURCES.crystals,
+    )
   })
 
   it('十连：服务端扣费 + 记录 10 条历史（镜像可见）', async () => {
     const store = await registerAndLoad('saver')
     const summary = await store.pull('standard', 10)
     expect(summary).not.toBeNull()
-    expect(store.save.player.crystals).toBe(0)
+    expect(store.save.player.crystals).toBe(START_RESOURCES.crystals - GACHA.COST_SINGLE * 10)
     expect(store.save.gacha.history).toHaveLength(10)
     expect(store.save.stats.totalPulls).toBe(10)
     expect(store.save.gacha.newbieUsed).toBe(true)
@@ -168,12 +170,14 @@ describe('服务端权威：重置与离线', () => {
   it('重置进度 → 服务端换一份新档（本地缓存也跟着换）', async () => {
     const store = await registerAndLoad('saver')
     await store.pull('standard', 10)
-    expect(store.save.player.crystals).toBe(0)
+    expect(store.save.player.crystals).toBe(START_RESOURCES.crystals - GACHA.COST_SINGLE * 10)
 
     await store.reset()
-    expect(store.save.player.crystals).toBe(3000)
+    expect(store.save.player.crystals).toBe(START_RESOURCES.crystals)
     expect(store.save.gacha.history).toHaveLength(0)
-    expect((cached() as { player?: { crystals: number } }).player?.crystals).toBe(3000)
+    expect((cached() as { player?: { crystals: number } }).player?.crystals).toBe(
+      START_RESOURCES.crystals,
+    )
   })
 
   it('服务端不可达 → 离线只读：动作被拒绝，进度不变', async () => {
@@ -209,7 +213,7 @@ describe('服务端权威：重置与离线', () => {
     await store.load()
     expect(store.offline).toBe(true)
     // 本地缓存里的进度还在（断网也能看到）
-    expect(store.save.player.crystals).toBe(0)
+    expect(store.save.player.crystals).toBe(START_RESOURCES.crystals - GACHA.COST_SINGLE * 10)
     expect(cachedPayload).toBeTruthy()
   })
 })

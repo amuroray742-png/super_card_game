@@ -25,27 +25,35 @@ import { parseArgs } from 'node:util'
 
 import { createNewSave } from '../../src/core/save/schema.ts'
 import { Rng } from '../../src/core/rng.ts'
-import { applyAction, syncRngState, type ActionContext } from '../../src/core/systems/actions.ts'
+import { applyAction, syncRngState, type ActionContext, type IdleActionResult } from '../../src/core/systems/actions.ts'
 import { POOL_NEWBIE } from '../../src/core/config/pools.ts'
 import { buildPveContext, buildTeam } from '../../src/core/systems/derive.ts'
 import { getTeamPower } from '../../src/core/systems/team.ts'
-import { atRealmGate, expToNext, skillLevelCap } from '../../src/core/systems/growth.ts'
+import { atRealmGate, expToNext, realmBreakCost, skillLevelCap } from '../../src/core/systems/growth.ts'
 import { relicUpgradeCost } from '../../src/core/systems/relic.ts'
 import { simulateWinRate } from '../../src/core/systems/battle.ts'
 import { computePower, resolveStats } from '../../src/core/systems/stats.ts'
 import { getStage, STAGES } from '../../src/core/config/stages.ts'
 import { getEnemy } from '../../src/core/config/enemies.ts'
 import { HERO_INDEX } from '../../src/core/config/heroes/index.ts'
+import { ITEM_BY_ELEMENT, type ItemId } from '../../src/core/config/items.ts'
+import { feedBooks, itemsToExp, itemName, materialTotals } from './item-flow.ts'
+import {
+  applyIdleTarget,
+  chooseIdleTarget,
+  resolveDungeonDifficulty,
+} from './dungeon-loop.ts'
 import {
   BATTLE,
   DAILY,
+  EXP_BOOK,
   GACHA,
   IDLE,
   LEVEL,
-  REALMS,
   RELIC,
   SKILL,
   START_RESOURCES,
+  type DungeonDifficultyId,
 } from '../../src/core/config/economy.ts'
 import type { HeroDef, Rarity, SaveData } from '../../src/core/model/types.ts'
 
@@ -186,6 +194,7 @@ function setTeam(save: SaveData, ctx: ActionContext, heroes: HeroDef[]): void {
 // ─────────────────────────── 成长策略 ───────────────────────────
 
 interface SpendReport {
+  /** 投入的经验（经验书折算） */
   expFed: number
   realmBreaks: number
   skillUps: number
@@ -196,9 +205,16 @@ interface SpendReport {
  * 把资源按**固定优先级**花掉（这条优先级就是本脚本对「理性玩家」的建模）。
  *
  * ① 等级：经验只喂「等级最低」的上阵英灵（均衡成长）；
- * ② 境界：卡在境界门槛且印记够 → 立刻突破（经验卡在门槛上是纯浪费）；
+ * ② 境界：卡在境界门槛且银两够 → 立刻突破（经验卡在门槛上是纯浪费）；
  * ③ 遗物强化：已装备遗物**轮转**升级（每件都升几级，而不是把强化石全砸一件）；
- * ④ 技能升级：剩下的术式结晶用于技能。
+ * ④ 技能升级：剩下的五行技能材料用于技能。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：
+ *   - 经验来源从「玩家经验池」变成「背包里的经验书」（主线掉落 + 任务产出），
+ *     喂书走 `feedBooks`（与 `recalibrate.ts` 同一份）；
+ *   - 术式结晶 → **五行技能材料**（按英灵五行取道具 id）；
+ *   - 遗物强化石 → **三档强化石**（按目标等级的档位逐档比对）；
+ *   - 境界突破的印记 → **银两**。
  *
  * ⚠ 银两同时被 ③ 和 ④ 消耗，所以顺序会左右结果——这里固定成「遗物先、技能后」，
  *   因为遗物强化是**立刻可见的乘区**，而技能等级上限受境界压制（新号前期本就升不高）。
@@ -206,16 +222,16 @@ interface SpendReport {
 function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): SpendReport {
   const report: SpendReport = { expFed: 0, realmBreaks: 0, skillUps: 0, relicUps: 0 }
 
-  // ① + ②：喂经验 / 突破境界
+  // ① + ②：喂经验书 / 突破境界
   let guard = 0
-  while (save.player.exp > 0 && guard++ < 5000) {
+  while (guard++ < 5000) {
     const states = teamIds.map((id) => save.heroes[id]).filter((s): s is NonNullable<typeof s> => !!s)
     if (states.length === 0) break
     // 选等级最低的上阵英灵（同级取存经验多的）
     const target = states.sort((a, b) => a.level - b.level || b.exp - a.exp)[0]
 
     if (atRealmGate(target.level)) {
-      // 卡门槛：印记够就突破，不够就别喂（经验卡在门槛上是纯浪费）
+      // 卡门槛：银两够就突破，不够就别喂（经验卡在门槛上是纯浪费）
       const broke = applyAction(save, { type: 'hero.breakRealm', heroId: target.id }, ctx)
       if (broke.ok) {
         report.realmBreaks += 1
@@ -225,19 +241,15 @@ function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): Spe
         .filter((s) => !atRealmGate(s.level))
         .sort((a, b) => a.level - b.level)[0]
       if (!alt) break
-      const need = Math.max(1, expToNext(alt.level) - alt.exp)
-      const amount = Math.min(save.player.exp, need)
-      const fed = applyAction(save, { type: 'hero.feedExp', heroId: alt.id, amount }, ctx)
-      if (!fed.ok) break
-      report.expFed += amount
+      const fed = feedBooks(save, ctx, alt.id)
+      if (!fed.fed) break
+      report.expFed += fed.exp
       continue
     }
 
-    const need = Math.max(1, expToNext(target.level) - target.exp)
-    const amount = Math.min(save.player.exp, need)
-    const fed = applyAction(save, { type: 'hero.feedExp', heroId: target.id, amount }, ctx)
-    if (!fed.ok) break
-    report.expFed += amount
+    const fed = feedBooks(save, ctx, target.id)
+    if (!fed.fed) break
+    report.expFed += fed.exp
   }
 
   // ③ 遗物强化（轮转：每次给「等级最低」的那件升一级）
@@ -256,7 +268,16 @@ function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): Spe
     const relic = candidates[0]
     const cost = relicUpgradeCost(relic.level)
     if (!cost) break
-    if (save.player.silver < cost.silver || save.player.relicStones < cost.stones) break
+    if (save.player.silver < cost.silver) break
+    // ⚠ 强化石**按档位拆分**（`cost.stones` 是 map）：逐档比对背包里的持有量
+    let stoneShort = false
+    for (const [id, n] of Object.entries(cost.stones)) {
+      if ((save.items[id as ItemId] ?? 0) < (n ?? 0)) {
+        stoneShort = true
+        break
+      }
+    }
+    if (stoneShort) break
     const up = applyAction(save, { type: 'relic.upgrade', uid: relic.uid }, ctx)
     if (!up.ok) break
     report.relicUps += 1
@@ -269,9 +290,13 @@ function spendGrowth(save: SaveData, ctx: ActionContext, teamIds: string[]): Spe
     for (const heroId of teamIds) {
       const state = save.heroes[heroId]
       if (!state) continue
+      const element = HERO_INDEX.get(heroId)?.element
+      if (!element) continue
+      // ⚠ 技能材料按**英灵五行**取（唯一口径 `ITEM_BY_ELEMENT`）
+      const materialId = ITEM_BY_ELEMENT[element]
       for (let index = 0; index < state.skillLevels.length; index++) {
         if ((state.skillLevels[index] ?? 0) >= skillLevelCap(state.level)) continue
-        if (save.player.skillStones < SKILL.SKILL_STONES_PER_LEVEL) continue
+        if ((save.items[materialId] ?? 0) < SKILL.MATERIAL_PER_LEVEL) continue
         if (save.player.silver < SKILL.SILVER_PER_LEVEL) continue
         const up = applyAction(save, { type: 'hero.upgradeSkill', heroId, index }, ctx)
         if (up.ok) {
@@ -320,35 +345,47 @@ interface ProfileResult {
     level: number
     power: number
     silver: number
+    /** 经验（经验书折算） */
     exp: number
     relics: number
   }[]
   resources: {
     silver: number
-    exp: number
-    skillStones: number
-    relicStones: number
-    emblems: number
     crystals: number
-    tickets: number
+    /** 经验（经验书折算） */
+    exp: number
+    /** 经验书本数（小 + 大） */
+    expBooks: number
+    /** 五行技能材料合计 */
+    skillMats: number
+    /** 三档强化石合计 */
+    relicStones: number
+    /** 同名英灵碎片合计 */
+    shards: number
   }
   /** 仓库里的遗物件数 */
   relics: number
+  /** 全天累计投入的经验（喂书折算） */
+  expFed: number
   /** 材料缺口（想继续变强还差什么） */
   gaps: {
+    /** 升到下一级还差多少经验 */
     expToNextLevel: number
-    skillStonesShort: number
-    relicStonesShort: number
-    emblemShort: number
+    /** 技能升满还差多少五行技能材料（按道具 id 分列） */
+    skillMatShort: Record<string, number>
+    /** 遗物再升 10 级还差多少强化石（按道具 id 分列） */
+    relicStoneShort: Record<string, number>
+    /** 突破境界还差多少银两 */
+    silverShort: number
     powerShort: number
   }
   /** 每小时产出（回退刷取的产出速率） */
   perHour: {
     silver: number
     exp: number
-    skillStones: number
+    skillMats: number
     relicStones: number
-    emblems: number
+    shards: number
     relics: number
   }
   /**
@@ -369,10 +406,8 @@ interface AccountResult {
   pull: {
     rarity: Record<Rarity, number>
     crystalsUsed: number
-    ticketsUsed: number
     guaranteed: boolean
     crystalsLeft: number
-    ticketsLeft: number
   }
   profiles: ProfileResult[]
   /** 抽卡资源来源（圣杯结晶从哪来） */
@@ -395,8 +430,21 @@ interface AccountResult {
  *   真实玩家每天都会上线，所以模拟也必须每天上线一次——
  *   走真实的「心跳计量离线段 → 心跳让租约生效（归零）→ 领奖」序列
  *   （与 tools/balance/recalibrate.ts 同口径）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：返回本段的**产出**（真实回放奖励包）——
+ *   经验改由经验书承载，而书会被喂光，所以「余额差值」测不出产出速率，
+ *   「回退刷取下一级」这个指标必须用**产出**来算。
  */
-function advanceIdle(save: SaveData, ctx: ActionContext, hours: number): void {
+function advanceIdle(
+  save: SaveData,
+  ctx: ActionContext,
+  hours: number,
+): {
+  exp: number
+  silver: number
+  materials: { skillMats: number; relicStones: number }
+  run: IdleActionResult | null
+} {
   const ms = Math.round(hours * HOUR_MS)
   // ① 先把「现在」推过去，再让心跳计量这一段离线时长
   //    （租约已过期 → 走离线曲线，不吃 3 倍在线倍率）
@@ -407,16 +455,46 @@ function advanceIdle(save: SaveData, ctx: ActionContext, hours: number): void {
   applyAction(save, { type: 'idle.heartbeat' }, ctx)
   // ③ 领奖：回放服务端已累计的场次（客户端只是上限）
   const battles = Math.floor(ms / 1000 / BATTLE.SECONDS_PER_BATTLE)
-  applyAction(save, { type: 'idle.tick', battles: Math.max(1, battles) }, ctx)
+  const tick = applyAction(save, { type: 'idle.tick', battles: Math.max(1, battles) }, ctx)
+  const run = tick.ok ? tick.result : null
+  const rewards = run?.rewards
+  return {
+    exp: itemsToExp(rewards?.items),
+    silver: rewards?.silver ?? 0,
+    /**
+     * 本段的**材料产出**（五行技能材料 / 三档强化石）。
+     *
+     * ⚠ 必须用**产出**而不是余额差：材料到账就会被养成动作吃掉，
+     *   余额差会把这部分产出抹掉（经验维度早就踩过这个坑）。
+     *   材料只在**挂机去向切到副本**的那些小时里才有流入。
+     */
+    materials: materialTotals(rewards?.items),
+    run,
+  }
 }
 
+/**
+ * 资源快照。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：钱包只剩银两与圣杯结晶；
+ *   经验 / 术式结晶 / 遗物强化石 / 印记 / 抽卡券全部退役，
+ *   前三者改由**背包堆叠物**（`save.items`）承载，经验按**经验书折算**。
+ */
 function snapshotResources(save: SaveData) {
+  const materials = materialTotals(save.items)
   return {
     silver: save.player.silver,
-    exp: save.player.exp,
-    skillStones: save.player.skillStones,
-    relicStones: save.player.relicStones,
-    emblems: save.player.emblems,
+    crystals: save.player.crystals,
+    /** 经验（经验书折算） */
+    exp: itemsToExp(save.items),
+    /** 经验书本数 */
+    expBooks: (save.items[EXP_BOOK.small.id] ?? 0) + (save.items[EXP_BOOK.large.id] ?? 0),
+    /** 五行技能材料合计 */
+    skillMats: materials.skillMats,
+    /** 三档强化石合计 */
+    relicStones: materials.relicStones,
+    /** 同名英灵碎片合计 */
+    shards: Object.values(save.player.shards).reduce((a, b) => a + b, 0),
     relics: save.relics.length,
   }
 }
@@ -432,34 +510,55 @@ function computeGaps(
   const lowest = [...states].sort((a, b) => a.level - b.level)[0]
   const expToNextLevel = lowest ? Math.max(0, expToNext(lowest.level) - lowest.exp) : 0
 
-  // 技能升满（受境界上限约束）还差多少术式结晶
-  let skillShort = 0
+  // 技能升满（受境界上限约束）还差多少**五行技能材料**（按英灵五行分列）
+  const skillShort: Record<string, number> = {}
   for (const state of states) {
+    const element = HERO_INDEX.get(state.id)?.element
+    if (!element) continue
+    const materialId = ITEM_BY_ELEMENT[element]
     const cap = skillLevelCap(state.level)
+    let need = 0
     for (let i = 0; i < state.skillLevels.length; i++) {
-      skillShort += Math.max(0, cap - (state.skillLevels[i] ?? 0)) * SKILL.SKILL_STONES_PER_LEVEL
+      need += Math.max(0, cap - (state.skillLevels[i] ?? 0)) * SKILL.MATERIAL_PER_LEVEL
     }
+    skillShort[materialId] = (skillShort[materialId] ?? 0) + need
   }
 
-  // 遗物再升 10 级还差多少强化石
-  const relicShort = Math.max(0, 10 * RELIC.STONES_PER_LEVEL - save.player.relicStones)
+  // 遗物再升 10 级还差多少**强化石**（按档位分列：逐级价格随档位变化）
+  const relicShort: Record<string, number> = {}
+  {
+    const equipped = Object.values(save.equipped)
+      .map((e) => save.relics.find((r) => r.uid === e.relicId))
+      .filter((r): r is NonNullable<typeof r> => !!r)
+    const cheapest = equipped.length > 0
+      ? Math.min(...equipped.map((r) => r.level))
+      : RELIC.MIN_LEVEL
+    for (let l = cheapest; l < cheapest + 10; l++) {
+      const cost = relicUpgradeCost(l)
+      if (!cost) break
+      for (const [id, n] of Object.entries(cost.stones)) {
+        relicShort[id] = (relicShort[id] ?? 0) + (n ?? 0)
+      }
+    }
+  }
+  // 缺口 = 需要 - 持有（逐档）
+  for (const [id, need] of Object.entries(relicShort)) {
+    relicShort[id] = Math.max(0, need - (save.items[id as ItemId] ?? 0))
+  }
 
-  // 突破境界的印记缺口
+  // 突破境界的**银两**缺口（印记已退役，突破改扣银两）
   const gated = states.find((s) => atRealmGate(s.level))
-  const emblemShort = gated ? (REALM_BREAK_EMBLEMS - save.player.emblems) : 0
+  const breakCost = gated ? realmBreakCost(gated.level) : null
+  const silverShort = breakCost ? Math.max(0, breakCost.silver - save.player.silver) : 0
 
   return {
     expToNextLevel,
-    skillStonesShort: Math.max(0, skillShort - save.player.skillStones),
-    relicStonesShort: relicShort,
-    emblemShort: Math.max(0, emblemShort),
+    skillMatShort: skillShort,
+    relicStoneShort: relicShort,
+    silverShort,
     powerShort: Math.max(0, bossPowerRequired - power),
   }
 }
-
-/** 第一个境界突破需要的印记（取配置，不写死） */
-const REALM_BREAK_EMBLEMS =
-  REALMS.find((r) => r.id === 'famed')?.breakCost?.emblems ?? 10
 
 /** 模拟一个新号在某个阵容下的第一天 */
 function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResult {
@@ -486,13 +585,46 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
   const chunks = Math.ceil(DAY_HOURS / CHUNK_HOURS)
   let chunkBefore = snapshotResources(save)
   let chunkAfter = chunkBefore
+  /** 最后一段的**真实产出**（经验书 / 材料的到账速率） */
+  let lastProduced = { exp: 0, silver: 0, materials: { skillMats: 0, relicStones: 0 } }
+  /** 全天累计投入的经验（喂书折算） */
+  let totalExpFed = 0
+  /** 副本难度（自适应状态；口径与 recalibrate.ts 共用，铁律 #4） */
+  let dungeonDifficulty: DungeonDifficultyId = 'easy'
   for (let c = 0; c < chunks; c++) {
-    advanceIdle(save, ctx, CHUNK_HOURS)
+    // ── 选本段（1 小时）的挂机去向 ──
+    //
+    // ⚠ **必须在「这段挂机时间开始之前」选**：去向是存档状态，
+    //   它决定了这段离线期归谁（切换时服务端先按**旧去向**结清，设计稿 §3）。
+    //
+    // ⚠ 段内**不能**重复套用离线曲线：本脚本每段都走「心跳 ×2」（每小时上线一次），
+    //   租约每段生效一次 → 离线累计每段归零 → 每段都拿到 f(该段时长) 的满额，
+    //   这正是「每小时上线一次」的口径（与 recalibrate 的「每天一次」不同，
+    //   两者相差 9 倍，见 economy.ts 的 IDLE 注释）。
+    const plan = chooseIdleTarget(
+      save,
+      ctx,
+      teamIds,
+      dungeonDifficulty,
+      Math.floor((CHUNK_HOURS * 3600) / BATTLE.SECONDS_PER_BATTLE),
+    )
+    applyIdleTarget(save, ctx, plan)
+    const produced = advanceIdle(save, ctx, CHUNK_HOURS)
+    lastProduced = produced
+    // 副本难度自适应：战败降一档，没战败按当前战力往上走
+    dungeonDifficulty = resolveDungeonDifficulty(
+      save,
+      ctx,
+      produced.run?.dungeon?.blockedAtBattle != null && plan.kind !== 'campaign'
+        ? (plan.difficulty ?? null)
+        : null,
+    )
     // 首轮之后先把遗物穿上（推荐装备与服务端执行同一函数 → 预览 = 执行）
     if (c === 0) {
       for (const heroId of teamIds) applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
     }
     const spend = spendGrowth(save, ctx, teamIds)
+    totalExpFed += spend.expFed
     if (spend.realmBreaks > 0 && firstRealmBreakHour === null) {
       firstRealmBreakHour = (c + 1) * CHUNK_HOURS
     }
@@ -504,7 +636,8 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
       level: levelNow,
       power: getTeamPower(buildTeam(save), buildPveContext(save)),
       silver: save.player.silver,
-      exp: save.player.exp,
+      /** 经验（经验书折算） */
+      exp: itemsToExp(save.items),
       relics: save.relics.length,
     })
     chunkBefore = chunkAfter
@@ -512,20 +645,20 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
   }
 
   // 每小时产出（用**最后一段**的速率，代表卡关后的实际回退刷取速度）
+  //
+  // ⚠ 经验用**产出**而不是余额差：经验书会被喂光，余额差恒为 0，
+  //   而「回退刷取下一级」要的是**到账速率**。
   const chunkDelta = {
     silver: chunkAfter.silver - chunkBefore.silver,
-    exp: chunkAfter.exp - chunkBefore.exp,
-    skillStones: chunkAfter.skillStones - chunkBefore.skillStones,
-    relicStones: chunkAfter.relicStones - chunkBefore.relicStones,
-    emblems: chunkAfter.emblems - chunkBefore.emblems,
+    shards: chunkAfter.shards - chunkBefore.shards,
     relics: chunkAfter.relics - chunkBefore.relics,
   }
   const perHour = {
     silver: Math.round(chunkDelta.silver / CHUNK_HOURS),
-    exp: Math.round(chunkDelta.exp / CHUNK_HOURS),
-    skillStones: Math.round(chunkDelta.skillStones / CHUNK_HOURS),
-    relicStones: Math.round(chunkDelta.relicStones / CHUNK_HOURS),
-    emblems: Math.round(chunkDelta.emblems / CHUNK_HOURS),
+    exp: Math.round(lastProduced.exp / CHUNK_HOURS),
+    skillMats: Math.round(lastProduced.materials.skillMats / CHUNK_HOURS),
+    relicStones: Math.round(lastProduced.materials.relicStones / CHUNK_HOURS),
+    shards: Math.round(chunkDelta.shards / CHUNK_HOURS),
     relics: Math.round(chunkDelta.relics / CHUNK_HOURS),
   }
 
@@ -594,14 +727,17 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
     curve,
     resources: {
       silver: save.player.silver,
-      exp: save.player.exp,
-      skillStones: save.player.skillStones,
-      relicStones: save.player.relicStones,
-      emblems: save.player.emblems,
       crystals: save.player.crystals,
-      tickets: save.player.tickets,
+      /** 经验（经验书折算） */
+      exp: itemsToExp(save.items),
+      expBooks: (save.items[EXP_BOOK.small.id] ?? 0) + (save.items[EXP_BOOK.large.id] ?? 0),
+      skillMats: materialTotals(save.items).skillMats,
+      relicStones: materialTotals(save.items).relicStones,
+      shards: Object.values(save.player.shards).reduce((a, b) => a + b, 0),
     },
     relics: save.relics.length,
+    /** 全天累计投入的经验（喂书折算） */
+    expFed: totalExpFed,
     gaps: computeGaps(save, teamIds, power, bossStage.powerRequired),
     perHour,
     farmToNextLevelHours,
@@ -635,8 +771,7 @@ for (let a = 0; a < SEED_COUNT; a++) {
       `　新手保底${pull.result.guaranteedTriggered ? '**替换**了末张' : '未替换（自然已出 SSR）'}`,
   )
   console.log(
-    `  扣费：圣杯结晶 ${num(pull.result.crystalsUsed)}（余 ${num(template.player.crystals)}）` +
-      `　抽卡券 ${num(pull.result.ticketsUsed)}（余 ${num(template.player.tickets)}）`,
+    `  扣费：圣杯结晶 ${num(pull.result.crystalsUsed)}（余 ${num(template.player.crystals)}）`,
   )
 
   const profiles: ProfileResult[] = []
@@ -659,10 +794,8 @@ for (let a = 0; a < SEED_COUNT; a++) {
     pull: {
       rarity,
       crystalsUsed: pull.result.crystalsUsed,
-      ticketsUsed: pull.result.ticketsUsed,
       guaranteed: pull.result.guaranteedTriggered,
       crystalsLeft: template.player.crystals,
-      ticketsLeft: template.player.tickets,
     },
     profiles,
     gachaIncome: {
@@ -681,8 +814,8 @@ console.log('\n' + '-'.repeat(78))
 console.log('【逐阵容汇总】')
 console.log(
   '  阵容'.padEnd(20) + 'BOSS胜率'.padEnd(10) + '卡关'.padEnd(8) +
-    '破境界'.padEnd(10) + '印记'.padEnd(8) + '仓库'.padEnd(8) +
-    '每h银两'.padEnd(12) + '每h印记'.padEnd(10) + '回退刷取下一级',
+    '破境界'.padEnd(10) + '投入经验'.padEnd(12) + '仓库'.padEnd(8) +
+    '每h银两'.padEnd(12) + '每h经验'.padStart(12) + '回退刷取下一级',
 )
 for (const account of accounts) {
   for (const p of account.profiles) {
@@ -691,22 +824,22 @@ for (const account of accounts) {
         `${pct(p.bossWinRate).padEnd(10)}` +
         `${String(p.blockedAtStage ?? '-').padEnd(8)}` +
         `${(p.firstRealmBreakHour !== null ? `${p.firstRealmBreakHour}h` : '未达成').padEnd(10)}` +
-        `${String(p.resources.emblems).padEnd(8)}` +
+        `${num(p.expFed).padEnd(12)}` +
         `${String(p.relics).padEnd(8)}` +
         `${num(p.perHour.silver).padEnd(12)}` +
-        `${String(p.perHour.emblems).padEnd(10)}` +
+        `${num(p.perHour.exp).padStart(12)} ` +
         `${Number.isFinite(p.farmToNextLevelHours) ? `${p.farmToNextLevelHours.toFixed(1)} 小时` : '—'}`,
     )
   }
 }
 
-console.log('\n【第一天成长曲线】每小时推进到哪里（关卡 / 等级 / 战力 / 银两 / 仓库）')
+console.log('\n【第一天成长曲线】每小时推进到哪里（关卡 / 等级 / 战力 / 银两 / 经验书 / 仓库）')
 for (const account of accounts) {
   for (const p of account.profiles) {
     console.log(`  ── ${p.label}（账号 seed=${account.seed}）`)
     console.log(
       '     小时'.padEnd(9) + '通关关卡'.padEnd(11) + '等级'.padEnd(8) +
-        '战力'.padEnd(14) + '银两'.padEnd(14) + '经验池'.padEnd(14) + '仓库',
+        '战力'.padEnd(14) + '银两'.padEnd(14) + '经验'.padEnd(14) + '仓库',
     )
     for (const row of p.curve) {
       console.log(
@@ -725,12 +858,21 @@ for (const account of accounts) {
 console.log('\n【材料缺口】（想继续变强还差什么）')
 for (const account of accounts) {
   for (const p of account.profiles) {
+    // ⚠ 五行技能材料 / 三档强化石**按道具 id 分列**（新模型的材料是分档的）
+    const skillShort = Object.entries(p.gaps.skillMatShort)
+      .filter(([, n]) => n > 0)
+      .map(([id, n]) => `${itemName(id as ItemId)} ${num(n)}`)
+      .join(' / ') || '—'
+    const stoneShort = Object.entries(p.gaps.relicStoneShort)
+      .filter(([, n]) => n > 0)
+      .map(([id, n]) => `${itemName(id as ItemId)} ${num(n)}`)
+      .join(' / ') || '—'
     console.log(
       `  ${p.label.padEnd(18)}` +
         `经验 ${num(p.gaps.expToNextLevel).padEnd(12)}` +
-        `术式结晶 ${num(p.gaps.skillStonesShort).padEnd(12)}` +
-        `强化石 ${num(p.gaps.relicStonesShort).padEnd(10)}` +
-        `印记 ${num(p.gaps.emblemShort).padEnd(8)}` +
+        `技能材料 ${skillShort.padEnd(30)}` +
+        `强化石 ${stoneShort.padEnd(24)}` +
+        `突破银两 ${num(p.gaps.silverShort).padEnd(10)}` +
         `战力 ${num(p.gaps.powerShort)}`,
     )
   }
@@ -738,7 +880,7 @@ for (const account of accounts) {
 
 console.log('\n【抽卡资源来源】')
 const sample = accounts[0]
-console.log(`  首抽后余额：圣杯结晶 ${num(sample.pull.crystalsLeft)}　抽卡券 ${num(sample.pull.ticketsLeft)}`)
+console.log(`  首抽后余额：圣杯结晶 ${num(sample.pull.crystalsLeft)}`)
 console.log('  推征掉落里**没有**圣杯结晶 → 结晶只来自签到与兑换码')
 console.log(
   `  签到 ${DAILY.SIGN_IN_CYCLE} 天循环共 ${num(sample.gachaIncome.signInPerCycle)} 结晶` +
@@ -746,7 +888,9 @@ console.log(
     `　下一个十连（${num(GACHA.COST_SINGLE * GACHA.TEN_PULL_COUNT)} 结晶）需签到约 ${sample.gachaIncome.daysForNextTenPull} 天`,
 )
 console.log(
-  `  新号自带 ${num(START_RESOURCES.tickets)} 张券 = 恰好一个十连（每抽 ${GACHA.TICKET_PER_PULL} 张）`,
+  `  新号自带 ${num(START_RESOURCES.crystals)} 结晶 = 恰好 ` +
+    `${num(Math.floor(START_RESOURCES.crystals / GACHA.COST_SINGLE))} 抽` +
+    `（每抽 ${num(GACHA.COST_SINGLE)} 结晶）`,
 )
 
 if (OUT_PATH) {

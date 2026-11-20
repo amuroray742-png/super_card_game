@@ -20,6 +20,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from './stores/game'
 import { useAccountStore } from './stores/account'
 import { formatNumber } from './utils/format'
+import { rewardLines } from './utils/reward-text'
+import { richParts } from '../content/compliance/index.ts'
 
 const store = useGameStore()
 const account = useAccountStore()
@@ -31,7 +33,10 @@ const TABS = [
   { key: 'expedition', label: '推征', icon: '⚔', to: '/expedition' },
   { key: 'temple', label: '圣殿', icon: '◈', to: '/temple' },
   { key: 'formation', label: '阵位', icon: '❖', to: '/formation' },
-  { key: 'forge', label: '铸造', icon: '⚒', to: '/forge' },
+  // ⚠ **实施修正（资源/背包版本 v10）**：「铸造」升级为「背包」。
+  //   路径与路由名 `forge` 全部保留（E2E / 截图工具 / 任务跳转都不用改），
+  //   列数仍是 5 → 360px 窄机型零回归。
+  { key: 'forge', label: '背包', icon: '⚒', to: '/forge' },
   { key: 'legacy', label: '传承', icon: '✧', to: '/legacy' },
 ]
 
@@ -72,6 +77,15 @@ const activeDesc = computed(() =>
 )
 
 /**
+ * 资源说明拆成粗体 / 普通片段。
+ *
+ * ⚠ 资源描述里也用了 `**…**` 强调（与合规页同一套写法），
+ *   而本弹窗是**纯文本插值** → 不解析的话星号会原样印在玩家眼前。
+ *   统一走合规页那份 `richParts`（唯一口径，不用 v-html）。
+ */
+const activeDescParts = computed(() => richParts(activeDesc.value))
+
+/**
  * 点「前往召唤」。
  *
  * 抽卡是核心循环，入口必须在任意页面一键可达（铁律 #10）——
@@ -82,18 +96,10 @@ function goGacha() {
   router.push('/gacha')
 }
 
-const offlineRewards = computed(() => {
-  const r = store.offlineReport?.rewards
-  if (!r) return []
-  return [
-    { label: '银两', value: r.silver ?? 0 },
-    { label: '经验', value: r.exp ?? 0 },
-    { label: '术式结晶', value: r.skillStones ?? 0 },
-    { label: '强化石', value: r.relicStones ?? 0 },
-    { label: '英灵印记', value: r.emblems ?? 0 },
-    { label: '遗物', value: r.relics?.length ?? 0 },
-  ].filter((x) => x.value > 0)
-})
+// ⚠ 结算明细的名称一律取登记表（铁律 #8：禁止就地写中文名）。
+//   旧实现在这里硬编码「银两 / 经验 / 术式结晶 / 强化石 / 英灵印记」，
+//   与背包 / 登记表对不上——现已改为通用聚合（`rewardLines`）。
+const offlineRewards = computed(() => rewardLines(store.offlineReport?.rewards))
 const offlineBlockedStage = computed(() => STAGE_INDEX.get(store.offlineReport?.blockedAtStage ?? 0))
 
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
@@ -213,7 +219,12 @@ function goBackBare() {
             <img class="res-info-icon" :src="resourceIconPath(activeResource)" :alt="activeDef.name" />
             <b>{{ formatNumber(activeValue) }}</b>
           </div>
-          <p class="tiny muted" style="margin: 8px 0 0; line-height: 1.8">{{ activeDesc }}</p>
+          <p class="tiny muted" style="margin: 8px 0 0; line-height: 1.8">
+            <template v-for="(part, i) in activeDescParts" :key="i">
+              <b v-if="part.bold">{{ part.text }}</b>
+              <template v-else>{{ part.text }}</template>
+            </template>
+          </p>
           <button
             v-if="activeDef.gachaEntry"
             class="btn btn-primary btn-block"

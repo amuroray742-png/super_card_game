@@ -105,7 +105,7 @@ function tierProgress(min: number): number {
         竞技等级决定可用的战术铭文槽位数量，不直接提供属性加成。
       </p>
       <p class="tiny muted" style="margin: 4px 0 0">
-        天梯段位分由**三队天梯**累计（每周一轮），与对战分互不换算（§9.2）。
+        天梯段位分由<b>三队天梯</b>累计（每周一轮），与对战分互不换算（§9.2）。
       </p>
     </section>
 

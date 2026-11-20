@@ -43,12 +43,12 @@ const vars = computed(() => ({
   softPityStart: store.rates.softPityStart,
   pityRemaining: store.rates.pityRemaining,
   tenPullFloor: GACHA.TEN_PULL_FLOOR,
-  dupSsr: GACHA.DUPLICATE_EMBLEM.SSR,
-  dupSr: GACHA.DUPLICATE_EMBLEM.SR,
-  dupR: GACHA.DUPLICATE_EMBLEM.R,
-  dupN: GACHA.DUPLICATE_EMBLEM.N,
-  ssrShards: GACHA.DUPLICATE_SSR_SHARDS,
-  nSilver: GACHA.DUPLICATE_N_SILVER,
+  // ⚠ **实施修正（资源/背包版本 v10）**：重复卡**只给同名碎片**，全稀有度适用
+  //   （设计稿 §2）。英灵印记与「N 卡重复给银两」两条旧路径已退役。
+  dupSsr: GACHA.DUPLICATE_SHARDS.SSR,
+  dupSr: GACHA.DUPLICATE_SHARDS.SR,
+  dupR: GACHA.DUPLICATE_SHARDS.R,
+  dupN: GACHA.DUPLICATE_SHARDS.N,
   contactEmail: CONTACT.email || CONTACT.missing,
   replyTime: CONTACT.replyTime,
 }))

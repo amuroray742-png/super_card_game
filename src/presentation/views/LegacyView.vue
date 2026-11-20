@@ -134,7 +134,7 @@ async function redeem() {
       </div>
       <div class="row-between tiny" style="margin-top: 4px">
         <span class="muted">保留</span>
-        <span>英灵本体 · 英灵印记 · 同名碎片 · 图鉴 · 段位</span>
+        <span>英灵本体 · 同名碎片 · 背包道具 · 图鉴 · 段位</span>
       </div>
       <div class="row-between tiny" style="margin-top: 4px">
         <span class="muted">累计</span>

@@ -7,6 +7,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { RELIC } from '../../core/config/economy.ts'
+import { ITEM_DEFS, type ItemId } from '../../core/config/items.ts'
 import { RELIC_DEFS, RELIC_SETS, decomposeValue, getRelicMods, relicUpgradeCost } from '../../core/systems/relic.ts'
 import { formatNumber } from '../utils/format'
 import { relicTemperRuleHint } from '../utils/relic-hint.ts'
@@ -68,6 +69,19 @@ const subMods = computed<StatMod[]>(() => relic.value?.subStats ?? [])
 
 /** 强化消耗 */
 const cost = computed(() => (relic.value ? relicUpgradeCost(relic.value.level) : null))
+
+/**
+ * 强化石消耗文案（**按档位**）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：强化石分三档，档位由「目标等级」决定。
+ *   名称取 `ITEM_DEFS`（铁律 #8）。
+ */
+const stoneCostText = computed(() => {
+  const stones = cost.value?.stones ?? {}
+  return Object.entries(stones)
+    .map(([id, n]) => `${ITEM_DEFS[id as ItemId]?.name ?? id} ${n}`)
+    .join(' · ')
+})
 
 /**
  * 淬炼段规则提示（Lv60 以上价格递增、收益递减）。
@@ -193,13 +207,13 @@ function decompose() {
         <div class="panel-title"><span>养成</span></div>
         <div v-if="cost" class="row-between tiny">
           <span class="muted">下一级消耗</span>
-          <b>银两 {{ formatNumber(cost.silver) }} · 强化石 {{ cost.stones }}</b>
+          <b>银两 {{ formatNumber(cost.silver) }} · {{ stoneCostText }}</b>
         </div>
         <div v-else class="tiny muted">已达最高强化等级。</div>
         <div v-if="temperHint" class="tiny muted" style="margin-top: 4px">{{ temperHint }}</div>
         <div v-if="back" class="row-between tiny" style="margin-top: 4px">
           <span class="muted">分解返还</span>
-          <b>银两 {{ formatNumber(back.silver) }} · 强化石 {{ back.stones }}</b>
+          <b>银两 {{ formatNumber(back.silver) }}</b>
         </div>
         <div class="row" style="margin-top: 10px; gap: 6px">
           <button class="btn btn-sm btn-primary" style="flex: 1" :disabled="!cost" @click="upgrade">
@@ -217,10 +231,10 @@ function decompose() {
       <div class="dialog">
         <div class="panel-title">分解确认</div>
         <p class="tiny muted" style="margin: 0 0 10px">
-          分解后该遗物将被移除，装备于英灵身上的对应槽位会同时清空，返还银两与强化石。
+          分解后该遗物将被移除，装备于英灵身上的对应槽位会同时清空，返还银两（不返还副本材料）。
         </p>
         <div v-if="back" class="tiny" style="margin-bottom: 10px">
-          预计返还：银两 {{ formatNumber(back.silver) }} · 强化石 {{ back.stones }}
+          预计返还：银两 {{ formatNumber(back.silver) }}
         </div>
         <div class="row" style="gap: 8px">
           <button class="btn btn-sm" style="flex: 1" @click="confirmOpen = false">取消</button>

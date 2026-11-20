@@ -4,6 +4,7 @@ import {
   E2E_PASSWORD,
   accessTokenOf,
   cachedSaveOf,
+  expOfRewards,
   loginAccount,
   postAction,
   registerAccount,
@@ -17,6 +18,14 @@ import { createNewSave } from '../../src/core/save/schema.ts'
 import { exportSave } from '../../src/core/save/serialize.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
 import { getStage } from '../../src/core/config/stages.ts'
+import { GACHA, START_RESOURCES } from '../../src/core/config/economy.ts'
+
+/**
+ * 新号起始结晶（口径取 core，**不写死数字**——铁律 #4）。
+ */
+const START_CRYSTALS = START_RESOURCES.crystals
+/** 十连的结晶消耗（= 10 抽 × 单抽价） */
+const TEN_PULL_CRYSTALS = GACHA.COST_SINGLE * GACHA.TEN_PULL_COUNT
 
 /**
  * 服务端权威端到端用例（AGENTS.md 铁律 #28 / #29）。
@@ -69,7 +78,8 @@ test.describe('服务端权威', () => {
     await page.waitForLoadState('networkidle')
 
     const before = await cachedSaveOf(page, session.user.id)
-    expect(before?.player?.crystals).toBe(3000)
+    // ⚠ 资源/背包版本 v10：新号起始结晶 6,000（＝ 20 抽），钱包只有银两 + 圣杯结晶。
+    expect(before?.player?.crystals).toBe(START_CRYSTALS)
 
     // 篡改本地缓存（模拟玩家手动改 / 另一个标签页写坏）
     await page.evaluate((key) => {
@@ -82,7 +92,7 @@ test.describe('服务端权威', () => {
     await page.reload()
     await page.waitForLoadState('networkidle')
     const after = await cachedSaveOf(page, session.user.id)
-    expect(after?.player?.crystals).toBe(3000)
+    expect(after?.player?.crystals).toBe(START_CRYSTALS)
   })
 
   test('同一个 actionId 重放只扣一次费（断网重试的安全网）', async () => {
@@ -91,7 +101,7 @@ test.describe('服务端权威', () => {
     await postAction(token, 'create-1', { type: 'save.create' })
 
     const before = await pullSave(token)
-    expect((before as unknown as { player: { crystals: number } }).player.crystals).toBe(3000)
+    expect((before as unknown as { player: { crystals: number } }).player.crystals).toBe(START_CRYSTALS)
 
     const first = await postAction(token, 'pull-1', {
       type: 'gacha.pull',
@@ -110,11 +120,12 @@ test.describe('服务端权威', () => {
     expect(second.result).toEqual(first.result)
 
     const after = await pullSave(token) as unknown as {
-      player: { crystals: number; tickets: number }
+      player: { crystals: number }
       stats: { totalPulls: number }
+      shards?: Record<string, number>
     }
-    expect(after.player.crystals).toBe(0)
-    expect(after.player.tickets).toBe(10)
+    // 十连只扣一次结晶（10 抽 × 300 = 3,000）
+    expect(after.player.crystals).toBe(START_CRYSTALS - TEN_PULL_CRYSTALS)
     expect(after.stats.totalPulls).toBe(10)
   })
 })
@@ -229,6 +240,9 @@ test.describe('离线只读', () => {
 })
 
 test('挑战 BOSS 战败后页面显示刷取关卡，后续推征继续发放战利品', async ({ page }) => {
+  // ⚠ 本用例要**真实等挂机时间**（每场 6 秒）才能多刷几场把经验书刷出来
+  //   （经验书是概率掉落，见下面注释）→ 默认 30 秒超时不够，放宽到 90 秒。
+  test.slow()
   const account = await registerAccount(uniqueUsername('farm'))
   const token = await accessTokenOf(account)
   const now = Date.now()
@@ -251,9 +265,21 @@ test('挑战 BOSS 战败后页面显示刷取关卡，后续推征继续发放�
   await settleIdleThroughUi(page, account.user.id, 1)
   await expect(page.getByText('当前挑战受阻')).toBeVisible()
   await expect(page.getByText(`正在刷取「${getStage(61).name}」`, { exact: false })).toBeVisible()
-  const farmed = await settleIdleThroughUi(page, account.user.id, 1)
-  expect(farmed.rewards.exp).toBeGreaterThan(0)
-  expect(farmed.rewards.relics).toHaveLength(1)
+
+  // ⚠ 资源/背包版本 v10：经验改由**经验书**产出（奖励包里没有 exp 字段），
+  //   而经验书是**概率掉落**（每类道具各自独立掷一次骰子，见 `economy.ts` 的 `expBookDrop`）
+  //   → 「一场一定有书」是错的假设（早期章节只有 ~73% 出书率）。
+  //   这里有界重试：累计拿到书为止，而不是断言单场。
+  //   ⚠ 每轮都要**真实等 6 秒**（挂机不创造时间）→ 上限 6 轮 ≈ 36 秒，
+  //   所以本用例用 `test.slow()` 把超时放宽到 90 秒。
+  let farmed = await settleIdleThroughUi(page, account.user.id, 1)
+  let exp = expOfRewards(farmed.rewards)
+  for (let i = 0; i < 5 && exp <= 0; i++) {
+    farmed = await settleIdleThroughUi(page, account.user.id, 1)
+    exp += expOfRewards(farmed.rewards)
+  }
+  expect(exp, '挂机应当产出经验书').toBeGreaterThan(0)
+  expect(farmed.rewards.relics?.length ?? 0).toBeGreaterThanOrEqual(1)
   expect(farmed.reachedStage).toBe(61)
   await expect(page.getByText(getStage(62).name, { exact: true })).toBeVisible()
 })

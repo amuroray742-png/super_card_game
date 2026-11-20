@@ -80,7 +80,7 @@ describe('挂机权威时间账本', () => {
   })
   it('目标最多为已通关的下一关，不能直接跳至末关', () => {
     const { save, ctx } = fixture()
-    expect(applyAction(save, { type: 'idle.setTarget', stageId: 310 }, ctx).ok).toBe(false)
+    expect(applyAction(save, { type: 'idle.setTarget', kind: 'campaign', stageId: 310 }, ctx).ok).toBe(false)
     expect(save.idle.currentStage).toBe(1)
   })
   it('战败不能算通关，通关与下一目标独立', () => {
@@ -130,7 +130,7 @@ describe('挂机权威时间账本', () => {
     split.ctx.now += BATTLE.SECONDS_PER_BATTLE * 1000
     expect(settleIdleLedger(split.save, split.ctx, 1)).toMatchObject({ blockedAtStage: 62 })
     expect(split.save.idle.farm?.winsUntilRetry).toBe(IDLE.FARM_WINS_BEFORE_RETRY)
-    expect(applyAction(split.save, { type: 'idle.setTarget', stageId: 61 }, split.ctx).ok).toBe(true)
+    expect(applyAction(split.save, { type: 'idle.setTarget', kind: 'campaign', stageId: 61 }, split.ctx).ok).toBe(true)
     expect(split.save.idle.farm).toBeUndefined()
   })
   it('频繁领取与一次领取使用相同的线性时间预算', () => {

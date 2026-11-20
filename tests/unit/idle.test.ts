@@ -10,7 +10,23 @@ import {
   OFFLINE_CAP_SECONDS,
 } from '../../src/core/systems/idle.ts'
 import { IDLE } from '../../src/core/config/economy.ts'
+import { EXP_BOOK_ITEM_EXP } from '../../src/core/config/items.ts'
+import type { RewardBundle } from '../../src/core/model/types.ts'
 import { makeHero, maxedHero } from './helpers.ts'
+
+/**
+ * 奖励包里的**经验总量**。
+ *
+ * ⚠ 资源/背包版本 v10：玩家经验池退役 → 经验改由「经验书」产出，
+ *   所以奖励包里没有 `exp` 字段，只有一叠叠经验书（`rewards.items`）。
+ */
+function totalExp(rewards: RewardBundle): number {
+  let sum = 0
+  for (const [id, count] of Object.entries(rewards.items ?? {})) {
+    sum += (EXP_BOOK_ITEM_EXP[id as keyof typeof EXP_BOOK_ITEM_EXP] ?? 0) * (count ?? 0)
+  }
+  return sum
+}
 
 describe('离线收益曲线（§5.7）', () => {
   it('满效率时长内效率为 100%', () => {
@@ -76,13 +92,13 @@ describe('离线结算', () => {
     const team = [maxedHero('xiangyu')]
     const twelve = settleOffline(team, 1, 12 * 3600, 7)
     const forty = settleOffline(team, 1, 40 * 3600, 7)
-    expect(forty.rewards.exp).toBe(twelve.rewards.exp)
+    expect(totalExp(forty.rewards)).toBe(totalExp(twelve.rewards))
   })
 
-  it('离线收益包含经验与银两', () => {
+  it('离线收益包含经验书与银两', () => {
     const team = [maxedHero('xiangyu')]
     const result = settleOffline(team, 1, 2 * 3600, 3)
-    expect(result.rewards.exp).toBeGreaterThan(0)
+    expect(totalExp(result.rewards)).toBeGreaterThan(0)
     expect(result.rewards.silver).toBeGreaterThan(0)
   })
 })

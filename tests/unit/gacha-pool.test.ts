@@ -85,7 +85,7 @@ describe('纪元池抽卡不再崩溃', () => {
       const byRarity = groupByRarity(resolvePoolHeroIds(pool))
       for (let seed = 0; seed < 200; seed++) {
         const outcome = executePull(
-          { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: 999999, tickets: 999999 },
+          { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: 999999 },
           pool,
           10,
           seed,
@@ -102,7 +102,7 @@ describe('纪元池抽卡不再崩溃', () => {
   it('抽卡结果的稀有度都在该池收录范围内', () => {
     const available = (['SSR', 'SR'] as Rarity[])
     const outcome = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: 999999, tickets: 999999 },
+      { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: 999999 },
       POOL_CHINA,
       10,
       42,

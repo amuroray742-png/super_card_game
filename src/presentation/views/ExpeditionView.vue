@@ -1,19 +1,23 @@
 <script setup lang="ts">
 /**
  * 推征（首页）：关卡推进 + 挂机 + 战斗回放。
+ *
+ * ⚠ **挂机去向**（资源/背包版本 v10）：主线 / 技能副本 / 强化副本
+ *   共用**同一份时间账本**，切换时服务端先结清旧去向再换新去向（设计稿 §3）。
  */
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { STAGES, STAGE_INDEX } from '../../core/config/stages.ts'
 import { getEnemy } from '../../core/config/enemies.ts'
-import { DROP_TABLES } from '../../core/config/economy.ts'
+import { DROP_TABLES, RELIC, DUNGEON_DIFFICULTIES, type DungeonDifficultyId, type RelicStoneTierId } from '../../core/config/economy.ts'
 import { runBattle } from '../../core/systems/battle.ts'
 import { buildPveContext } from '../../core/systems/derive.ts'
 import { formatNumber, formatPower } from '../utils/format'
+import { rewardLines } from '../utils/reward-text'
 import BattleCanvas from '../components/BattleCanvas.vue'
 import BattleResultPanel from '../components/BattleResultPanel.vue'
-import type { BattleResult } from '../../core/model/types.ts'
+import type { BattleResult, Element } from '../../core/model/types.ts'
 
 const store = useGameStore()
 const router = useRouter()
@@ -30,6 +34,71 @@ const farmStage = computed(() => STAGE_INDEX.get(farm.value?.stage ?? 0))
 
 /** 当前关卡的掉落表（战后结算展示） */
 const drops = computed(() => DROP_TABLES[stage.value.dropTableId])
+
+// ─────────────────────────── 挂机去向 ───────────────────────────
+
+/** 当前挂机去向（服务端权威镜像） */
+const idleTarget = computed(() => store.save.idle.target)
+
+/** 去向选择器当前编辑的种类（默认跟存档一致） */
+const targetKind = ref<'campaign' | 'skill' | 'enhance'>(idleTarget.value.kind)
+const targetElement = ref<Element>(
+  idleTarget.value.kind === 'skill' ? idleTarget.value.element : '金',
+)
+const targetTier = ref<RelicStoneTierId>(
+  idleTarget.value.kind === 'enhance' ? idleTarget.value.tier : 'relicStoneTier1',
+)
+const targetDifficulty = ref<DungeonDifficultyId>(
+  idleTarget.value.kind === 'campaign' ? 'easy' : idleTarget.value.difficulty,
+)
+
+/** 当前去向下文的显示名 */
+const targetName = computed(() => {
+  const t = idleTarget.value
+  if (t.kind === 'campaign') return '主线'
+  if (t.kind === 'skill') return `技能副本 · ${t.element}`
+  const tier = RELIC.STONE_TIERS.find((x) => x.id === t.tier)
+  return `强化副本 · ${tier?.name ?? t.tier}`
+})
+
+/** 切到别的种类时，把难度拉回合法值 */
+function pickKind(kind: 'campaign' | 'skill' | 'enhance') {
+  targetKind.value = kind
+  if (kind === 'campaign') return
+  if (!DUNGEON_DIFFICULTIES.some((d) => d.id === targetDifficulty.value)) {
+    targetDifficulty.value = 'easy'
+  }
+}
+
+/** 切换挂机去向（服务端先结清旧去向） */
+async function applyTarget() {
+  const kind = targetKind.value
+  const res = await store.setIdleTarget(
+    kind === 'campaign'
+      ? { kind: 'campaign', stageId: stage.value.id }
+      : kind === 'skill'
+        ? { kind: 'skill', element: targetElement.value, difficulty: targetDifficulty.value }
+        : { kind: 'enhance', tier: targetTier.value, difficulty: targetDifficulty.value },
+  )
+  if (res) store.notify('挂机去向已更新', 'ok')
+}
+
+/** 副本战败时给出的「降一档难度」建议 */
+const dungeonBlocked = ref<{ suggest: DungeonDifficultyId } | null>(null)
+
+/** 按建议降一档难度 */
+async function lowerDifficulty() {
+  const suggest = dungeonBlocked.value?.suggest
+  if (!suggest) return
+  targetDifficulty.value = suggest
+  const kind = idleTarget.value.kind
+  if (kind === 'skill') {
+    await store.setIdleTarget({ kind: 'skill', element: idleTarget.value.element, difficulty: suggest })
+  } else if (kind === 'enhance') {
+    await store.setIdleTarget({ kind: 'enhance', tier: idleTarget.value.tier, difficulty: suggest })
+  }
+  dungeonBlocked.value = null
+}
 
 const powerGap = computed(() => {
   const need = stage.value.powerRequired
@@ -85,17 +154,19 @@ async function idle(battles: number) {
       store.notify('当前可用的挂机时间尚不足一场', 'info')
       return
     }
-    const r = res.rewards
-    const parts = [
-      r.silver ? `银两 ${formatNumber(r.silver)}` : '',
-      r.exp ? `经验 ${formatNumber(r.exp)}` : '',
-      r.skillStones ? `术式结晶 ${r.skillStones}` : '',
-      r.relicStones ? `强化石 ${r.relicStones}` : '',
-      r.relics && r.relics.length > 0 ? `遗物 ${r.relics.length}` : '',
-    ].filter(Boolean)
+    // ⚠ 结算明细的名称一律取登记表（铁律 #8：禁止就地写中文名）
+    const parts = rewardLines(res.rewards).map((l) => `${l.label} ${formatNumber(l.value)}`)
     if (res.blockedAtStage !== null) {
       const lost = STAGE_INDEX.get(res.blockedAtStage)?.name
       parts.unshift(`${lost ?? '当前关卡'}战败`)
+    }
+    // 副本战败：给出「降一档难度」的建议（设计稿 §3）
+    const d = res.dungeon
+    if (d && d.blockedAtBattle !== null) {
+      dungeonBlocked.value = d.suggestDifficulty
+        ? { suggest: d.suggestDifficulty as DungeonDifficultyId }
+        : null
+      parts.unshift(`副本第 ${d.blockedAtBattle} 场战败`)
     }
     store.notify(parts.length ? parts.join(' · ') : '推征完成', res.blockedAtStage !== null ? 'warn' : 'ok')
   }
@@ -152,6 +223,100 @@ async function idle(battles: number) {
         <button class="btn btn-sm" style="flex: 1" @click="idle(1)">推征 1 场</button>
         <button class="btn btn-sm" style="flex: 1" @click="idle(10)">推征 10 场</button>
         <button class="btn btn-sm btn-primary" style="flex: 1" @click="fight">观战</button>
+      </div>
+    </section>
+
+    <!-- 挂机去向 -->
+    <section class="panel">
+      <div class="row-between">
+        <div class="tiny muted">挂机去向</div>
+        <b class="tiny" data-testid="idle-target-name">{{ targetName }}</b>
+      </div>
+      <div class="chips">
+        <button
+          class="chip"
+          :class="{ on: targetKind === 'campaign' }"
+          data-testid="idle-target-campaign"
+          @click="pickKind('campaign')"
+        >
+          主线
+        </button>
+        <button
+          class="chip"
+          :class="{ on: targetKind === 'skill' }"
+          data-testid="idle-target-skill"
+          @click="pickKind('skill')"
+        >
+          技能副本
+        </button>
+        <button
+          class="chip"
+          :class="{ on: targetKind === 'enhance' }"
+          data-testid="idle-target-enhance"
+          @click="pickKind('enhance')"
+        >
+          强化副本
+        </button>
+      </div>
+
+      <!-- 技能副本：五行 -->
+      <div v-if="targetKind === 'skill'" class="chips">
+        <button
+          v-for="el in (['金', '木', '水', '火', '土'] as Element[])"
+          :key="el"
+          class="chip"
+          :class="{ on: targetElement === el }"
+          :data-testid="`idle-target-element-${el}`"
+          @click="targetElement = el"
+        >
+          {{ el }}
+        </button>
+      </div>
+
+      <!-- 强化副本：石档 -->
+      <div v-if="targetKind === 'enhance'" class="chips">
+        <button
+          v-for="tier in RELIC.STONE_TIERS"
+          :key="tier.id"
+          class="chip"
+          :class="{ on: targetTier === tier.id }"
+          :data-testid="`idle-target-tier-${tier.id}`"
+          @click="targetTier = tier.id"
+        >
+          {{ tier.name }}
+        </button>
+      </div>
+
+      <!-- 副本难度 -->
+      <div v-if="targetKind !== 'campaign'" class="chips">
+        <button
+          v-for="d in DUNGEON_DIFFICULTIES"
+          :key="d.id"
+          class="chip"
+          :class="{ on: targetDifficulty === d.id }"
+          :data-testid="`idle-target-difficulty-${d.id}`"
+          @click="targetDifficulty = d.id"
+        >
+          {{ d.name }}
+        </button>
+      </div>
+
+      <div class="row" style="gap: 6px; margin-top: 8px">
+        <button class="btn btn-sm btn-primary" style="flex: 1" data-testid="idle-target-apply" @click="applyTarget">
+          切换去向
+        </button>
+        <button class="btn btn-sm btn-ghost" style="flex: 1" @click="router.push('/dungeon')">
+          材料副本 ›
+        </button>
+      </div>
+      <p class="tiny muted" style="margin: 6px 0 0">
+        三个去向共用同一份挂机时间；切换时先按旧去向结清收益，再开始新去向。
+      </p>
+      <div v-if="dungeonBlocked" class="warn-text" style="margin-top: 6px">
+        副本战败：战力不足，建议降到更低难度。
+        <button class="btn btn-sm" style="margin-left: 6px" data-testid="idle-lower-difficulty" @click="lowerDifficulty">
+          降一档难度
+        </button>
       </div>
     </section>
 
@@ -241,8 +406,36 @@ async function idle(battles: number) {
   margin-top: 10px;
 }
 
-.ok-text { color: var(--c-green); }
-.warn-text { color: #e0a06a; }
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.chip {
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--c-line);
+  background: var(--c-bg-2);
+  font-size: 12px;
+  color: var(--c-text-dim);
+  min-height: 28px;
+}
+
+.chip.on {
+  border-color: var(--c-gold);
+  color: var(--c-gold-2);
+  background: #2a2419;
+}
+
+.ok-text {
+  color: var(--c-green);
+}
+
+.warn-text {
+  color: #e0a06a;
+}
 
 .stage-grid {
   display: grid;

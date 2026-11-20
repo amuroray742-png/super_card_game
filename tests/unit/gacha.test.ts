@@ -195,7 +195,7 @@ describe('概率公示同源（合规硬要求）', () => {
 })
 
 describe('重复转化（§7.4 合规要点）', () => {
-  it('重复 SSR 转化为印记 + 同名碎片', () => {
+  it('重复 SSR 转化为同名碎片', () => {
     // 把所有 SSR 都放进「已拥有」：十连必出 SSR（新手保底）→ 必然出现重复 SSR。
     // ⚠ 旧写法靠「固定种子恰好抽出项羽」才成立——随机序列修好后就不再可靠。
     const owned: Record<string, ReturnType<typeof createHeroState>> = {}
@@ -206,33 +206,30 @@ describe('重复转化（§7.4 合规要点）', () => {
       pity: { pitySSR: 0, pity10: 0 },
       owned,
       crystals: 999999,
-      tickets: 0,
     }
     const outcome = executePull(ctx, POOL_STANDARD, 10, 3)
     const dup = outcome.results.find((r) => !r.isNew && r.rarity === 'SSR')
     expect(dup).toBeDefined()
-    expect(dup!.emblems).toBe(GACHA.DUPLICATE_EMBLEM.SSR)
-    expect(dup!.shards).toBe(GACHA.DUPLICATE_SSR_SHARDS)
+    // ⚠ 资源/背包版本 v10：重复卡**只**给同名碎片（印记退役）
+    expect(dup!.shards).toBe(GACHA.DUPLICATE_SHARDS.SSR)
   })
 
-  it('印记数量符合公示表', () => {
-    expect(GACHA.DUPLICATE_EMBLEM.SSR).toBe(50)
-    expect(GACHA.DUPLICATE_EMBLEM.SR).toBe(12)
-    expect(GACHA.DUPLICATE_EMBLEM.R).toBe(3)
-    expect(GACHA.DUPLICATE_EMBLEM.N).toBe(1)
+  it('碎片数量符合公示表（全部稀有度都适用）', () => {
+    expect(GACHA.DUPLICATE_SHARDS.SSR).toBe(30)
+    expect(GACHA.DUPLICATE_SHARDS.SR).toBe(12)
+    expect(GACHA.DUPLICATE_SHARDS.R).toBe(6)
+    expect(GACHA.DUPLICATE_SHARDS.N).toBe(3)
   })
 
-  it('新获得的英灵不产生印记', () => {
+  it('新获得的英灵不产生碎片', () => {
     const ctx = {
       pity: { pitySSR: 0, pity10: 0 },
       owned: {},
       crystals: 999999,
-      tickets: 0,
     }
     const outcome = executePull(ctx, POOL_STANDARD, 10, 11)
     for (const r of outcome.results) {
       if (r.isNew) {
-        expect(r.emblems).toBe(0)
         expect(r.shards).toBe(0)
       }
     }
@@ -243,12 +240,11 @@ describe('重复转化（§7.4 合规要点）', () => {
       pity: { pitySSR: 0, pity10: 0 },
       owned: {},
       crystals: 999999,
-      tickets: 0,
     }
     const outcome = executePull(ctx, POOL_STANDARD, 10, 5)
     const summary = summarizePull(outcome)
     expect(summary.newHeroes.length).toBeGreaterThan(0)
-    expect(summary.emblems).toBeGreaterThanOrEqual(0)
+    expect(Object.keys(summary.shards).length).toBeGreaterThanOrEqual(0)
   })
 
   it('同一批里抽到同一英灵两次时，第二张按「重复转化」处理', () => {
@@ -256,7 +252,6 @@ describe('重复转化（§7.4 合规要点）', () => {
       pity: { pitySSR: 0, pity10: 0 },
       owned: {},
       crystals: 999999,
-      tickets: 0,
     }
     // 找一个会在十连内抽到重复英灵的种子（池子越大重复越常见，搜索仍然有效）
     let dupSeed = -1
@@ -272,10 +267,10 @@ describe('重复转化（§7.4 合规要点）', () => {
     const repeated = ids.find((id, i) => ids.indexOf(id) !== i)!
     const sameHero = outcome.results.filter((r) => r.heroId === repeated)
     expect(sameHero).toHaveLength(2)
-    // 第一张新获得 → 第二张必须算重复（给印记 / 银两），否则玩家少拿一份转化
+    // 第一张新获得 → 第二张必须算重复（给同名碎片），否则玩家少拿一份转化
     expect(sameHero[0].isNew).toBe(true)
     expect(sameHero[1].isNew).toBe(false)
-    expect(sameHero[1].emblems).toBe(GACHA.DUPLICATE_EMBLEM[sameHero[1].rarity])
+    expect(sameHero[1].shards).toBe(GACHA.DUPLICATE_SHARDS[sameHero[1].rarity])
     // 「新获得英灵」列表里同一个人只出现一次
     const newHeroes = summarizePull(outcome).newHeroes
     expect(newHeroes.filter((id) => id === repeated)).toHaveLength(1)
@@ -286,61 +281,32 @@ describe('抽卡费用', () => {
   const TEN = GACHA.TEN_PULL_COUNT
 
   it('单抽与十连费用正确（逐抽计价）', () => {
-    expect(pullCost(1)).toEqual({ crystals: GACHA.COST_SINGLE, tickets: GACHA.TICKET_PER_PULL })
+    expect(pullCost(1)).toEqual({ crystals: GACHA.COST_SINGLE })
     expect(pullCost(TEN)).toEqual({
       crystals: GACHA.COST_SINGLE * TEN,
-      tickets: GACHA.TICKET_PER_PULL * TEN,
     })
   })
 
-  it('单抽优先扣圣杯结晶，结晶不足时改用抽卡券', () => {
-    expect(resolvePayment(1, GACHA.COST_SINGLE, 5)).toEqual({
-      crystals: GACHA.COST_SINGLE,
-      tickets: 0,
-    })
-    expect(resolvePayment(1, GACHA.COST_SINGLE - 1, 1)).toEqual({ crystals: 0, tickets: 1 })
-    expect(resolvePayment(1, 0, 1)).toEqual({ crystals: 0, tickets: 1 })
+  it('结晶足够时全额扣结晶', () => {
+    expect(resolvePayment(1, GACHA.COST_SINGLE)).toEqual({ crystals: GACHA.COST_SINGLE })
+    expect(resolvePayment(1, GACHA.COST_SINGLE + 5_000)).toEqual({ crystals: GACHA.COST_SINGLE })
   })
 
-  it('十连可用抽卡券整付（10 张券抵 10 抽）', () => {
-    expect(resolvePayment(TEN, 0, TEN)).toEqual({ crystals: 0, tickets: TEN })
-    expect(resolvePayment(TEN, 0, TEN + 5)).toEqual({ crystals: 0, tickets: TEN })
-  })
-
-  it('十连优先扣圣杯结晶，结晶够时不动券', () => {
-    expect(resolvePayment(TEN, GACHA.COST_SINGLE * TEN, 99)).toEqual({
+  it('十连一次扣 3,000 结晶', () => {
+    expect(resolvePayment(TEN, GACHA.COST_SINGLE * TEN)).toEqual({
       crystals: GACHA.COST_SINGLE * TEN,
-      tickets: 0,
-    })
-  })
-
-  it('十连支持结晶与券混合支付（结晶优先、券补差额）', () => {
-    // 1500 结晶付 5 抽，5 张券付另外 5 抽
-    expect(resolvePayment(TEN, 1500, 5)).toEqual({ crystals: 1500, tickets: 5 })
-    // 结晶只够 9 抽 → 差 1 抽用券补
-    expect(resolvePayment(TEN, GACHA.COST_SINGLE * 9, 1)).toEqual({
-      crystals: GACHA.COST_SINGLE * 9,
-      tickets: 1,
-    })
-    // 不足一整抽的零头不参与计价（按整抽计）
-    expect(resolvePayment(TEN, GACHA.COST_SINGLE * 9 + 299, 1)).toEqual({
-      crystals: GACHA.COST_SINGLE * 9,
-      tickets: 1,
     })
   })
 
   it('余额不足时返回 null（抽卡总闸门不得被绕过）', () => {
-    // 券不够 10 张
-    expect(resolvePayment(TEN, 0, TEN - 1)).toBeNull()
-    // 结晶差 1 抽且无券
-    expect(resolvePayment(TEN, GACHA.COST_SINGLE * TEN - 1, 0)).toBeNull()
-    expect(resolvePayment(1, 0, 0)).toBeNull()
+    expect(resolvePayment(TEN, GACHA.COST_SINGLE * TEN - 1)).toBeNull()
+    expect(resolvePayment(1, 0)).toBeNull()
   })
 
   it('余额不足时 executePull 抛错，不会产出结果', () => {
     expect(() =>
       executePull(
-        { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: 0, tickets: 0 },
+        { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: 0 },
         POOL_STANDARD,
         10,
         1,
@@ -350,25 +316,23 @@ describe('抽卡费用', () => {
 
   it('余额充足时不会把资源扣成负数', () => {
     const outcome = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: GACHA.COST_SINGLE * TEN, tickets: 0 },
+      { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: GACHA.COST_SINGLE * TEN },
       POOL_STANDARD,
       10,
       1,
     )
     expect(outcome.crystalsUsed).toBe(GACHA.COST_SINGLE * TEN)
-    expect(outcome.ticketsUsed).toBe(0)
   })
 
-  it('用抽卡券支付十连时产出 10 个结果且不扣结晶', () => {
+  it('十连产出 10 个结果', () => {
     const outcome = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: 0, tickets: TEN },
+      { pity: { pitySSR: 0, pity10: 0 }, owned: {}, crystals: GACHA.COST_SINGLE * TEN },
       POOL_STANDARD,
       TEN,
       7,
     )
     expect(outcome.results.length).toBe(TEN)
-    expect(outcome.crystalsUsed).toBe(0)
-    expect(outcome.ticketsUsed).toBe(TEN)
+    expect(outcome.crystalsUsed).toBe(GACHA.COST_SINGLE * TEN)
   })
 })
 

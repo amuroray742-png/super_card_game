@@ -22,6 +22,7 @@
  * 但两者的重置边界不同 → 必须分开存，不能共用一个数。
  */
 import { dayIndex, weekIndex } from '../time.ts'
+import { EXP_BOOK } from '../config/economy.ts'
 import {
   TASK_INDEX,
   tasksOfPeriod,
@@ -129,13 +130,22 @@ export function taskView(daily: DailyState, now: number, taskId: string): TaskVi
 /**
  * 任务奖励 → 奖励包。
  *
- * ⚠ 任务奖励只可能是养成材料（见 `config/tasks.ts` 的 `TaskReward`），
+ * ⚠ 任务奖励只可能是**通用经验书**（见 `config/tasks.ts` 的 `TaskReward`），
  *   所以这里**只搬**这两项：将来配置里若混进别的字段，编译期就会报错，
  *   不会悄悄把圣杯结晶发出去。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：奖励进 `items`（堆叠道具），
+ *   不再是独立的资源字段（术式结晶 / 遗物强化石已退役）。
  */
 export function taskRewardBundle(rewards: TaskReward): RewardBundle {
   const out: RewardBundle = {}
-  if (rewards.skillStones) out.skillStones = rewards.skillStones
-  if (rewards.relicStones) out.relicStones = rewards.relicStones
+  const books = rewards.expBooks
+  if (!books) return out
+  const items: Record<string, number> = {}
+  if (books.small) items[EXP_BOOK.small.id] = books.small
+  if (books.large) items[EXP_BOOK.large.id] = books.large
+  if (Object.keys(items).length > 0) {
+    out.items = items as RewardBundle['items']
+  }
   return out
 }

@@ -14,23 +14,28 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
-import { ARENA, DAILY } from '../../core/config/economy.ts'
+import { DAILY } from '../../core/config/economy.ts'
 import { taskViews, type TaskView } from '../../core/systems/tasks.ts'
+import { ITEM_DEFS } from '../../core/config/items.ts'
 import { dayIndex } from '../../core/time.ts'
 import { formatNumber } from '../utils/format'
+import { rewardLines } from '../utils/reward-text'
 
 const store = useGameStore()
 const router = useRouter()
 
 const daily = computed(() => store.save.daily)
 
-/** 签到奖励条目（配置表各条字段不完全相同，统一成同一形状便于展示） */
+/**
+ * 签到奖励条目（配置表各条字段不完全相同，统一成同一形状便于展示）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：抽卡券 / 术式结晶 / 遗物强化石退役，
+ *   改为 `items`（通用经验书）。
+ */
 interface SignInReward {
   crystals?: number
   silver?: number
-  tickets?: number
-  skillStones?: number
-  relicStones?: number
+  items?: Record<string, number>
 }
 
 /** 签到奖励表（数值全部来自 core 配置） */
@@ -59,22 +64,25 @@ function isToday(index: number): boolean {
   return index === nextIndex.value && !signedToday.value
 }
 
+/**
+ * 签到奖励文案。
+ *
+ * ⚠ 名称一律取登记表（铁律 #8：禁止就地写中文名）。
+ *   签到奖励结构 = `{ crystals, silver, items }`（抽卡券 / 术式结晶 / 强化石已退役）。
+ */
 function rewardText(reward: SignInReward): string {
-  const parts: string[] = []
-  if (reward.crystals) parts.push(`圣杯结晶 ${reward.crystals}`)
-  if (reward.silver) parts.push(`银两 ${formatNumber(reward.silver)}`)
-  if (reward.tickets) parts.push(`抽卡券 ${reward.tickets}`)
-  if (reward.skillStones) parts.push(`术式结晶 ${reward.skillStones}`)
-  if (reward.relicStones) parts.push(`强化石 ${reward.relicStones}`)
-  return parts.join(' · ')
+  return rewardLines(reward).map((l) => `${l.label} ${formatNumber(l.value)}`).join(' · ')
 }
 
-/** 任务奖励文案（只可能是养成材料，见 config/tasks.ts 的 TaskReward） */
+/**
+ * 任务奖励文案（只可能是通用经验书，见 config/tasks.ts 的 TaskReward）。
+ */
 function taskRewardText(view: TaskView): string {
-  const r = view.def.rewards
+  const books = view.def.rewards.expBooks
+  if (!books) return ''
   const parts: string[] = []
-  if (r.relicStones) parts.push(`强化石 ${r.relicStones}`)
-  if (r.skillStones) parts.push(`术式结晶 ${r.skillStones}`)
+  if (books.small) parts.push(`${ITEM_DEFS.expBookSmall.name} ${books.small}`)
+  if (books.large) parts.push(`${ITEM_DEFS.expBookLarge.name} ${books.large}`)
   return parts.join(' · ')
 }
 
@@ -88,12 +96,7 @@ const weeklyTasks = computed(() => taskViews(daily.value, store.now(), 'weekly')
 async function signIn() {
   const reward = await store.signInDaily()
   if (reward) {
-    const parts: string[] = []
-    if (reward.crystals) parts.push(`圣杯结晶 ${reward.crystals}`)
-    if (reward.silver) parts.push(`银两 ${formatNumber(reward.silver)}`)
-    if (reward.tickets) parts.push(`抽卡券 ${reward.tickets}`)
-    if (reward.skillStones) parts.push(`术式结晶 ${reward.skillStones}`)
-    if (reward.relicStones) parts.push(`强化石 ${reward.relicStones}`)
+    const parts = rewardLines(reward).map((l) => `${l.label} ${formatNumber(l.value)}`)
     store.notify(parts.length ? `签到成功：${parts.join(' · ')}` : '签到成功', 'ok')
   }
 }
@@ -102,9 +105,7 @@ async function signIn() {
 async function claim(view: TaskView) {
   const reward = await store.claimTask(view.def.id)
   if (!reward) return
-  const parts: string[] = []
-  if (reward.skillStones) parts.push(`术式结晶 ${reward.skillStones}`)
-  if (reward.relicStones) parts.push(`强化石 ${reward.relicStones}`)
+  const parts = rewardLines(reward).map((l) => `${l.label} ${formatNumber(l.value)}`)
   store.notify(parts.length ? `已领取：${parts.join(' · ')}` : '任务奖励已领取', 'ok')
 }
 
@@ -221,16 +222,16 @@ function go(view: TaskView) {
         </button>
       </div>
       <p class="tiny muted" style="margin: 8px 0 0">
-        任务奖励只有养成材料（强化石 / 术式结晶），不影响召唤节奏与竞技产出。
+        任务奖励只有通用经验书（辅助养成），不含圣杯结晶，不影响召唤节奏与竞技产出。
       </p>
     </section>
 
-    <!-- 竞技周上限提示 -->
+    <!-- 竞技产出提示 -->
     <section class="panel notice">
       <div class="panel-title"><span>竞技产出提示</span></div>
       <p class="tiny" style="margin: 0; line-height: 1.8; color: var(--c-text-dim)">
-        竞技勋章每周获取上限为 {{ ARENA.MEDAL_WEEKLY_CAP }} 枚，竞技兑换的抽卡券每周上限为
-        {{ ARENA.TICKET_WEEKLY_CAP }} 张。竞技场不产出银两、经验、强化石与圣杯结晶。
+        ⚠ 竞技勋章与竞技材料<b>已停止新增</b>，旧余额只作记录保留。
+        竞技只承接段位分与称号，不产出银两、经验、强化石与圣杯结晶。
       </p>
     </section>
   </div>

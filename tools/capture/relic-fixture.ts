@@ -1,5 +1,5 @@
 /**
- * 遗物截图用的前置存档（造数据 → 走服务端动作层导入）。
+ * 遗物 / 背包截图用的前置存档（造数据 → 走服务端动作层导入）。
  *
  * ## 为什么是「导入前置」而不是「挂机攒遗物」
  *
@@ -22,6 +22,7 @@ import { createNewSave } from '../../src/core/save/schema.ts'
 import { exportSave } from '../../src/core/save/serialize.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
 import { RELIC_INDEX } from '../../src/core/config/relics.ts'
+import { RELIC_STONE_ITEM_BY_TIER, ITEM_BY_ELEMENT } from '../../src/core/config/items.ts'
 import { RELIC } from '../../src/core/config/economy.ts'
 import { STAGES } from '../../src/core/config/stages.ts'
 import type { RelicInstance, SaveData } from '../../src/core/model/types.ts'
@@ -64,13 +65,63 @@ export function buildRelicFixture(now = Date.now()): SaveData {
   save.relicSeq = save.relics.length
 
   // 银两 / 强化石给足：强化按钮必须可点（否则截出来的是禁用态）。
+  //
+  // ⚠ **实施修正（资源/背包版本 v10）**：强化石不再是钱包字段（`player.relicStones`
+  //   已退役），而是**背包里的堆叠道具**（`save.items[<道具 id>]`），且分三档。
+  //   本 fixture 的目的只是「让强化按钮可点」——遗物从 Lv1 升到 Lv60 用的是
+  //   **初阶强化石**，所以塞初阶石即可（道具 id 走唯一口径 `RELIC_STONE_ITEM_BY_TIER`，
+  //   禁止就地写字符串 id）。
   save.player.silver = 5_000_000
-  save.player.relicStones = 200_000
+  save.items[RELIC_STONE_ITEM_BY_TIER.relicStoneTier1] = 200_000
 
   save.campaign.clearedStage = 0
   save.campaign.chapterProgress = 1
   save.idle.currentStage = STAGES[0].id
   save.idle.autoAdvance = false
+
+  return save
+}
+
+/**
+ * 背包场景用的前置存档。
+ *
+ * ⚠ 资源/背包版本 v10：背包有 **5 个分类**（遗物 / 技能材料 / 强化材料 / 经验书 / 卡碎片），
+ *   每个分类都得**有货可看**才验得了「数量、名称、直达入口」——
+ *   空分类截出来只是一行「暂无」，看不出任何东西。
+ *
+ * - **五行技能材料**：每个五行都给（数量刻意错开，看得出五行筛选在起作用）；
+ * - **强化石**：三档都给（初阶 / 中阶 / 高阶）；
+ * - **经验书**：小书 + 大书都放（投喂预览要看面额）；
+ * - **同名碎片**：给队里两名英灵（碎片页点一下要能跳到英灵页）。
+ *
+ * 道具 id 一律走 `ITEM_IDS` / `ITEM_BY_ELEMENT` 的唯一口径，**禁止就地写字符串**。
+ */
+export function buildBackpackFixture(now = Date.now()): SaveData {
+  const save = buildRelicFixture(now)
+
+  // 五行技能材料：数量错开 → 五行筛选切换时能看出差异
+  const elementAmounts: Record<string, number> = {
+    金: 240, 木: 180, 水: 150, 火: 96, 土: 64,
+  }
+  for (const [element, amount] of Object.entries(elementAmounts)) {
+    const itemId = ITEM_BY_ELEMENT[element as keyof typeof ITEM_BY_ELEMENT]
+    if (!itemId) throw new Error(`五行材料映射缺失：${element}`)
+    save.items[itemId] = amount
+  }
+
+  // 强化石三档（初阶已有，这里补中阶 / 高阶）
+  save.items[RELIC_STONE_ITEM_BY_TIER.relicStoneTier2] = 40
+  save.items[RELIC_STONE_ITEM_BY_TIER.relicStoneTier3] = 12
+
+  // 经验书：两种面额都放，投喂预览才看得出差异
+  save.items.expBookSmall = 360
+  save.items.expBookLarge = 24
+
+  // 同名碎片：队里两名英灵（碎片页点一下要能跳到英灵页）
+  save.player.shards = {
+    [FIXTURE_TEAM[0]]: 240,
+    [FIXTURE_TEAM[1]]: 60,
+  }
 
   return save
 }

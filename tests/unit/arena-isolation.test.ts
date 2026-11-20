@@ -95,7 +95,7 @@ describe('竞技整改回归', () => {
     expect(asymmetric.result.roster.filter((u) => u.side === 'enemy').map((u) => u.maxHp)).toEqual([healerHp, healerHp, healerHp])
   })
 
-  it('北京时间周一零点重置奖励，重复结算与重载不重复重置', () => {
+  it('北京时间周一零点重置周计数；竞技产出已停发，旧余额只读保留', () => {
     const save = arenaSave()
     const before = Date.parse('2026-11-08T15:59:59Z')
     const settle = (now: number) => applyAction(save, { type: 'arena.settle' }, { now, rng: new Rng(19), randomSeed: () => 19 })
@@ -104,13 +104,13 @@ describe('竞技整改回归', () => {
     settle(before)
     expect(save.arena.weeklyMedals).toBe(999)
     settle(before + 1000)
-    expect(save.arena.weeklyMedals).toBeGreaterThan(0)
-    expect(save.arena.weeklyMedals).toBeLessThan(999)
+    // ⚠ 资源/背包版本 v10：竞技勋章**停发**（设计稿 §3）→ 周重置后回到 0，
+    //   而不是「重置后继续累计」。旧余额（save.arena.medals）保留为只读记录。
+    expect(save.arena.weeklyMedals).toBe(0)
     expect(save.arena.weeklyTickets).toBeLessThanOrEqual(1)
-    const earned = save.arena.weeklyMedals
     settle(before + 2000)
-    expect(save.arena.weeklyMedals).toBe(earned * 2)
-    expect(normalizeSave(save).arena.weeklyMedals).toBe(earned * 2)
+    expect(save.arena.weeklyMedals).toBe(0)
+    expect(normalizeSave(save).arena.weeklyMedals).toBe(0)
   })
 
   it('旧档周标记只初始化一次，不因下次 normalize 洗掉计数', () => {
@@ -349,10 +349,14 @@ describe('7. 产出隔离', () => {
     expect(reward).not.toHaveProperty('crystals')
   })
 
-  it('竞技勋章与抽卡券有周上限', () => {
-    const { weeklyMedals, weeklyTickets } = resolveArenaRewards(true, 999, 999)
-    expect(weeklyMedals).toBeLessThanOrEqual(999 + 1)
-    expect(weeklyTickets).toBeLessThanOrEqual(999 + 1)
+  it('竞技产出整体退场：结算恒为 0，不再发放勋章 / 竞技材料', () => {
+    // ⚠ 资源/背包版本 v10：竞技只承接段位分与称号，产出退场（设计稿 §3）
+    const { reward, weeklyMedals, weeklyMaterials } = resolveArenaRewards(true, 999, 999)
+    expect(reward.medals).toBe(0)
+    expect(reward.arenaMaterials).toBe(0)
+    // 旧余额只读透传，不被改写
+    expect(weeklyMedals).toBe(999)
+    expect(weeklyMaterials).toBe(999)
   })
 })
 

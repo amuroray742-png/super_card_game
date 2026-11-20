@@ -4,15 +4,60 @@
  * 存档带版本号与迁移链，保证后续更新不丢档。
  */
 import type { SaveData } from '../model/types.ts'
-import { START_RESOURCES } from '../config/economy.ts'
+import type { Element } from '../model/types.ts'
+import type { ItemId } from '../config/items.ts'
+import type { DungeonDifficultyId, RelicStoneTierId } from '../config/economy.ts'
+import {
+  START_ITEMS,
+  START_RESOURCES,
+  LEGACY_CONVERSION,
+  EXP_BOOK,
+  DUNGEON_DIFFICULTY_IDS,
+  RELIC_STONE_TIER_IDS,
+} from '../config/economy.ts'
+import { ITEM_IDS } from '../config/items.ts'
+import { ELEMENTS } from '../model/types.ts'
 import { arenaWeekIndex } from '../time.ts'
 import { makeRelicUid, parseLegacyRelicUid, RELIC_DEFS, RELIC_SETS } from '../systems/relic.ts'
 import { emptyLadderSquads } from '../config/ladder.ts'
 import '../config/relics.ts'
 
-export const SAVE_VERSION = 9
+export const SAVE_VERSION = 10
 
 export type Migration = (save: SaveData) => SaveData
+
+/** 已登记的道具 id 集合（O(1) 判定） */
+const ITEM_ID_SET = new Set<string>(ITEM_IDS)
+/** 五行集合 */
+const ELEMENT_SET = new Set<string>(ELEMENTS)
+/** 副本难度集合 */
+const DUNGEON_DIFFICULTY_SET = new Set<string>(DUNGEON_DIFFICULTY_IDS)
+/** 强化石档位集合 */
+const RELIC_STONE_TIER_SET = new Set<string>(RELIC_STONE_TIER_IDS)
+
+/**
+ * 读取存档里的数值字段（旧档可能缺字段 / 类型不对）。
+ */
+function num(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
+/**
+ * 剔除**退役**的玩家字段（v10 起不再存在）。
+ *
+ * ⚠ 这些字段在 v9 及更早存在：抽卡券 / 英灵印记 / 玩家经验池 /
+ *   术式结晶 / 遗物强化石。迁移（`MIGRATIONS[9]`）负责把它们折算进新结构，
+ *   本函数在迁移**之后**收尾，保证它们不会残留在 v10 存档里
+ *   （手工构造 / 畸形导入也无法复活它们）。
+ */
+function stripRetiredPlayerFields(save: SaveData): void {
+  const player = save.player as unknown as Record<string, unknown>
+  delete player.tickets
+  delete player.emblems
+  delete player.exp
+  delete player.skillStones
+  delete player.relicStones
+}
 
 /**
  * 迁移链：键为"从该版本升级"，值为迁移函数。
@@ -125,6 +170,47 @@ export const MIGRATIONS: Record<number, Migration> = {
     }
     return save
   },
+  // v9 → v10：**资源/背包版本**（钱包收敛 + 通用道具系统）
+  //
+  // 折算口径见 `economy.ts` 的 `LEGACY_CONVERSION`；数值待策划确认
+  // （实现文档 §5）。⚠ 本迁移必须**幂等**——`migrate()` 每次载入都会跑一遍。
+  //
+  // ⚠ 术式结晶 / 遗物强化石**不自动折算**，而是记进 `save.legacy` 的一次性
+  //   分配权益，由玩家自己选一个五行 / 一个石档（避免强塞无用材料）。
+  9: (save) => {
+    const player = save.player as unknown as Record<string, unknown>
+
+    // ① 抽卡券 → 圣杯结晶（设计稿 §2「原券按每张 300 结晶折算」）
+    const tickets = num(player.tickets)
+    if (tickets > 0) save.player.crystals += tickets * LEGACY_CONVERSION.ticketToCrystals
+
+    // ② 英灵印记 → 银两（按旧突破购买力折算，实现文档 §2）
+    const emblems = num(player.emblems)
+    if (emblems > 0) save.player.silver += emblems * LEGACY_CONVERSION.emblemToSilver
+
+    // ③ 玩家经验池 → 经验书（大书优先，尾差向上补足一本小书）
+    const pool = num(player.exp)
+    if (pool > 0) {
+      const smallExp = EXP_BOOK.small.exp
+      const largeExp = EXP_BOOK.large.exp
+      const largeCount = Math.floor(pool / largeExp)
+      let rest = pool - largeCount * largeExp
+      const smallCount = Math.floor(rest / smallExp)
+      rest -= smallCount * smallExp
+      // 尾差向上补足一本小书（补差不超过一本小书）
+      const smallTotal = smallCount + (rest > 0 ? 1 : 0)
+      save.items[EXP_BOOK.small.id] = (save.items[EXP_BOOK.small.id] ?? 0) + smallTotal
+      if (largeCount > 0) {
+        save.items[EXP_BOOK.large.id] = (save.items[EXP_BOOK.large.id] ?? 0) + largeCount
+      }
+    }
+
+    // ④ 术式结晶 / 遗物强化石 → 一次性分配权益（只加不清零 ⇒ 幂等）
+    save.legacy.skillStones += num(player.skillStones)
+    save.legacy.relicStones += num(player.relicStones)
+
+    return save
+  },
 }
 
 /** 空的天梯状态 */
@@ -179,24 +265,30 @@ export function createNewSave(now: number, seed = 0): SaveData {
     rng: { seed, counter: 0 },
     player: {
       silver: START_RESOURCES.silver,
-      exp: START_RESOURCES.exp,
-      shards: {},
-      emblems: START_RESOURCES.emblems,
       crystals: START_RESOURCES.crystals,
-      tickets: START_RESOURCES.tickets,
-      skillStones: START_RESOURCES.skillStones,
-      relicStones: START_RESOURCES.relicStones,
+      shards: {},
       permBoost: 0,
       rebirthCount: 0,
     },
+    items: { ...START_ITEMS },
+    legacy: { skillStones: 0, relicStones: 0, allocated: false },
     heroes: {},
     relics: [],
     relicSeq: 0,
     equipped: {},
     team: { slots: [null, null, null, null, null, null], presets: [] },
     gacha: { pitySSR: 0, pity10: 0, history: [], pools: {}, newbieUsed: false },
-    campaign: { clearedStage: 0, stageStars: {}, chapterProgress: 1 },
-    idle: { currentStage: 1, autoAdvance: true, totalIdleSeconds: 0, measuredAt: now, effectiveMs: 0, offlineElapsedMs: 0, activeUntil: now },
+    campaign: { clearedStage: 0, stageStars: {}, chapterProgress: 1, creditedStages: 0 },
+    idle: {
+      currentStage: 1,
+      target: { kind: 'campaign' },
+      autoAdvance: true,
+      totalIdleSeconds: 0,
+      measuredAt: now,
+      effectiveMs: 0,
+      offlineElapsedMs: 0,
+      activeUntil: now,
+    },
     codes: [],
     settings: { speed: 1, sfx: true, skipAnim: false },
     stats: { firstStartAt: now, totalPulls: 0, totalPower: 0 },
@@ -249,7 +341,80 @@ function normalizeLadder(raw: Partial<SaveData['arena']['ladder']> | undefined):
 }
 
 /**
+ * 规范化背包堆叠物：只保留**已登记**的道具 id，值取非负整数。
+ *
+ * ⚠ 未知道具 id 一律丢弃——存档里出现未登记的 id 说明数据有问题，
+ *   留着会让背包页显示出一个「没有名字也没有图标」的条目（铁律 #22）。
+ *
+ * ⚠ 返回的是**完整**的道具表（未持有的道具填 0）：
+ *   `SaveData.items` 的类型是 `Record<ItemId, number>`，
+ *   缺键会让「新增道具」这条链路的类型检查失效。
+ *
+ * ⚠ **起点是全 0，不是 `START_ITEMS`**：
+ *   `START_ITEMS` 是**新号**的起步道具（`createNewSave` 单独发放）。
+ *   若规范化时也补上，老玩家每次载入都会白拿一遍起步书；
+ *   而且「持有 0 个」与「没有这个键」无法区分 → 玩家清空背包后被自动补回。
+ *
+ * ⚠ **显式的 0 必须被尊重**：`items` 是完整表，「持有 0 个」与「没有这个键」
+ *   是两回事。若把 0 当成缺键，新号起步的 10 本小经验书会在玩家用完之后
+ *   被**自动补回**（背包永远清不空）。
+ */
+function normalizeItems(raw: unknown): SaveData['items'] {
+  const out = {} as SaveData['items']
+  for (const id of ITEM_IDS) out[id] = 0
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!ITEM_ID_SET.has(id as ItemId)) continue
+    const n = num(value)
+    if (n >= 0) out[id as ItemId] = Math.floor(n)
+  }
+  return out
+}
+
+/**
+ * 规范化挂机去向。
+ *
+ * ⚠ 形状不合法（未知种类 / 未知五行 / 未知档位）一律回落到主线——
+ *   宁可退回默认去向，也不能让挂机跑到不存在的副本上。
+ */
+function normalizeIdleTarget(raw: unknown): SaveData['idle']['target'] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { kind: 'campaign' }
+  const target = raw as Record<string, unknown>
+  const difficulty = target.difficulty
+  if (target.kind === 'skill') {
+    const element = target.element
+    if (typeof element === 'string' && ELEMENT_SET.has(element as Element)) {
+      if (typeof difficulty === 'string' && DUNGEON_DIFFICULTY_SET.has(difficulty as DungeonDifficultyId)) {
+        return { kind: 'skill', element: element as Element, difficulty: difficulty as DungeonDifficultyId }
+      }
+    }
+    return { kind: 'campaign' }
+  }
+  if (target.kind === 'enhance') {
+    const tier = target.tier
+    if (typeof tier === 'string' && RELIC_STONE_TIER_SET.has(tier as RelicStoneTierId)) {
+      if (typeof difficulty === 'string' && DUNGEON_DIFFICULTY_SET.has(difficulty as DungeonDifficultyId)) {
+        return { kind: 'enhance', tier: tier as RelicStoneTierId, difficulty: difficulty as DungeonDifficultyId }
+      }
+    }
+    return { kind: 'campaign' }
+  }
+  return { kind: 'campaign' }
+}
+
+/**
  * 规范化存档：补齐缺失字段，保证旧档 / 损坏档也能安全加载。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：不再把 `version` 强制成当前版本——
+ *   保留**原始版本号**，让 `migrate()` 能按真实版本走迁移链。
+ *   原因：`normalizeSave` 曾把版本改写成 `SAVE_VERSION`，
+ *   于是 `validateImportedSave`（导入路径）拿到的已是新版本 →
+ *   `migrate()` 对导入档**完全不跑** → 导入的旧档会保留 `player.tickets`
+ *   等退役字段，而新代码不认识它们（静默丢档）。
+ *   调用方（`restoreSave` / `deserialize` / `validateImportedSave`）负责显式 `migrate()`。
+ *
+ * ⚠ `player` 仍用展开合并：**退役字段必须活到迁移那一步**才能被折算，
+ *   迁移结束后由 `migrate()` 的收尾 `stripRetiredPlayerFields()` 剔除。
  */
 export function normalizeSave(raw: unknown): SaveData {
   const base = createNewSave(Date.now())
@@ -259,7 +424,11 @@ export function normalizeSave(raw: unknown): SaveData {
   const merged: SaveData = {
     ...base,
     ...save,
-    version: SAVE_VERSION,
+    // 保留原始版本号（合法整数则保留，否则回落 1）；迁移由调用方显式执行
+    version:
+      typeof save.version === 'number' && Number.isSafeInteger(save.version) && save.version > 0
+        ? save.version
+        : 1,
     // 旧档没有写入时间戳：按 0 处理，保证「旧档首次写入」不会被判成外部更新
     savedAt: typeof save.savedAt === 'number' ? save.savedAt : 0,
     // 旧档没有随机数状态：种子留 0（= 未设置），由服务端补密码学随机种子。
@@ -269,11 +438,20 @@ export function normalizeSave(raw: unknown): SaveData {
       counter: typeof save.rng?.counter === 'number' ? save.rng.counter : 0,
     },
     player: { ...base.player, ...(save.player ?? {}) },
+    // 堆叠道具：只保留**已登记**的道具 id，值取非负整数
+    items: normalizeItems(save.items),
+    // 旧档一次性分配权益：只加不清零（迁移会往里加，两边都不清零 ⇒ 幂等）
+    legacy: {
+      skillStones: Math.max(0, num(save.legacy?.skillStones)),
+      relicStones: Math.max(0, num(save.legacy?.relicStones)),
+      allocated: save.legacy?.allocated === true,
+    },
     team: { ...base.team, ...(save.team ?? {}) },
     gacha: { ...base.gacha, ...(save.gacha ?? {}) },
     campaign: { ...base.campaign, ...(save.campaign ?? {}) },
     idle: {
       ...base.idle, ...(save.idle ?? {}),
+      target: normalizeIdleTarget(save.idle?.target),
       measuredAt: Number.isFinite(save.idle?.measuredAt) ? save.idle!.measuredAt : (save.lastTickAt ?? base.lastTickAt),
       effectiveMs: Number.isFinite(save.idle?.effectiveMs) ? Math.max(0, save.idle!.effectiveMs!) : 0,
       offlineElapsedMs: Number.isFinite(save.idle?.offlineElapsedMs) ? Math.max(0, save.idle!.offlineElapsedMs!) : 0,
@@ -332,6 +510,9 @@ export function normalizeSave(raw: unknown): SaveData {
 
 /**
  * 执行迁移链。
+ *
+ * ⚠ 收尾会**剔除退役的玩家字段**（v10 起不再存在）——
+ *   这样即使存档来自手工构造或畸形导入，退役字段也不会残留。
  */
 export function migrate(save: SaveData): SaveData {
   let current = save
@@ -346,6 +527,7 @@ export function migrate(save: SaveData): SaveData {
     version++
     current.version = version
   }
+  stripRetiredPlayerFields(current)
   current.version = SAVE_VERSION
   return current
 }

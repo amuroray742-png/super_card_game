@@ -22,9 +22,14 @@ import { relicUpgradeCost, getRelicMods } from '../../src/core/systems/relic.ts'
 import { getEquippedRelics } from '../../src/core/systems/loadout.ts'
 import { Rng } from '../../src/core/rng.ts'
 import { GACHA, RELIC } from '../../src/core/config/economy.ts'
+import { ITEM_BY_ELEMENT } from '../../src/core/config/items.ts'
+import { HERO_INDEX } from '../../src/core/config/heroes/index.ts'
 
 const NOW = 1_700_000_000_000
 const SEED = 20241117
+
+/** 项羽是土属性 → 技能升级扣「土系技能材料」那一叠 */
+const SKILL_MAT_ID = ITEM_BY_ELEMENT[HERO_INDEX.get('xiangyu')!.element]
 
 /** 一个可控的上下文：时间固定、随机源可观察 */
 function makeCtx(save: SaveData) {
@@ -61,7 +66,7 @@ describe('动作层：失败即原子（存档不变）', () => {
     const rng = new Rng(1)
     save.relics = [makeTestRelic('set_zhanshen_1', rng, 1)]
     save.player.silver = 0
-    save.player.relicStones = 0
+    save.items.relicStoneTier1 = 0
     const before = JSON.stringify(save)
 
     const { ctx } = makeCtx(save)
@@ -71,13 +76,12 @@ describe('动作层：失败即原子（存档不变）', () => {
     if (!res.ok) expect(res.code).toBe('INSUFFICIENT_FUNDS')
     expect(save.relics[0].level).toBe(1)
     expect(save.player.silver).toBe(0)
-    expect(save.player.relicStones).toBe(0)
+    expect(save.items.relicStoneTier1).toBe(0)
     expect(JSON.stringify(save)).toBe(before)
   })
 
   it('抽卡：余额不足 → 一个字节都没变，且不消耗随机序列', () => {
     save.player.crystals = 0
-    save.player.tickets = 0
     const before = JSON.stringify(save)
     const { ctx, rng } = makeCtx(save)
     const counterBefore = rng.snapshot().counter
@@ -90,36 +94,36 @@ describe('动作层：失败即原子（存档不变）', () => {
     expect(rng.snapshot().counter).toBe(counterBefore)
   })
 
-  it('喂经验：经验池不足 → 池子与英灵等级都不变', () => {
+  it('喂经验书：书不够 → 背包与英灵等级都不变', () => {
     save.heroes['xiangyu'] = createHeroState('xiangyu', NOW)
-    save.player.exp = 10
+    save.items.expBookSmall = 0
     const before = JSON.stringify(save)
     const { ctx } = makeCtx(save)
 
-    const res = applyAction(save, { type: 'hero.feedExp', heroId: 'xiangyu', amount: 9999 }, ctx)
+    const res = applyAction(save, { type: 'hero.feedBooks', heroId: 'xiangyu', bookId: 'expBookSmall', count: 1 }, ctx)
 
     expect(res.ok).toBe(false)
-    expect(save.player.exp).toBe(10)
+    expect(save.items.expBookSmall).toBe(0)
     expect(save.heroes['xiangyu'].level).toBe(1)
     expect(JSON.stringify(save)).toBe(before)
   })
 
-  it('境界突破：印记不足 → 印记不变、境界不变', () => {
+  it('境界突破：银两不足 → 银两不变、境界不变', () => {
     save.heroes['xiangyu'] = { ...createHeroState('xiangyu', NOW), level: 60 }
-    save.player.emblems = 0
+    save.player.silver = 0
     const before = JSON.stringify(save)
     const { ctx } = makeCtx(save)
 
     const res = applyAction(save, { type: 'hero.breakRealm', heroId: 'xiangyu' }, ctx)
 
     expect(res.ok).toBe(false)
-    expect(save.player.emblems).toBe(0)
+    expect(save.player.silver).toBe(0)
     expect(JSON.stringify(save)).toBe(before)
   })
 
-  it('技能升级：术式结晶不足 → 结晶不变；且不会误扣圣杯结晶', () => {
+  it('技能升级：技能材料不足 → 材料不变；且不会误扣圣杯结晶', () => {
     save.heroes['xiangyu'] = createHeroState('xiangyu', NOW)
-    save.player.skillStones = 0
+    save.items[SKILL_MAT_ID] = 0
     save.player.silver = 100_000
     save.player.crystals = 5_000
     const crystalsBefore = save.player.crystals
@@ -128,15 +132,14 @@ describe('动作层：失败即原子（存档不变）', () => {
     const res = applyAction(save, { type: 'hero.upgradeSkill', heroId: 'xiangyu', index: 0 }, ctx)
 
     expect(res.ok).toBe(false)
-    expect(save.player.skillStones).toBe(0)
-    // ⚠ 术式结晶与圣杯结晶是两个资源，扣错就白扣抽卡资源（历史 bug）
+    expect(save.items[SKILL_MAT_ID]).toBe(0)
+    // ⚠ 技能材料与圣杯结晶是两个资源，扣错就白扣抽卡资源（历史 bug）
     expect(save.player.crystals).toBe(crystalsBefore)
   })
 
-  it('升星：碎片或印记不足 → 都不变', () => {
+  it('升星：碎片不足 → 不变', () => {
     save.heroes['xiangyu'] = createHeroState('xiangyu', NOW)
     save.player.shards['xiangyu'] = 0
-    save.player.emblems = 0
     const before = JSON.stringify(save)
     const { ctx } = makeCtx(save)
 
@@ -190,7 +193,7 @@ describe('动作层：成功路径', () => {
     const rng = new Rng(7)
     save.relics = [makeTestRelic('set_zhanshen_1', rng, 1)]
     save.player.silver = 100_000
-    save.player.relicStones = 500
+    save.items.relicStoneTier1 = 500
     const uid = save.relics[0].uid
     const cost = relicUpgradeCost(1)!
     const modsBefore = getRelicMods(save.relics[0]).map((m) => m.value)
@@ -201,7 +204,8 @@ describe('动作层：成功路径', () => {
     expect(res.ok).toBe(true)
     expect(save.relics[0].level).toBe(2)
     expect(save.player.silver).toBe(100_000 - cost.silver)
-    expect(save.player.relicStones).toBe(500 - cost.stones)
+    // 强化石按档位扣（Lv1 → Lv2 落在初阶）
+    expect(save.items.relicStoneTier1).toBe(500 - (cost.stones.relicStoneTier1 ?? 0))
     const modsAfter = getRelicMods(save.relics[0]).map((m) => m.value)
     expect(modsAfter.some((v, i) => v > modsBefore[i])).toBe(true)
   })
@@ -211,7 +215,9 @@ describe('动作层：成功路径', () => {
     // ⚠ 上限取 core 配置，不写死数字（强化上限已由 60 提到 200）。
     save.relics = [makeTestRelic('set_zhanshen_1', rng, RELIC.MAX_LEVEL)]
     save.player.silver = 1_000_000_000
-    save.player.relicStones = 10_000_000
+    save.items.relicStoneTier1 = 10_000_000
+    save.items.relicStoneTier2 = 10_000_000
+    save.items.relicStoneTier3 = 10_000_000
     const { ctx } = makeCtx(save)
     const res = applyAction(save, { type: 'relic.upgrade', uid: save.relics[0].uid }, ctx)
     expect(res.ok).toBe(false)
@@ -220,7 +226,6 @@ describe('动作层：成功路径', () => {
 
   it('抽卡：结晶被扣、英灵入库、保底计数推进', () => {
     save.player.crystals = 3_000
-    save.player.tickets = 0
     const { ctx } = makeCtx(save)
 
     const res = applyAction(save, { type: 'gacha.pull', poolId: 'standard', count: 10 }, ctx)
@@ -234,46 +239,42 @@ describe('动作层：成功路径', () => {
     expect(save.stats.totalPulls).toBe(10)
   })
 
-  it('抽卡：结晶不够时自动用抽卡券补（逐抽计价）', () => {
+  it('抽卡：结晶不够 → 拒绝，不会扣成负数', () => {
     save.player.crystals = GACHA.COST_SINGLE * 3
-    save.player.tickets = 7
     const { ctx } = makeCtx(save)
 
     const res = applyAction(save, { type: 'gacha.pull', poolId: 'standard', count: 10 }, ctx)
 
-    expect(res.ok).toBe(true)
-    if (!res.ok) return
-    expect(res.result.crystalsUsed).toBe(GACHA.COST_SINGLE * 3)
-    expect(res.result.ticketsUsed).toBe(7)
-    expect(save.player.crystals).toBe(0)
-    expect(save.player.tickets).toBe(0)
+    expect(res.ok).toBe(false)
+    expect(save.player.crystals).toBe(GACHA.COST_SINGLE * 3)
   })
 
-  it('喂经验：池子扣减、英灵升级（经验池是唯一来源）', () => {
+  it('喂经验书：书被扣、英灵升级', () => {
     save.heroes['xiangyu'] = createHeroState('xiangyu', NOW)
-    save.player.exp = 10_000
+    save.items.expBookSmall = 10
     const { ctx } = makeCtx(save)
 
-    const res = applyAction(save, { type: 'hero.feedExp', heroId: 'xiangyu', amount: 1_000 }, ctx)
+    const res = applyAction(save, { type: 'hero.feedBooks', heroId: 'xiangyu', bookId: 'expBookSmall', count: 1 }, ctx)
 
     expect(res.ok).toBe(true)
-    expect(save.player.exp).toBe(9_000)
+    if (!res.ok) return
+    expect(save.items.expBookSmall).toBe(9)
     expect(save.heroes['xiangyu'].level).toBeGreaterThan(1)
   })
 
-  it('境界突破：印记扣减、境界推进、门槛上的经验立刻兑现', () => {
+  it('境界突破：银两扣减、境界推进、门槛上的经验立刻兑现', () => {
     save.heroes['xiangyu'] = { ...createHeroState('xiangyu', NOW), level: 60, exp: 0 }
-    save.player.emblems = 1_000
+    save.player.silver = 1_000_000
     const { ctx } = makeCtx(save)
 
     const res = applyAction(save, { type: 'hero.breakRealm', heroId: 'xiangyu' }, ctx)
 
     expect(res.ok).toBe(true)
-    expect(save.player.emblems).toBeLessThan(1_000)
+    expect(save.player.silver).toBeLessThan(1_000_000)
     expect(save.heroes['xiangyu'].level).toBeGreaterThan(60)
   })
 
-  it('遗物分解：返还银两与强化石、从仓库与装备槽移除', () => {
+  it('遗物分解：返还银两、从仓库与装备槽移除', () => {
     const rng = new Rng(11)
     save.relics = [makeTestRelic('set_zhanshen_1', rng, 10)]
     save.heroes['xiangyu'] = createHeroState('xiangyu', NOW)
@@ -350,9 +351,8 @@ describe('动作层：成功路径', () => {
   it('竞技场：段位分与勋章入账，且产出不回流 PVE 经济', () => {
     seedTeam(save)
     const silverBefore = save.player.silver
-    const expBefore = save.player.exp
-    const stonesBefore = save.player.relicStones
     const crystalsBefore = save.player.crystals
+    const itemsBefore = JSON.stringify(save.items)
     const { ctx } = makeCtx(save)
 
     const res = applyAction(save, { type: 'arena.settle' }, ctx)
@@ -361,10 +361,10 @@ describe('动作层：成功路径', () => {
     expect(save.arena.tierPoints).toBeGreaterThanOrEqual(0)
     expect(save.arena.medals).toBeGreaterThanOrEqual(0)
     // 合规红线：竞技产出绝不回流 PVE 经济
+    // ⚠ 资源/背包版本 v10：竞技**不再**发勋章 / 竞技材料（余额只读保留）
     expect(save.player.silver).toBe(silverBefore)
-    expect(save.player.exp).toBe(expBefore)
-    expect(save.player.relicStones).toBe(stonesBefore)
     expect(save.player.crystals).toBe(crystalsBefore)
+    expect(JSON.stringify(save.items)).toBe(itemsBefore)
   })
 
   it('一键推荐：按推荐铺满槽位，战力不低于之前', () => {

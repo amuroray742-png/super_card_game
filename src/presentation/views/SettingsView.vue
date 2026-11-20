@@ -198,7 +198,7 @@ async function doReset() {
       </p>
       <p class="tiny muted" style="margin: 0 0 8px">
         导出串含完整仓库（含全部遗物）。仓库很大时导出会超出导入上限——
-        这种情况请以**服务端备份**为准，导出串只作小档备份与早期迁移用。
+        这种情况请以<b>服务端备份</b>为准，导出串只作小档备份与早期迁移用。
       </p>
       <div class="row" style="gap: 6px">
         <button class="btn btn-sm" style="flex: 1" :disabled="busy" @click="doExport">导出存档</button>

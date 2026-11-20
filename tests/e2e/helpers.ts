@@ -278,17 +278,29 @@ export interface CachedSave {
   stats?: { totalPulls: number }
   player?: {
     crystals: number
-    tickets?: number
-    exp?: number
-    emblems?: number
     silver?: number
-    skillStones?: number
-    relicStones?: number
+    shards?: Record<string, number>
   }
+  /** 背包堆叠物（经验书 / 五行技能材料 / 三档强化石） */
+  items?: Record<string, number>
   heroes?: Record<string, { level: number; exp: number }>
+  /** 主线进度（副本**不写**这里 → 分开记账的判据） */
+  campaign?: { clearedStage: number; chapterProgress?: number }
   relics?: Array<{ defId: string; uid: string; level: number }>
   equipped?: Record<string, { heroId: string }>
   settings?: { speed?: number }
+}
+
+/**
+ * 奖励包里的**经验总量**（经验书折算）。
+ *
+ * ⚠ 资源/背包版本 v10：玩家经验池退役 → 经验由「经验书」产出，
+ *   奖励包里没有 `exp` 字段，只有一叠叠经验书（`rewards.items`）。
+ */
+export function expOfRewards(rewards: { items?: Record<string, number> }): number {
+  const small = rewards.items?.expBookSmall ?? 0
+  const large = rewards.items?.expBookLarge ?? 0
+  return small * 1_000 + large * 10_000
 }
 
 /** 服务端遗物实例（分页接口回包里的一条） */

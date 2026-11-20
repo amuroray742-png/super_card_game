@@ -62,7 +62,8 @@ describe('遗物图标约定', () => {
 describe('资源图标约定', () => {
   it('按资源 key 取图标路径', () => {
     expect(resourceIconPath('crystals')).toBe('/resources/crystals.webp')
-    expect(resourceIconPath('skillStones')).toBe('/resources/skillStones.webp')
+    // ⚠ 资源/背包版本 v10：术式结晶退役 → 改用新的堆叠道具 key
+    expect(resourceIconPath('skillMatGold')).toBe('/resources/skillMatGold.webp')
   })
 
   it('每一个资源 key 都有对应的图标文件（配置齐全 ≠ 资源齐全）', () => {

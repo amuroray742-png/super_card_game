@@ -28,7 +28,7 @@ import type {
   SaveData,
   StatMod,
 } from '../model/types.ts'
-import { ARENA, LADDER, LADDER_RETURN_REWARDS, LADDER_SEASON_REWARDS, TIERS } from '../config/economy.ts'
+import { LADDER, LADDER_RETURN_REWARDS, LADDER_SEASON_REWARDS, TIERS } from '../config/economy.ts'
 import { LADDER_TIERS, emptyLadderSquads } from '../config/ladder.ts'
 import { getEnemy } from '../config/enemies.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
@@ -212,25 +212,24 @@ export function ladderPointsFor(wins: number): number {
 // ─────────────────────────── 产出 ───────────────────────────
 
 /**
- * 天梯产出（**只含竞技专属资源**）。
+ * 天梯产出（**已整体退场**，恒为 0）。
  *
- * ⚠ 周上限与镜像试炼**共用**同一份预算（`arena.weeklyMedals`）——
- *   两个模式各发一份勋章却各算各的上限，玩家一周能拿到的勋章就是上限的两倍。
- *   共享预算是「竞技产出有上限」这条约束的唯一口径（铁律 #4）。
+ * ⚠ **实施修正（资源/背包版本 v10）**：天梯只承接**段位分与称号**，
+ *   勋章 / 竞技材料停发（设计稿 §3）。旧余额（`save.arena.medals`）只读保留。
+ *
+ * ⚠ 周上限参数保留在签名里，是为了让「周预算」的旧口径不被悄悄删掉——
+ *   但它们**不再参与计算**（返回的累计值原样透传）。
  */
 export function resolveLadderRewards(
   wins: number,
   weeklyMedals: number,
   weeklyMaterials: number,
 ): { reward: LadderReward; weeklyMedals: number; weeklyMaterials: number } {
-  const baseMedals = wins * 30 + (wins >= LADDER.SQUAD_COUNT ? 60 : 0)
-  const baseMaterials = wins * 10 + (wins >= LADDER.SQUAD_COUNT ? 30 : 0)
-  const medals = Math.min(baseMedals, Math.max(0, ARENA.MEDAL_WEEKLY_CAP - weeklyMedals))
-  const arenaMaterials = Math.min(baseMaterials, Math.max(0, ARENA.MATERIAL_WEEKLY_CAP - weeklyMaterials))
+  void wins
   return {
-    reward: { medals, arenaMaterials },
-    weeklyMedals: weeklyMedals + medals,
-    weeklyMaterials: weeklyMaterials + arenaMaterials,
+    reward: { medals: 0, arenaMaterials: 0 },
+    weeklyMedals,
+    weeklyMaterials,
   }
 }
 
@@ -242,7 +241,12 @@ export const LADDER_REWARD_ALLOWED_KEYS: readonly (keyof LadderReward)[] = [
 
 // ─────────────────────────── 赛季 ───────────────────────────
 
-/** 赛季结算奖励（按赛季内累计段位分分档） */
+/**
+ * 赛季结算奖励（按赛季内累计段位分分档）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：赛季奖励**只留称号**，
+ *   勋章 / 竞技材料恒为 0（设计稿 §3）。
+ */
 export function resolveSeasonReward(
   seasonPoints: number,
   season: number,
@@ -250,8 +254,8 @@ export function resolveSeasonReward(
   const spec = LADDER_SEASON_REWARDS.find((r) => seasonPoints >= r.minPoints)
     ?? LADDER_SEASON_REWARDS[LADDER_SEASON_REWARDS.length - 1]
   return {
-    medals: spec.medals,
-    arenaMaterials: spec.arenaMaterials,
+    medals: 0,
+    arenaMaterials: 0,
     title: spec.titleTier ? `ladder_title_${season}_${spec.titleTier}` : null,
     tier: spec.titleTier,
   }
@@ -360,16 +364,21 @@ export function detectReturnDays(save: SaveData, now: number): number {
   return days
 }
 
-/** 回流奖励（按离线天数分档；null = 不满足条件） */
+/**
+ * 回流奖励（按离线天数分档；null = 不满足条件）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：改发**通用经验书**（`items`），
+ *   竞技勋章停发（`medals` 恒为 0）——
+ *   设计稿 §3「日常、周目标、回流｜建议用少量通用经验书承接辅助养成奖励」。
+ */
 export function resolveReturnReward(
   offlineDays: number,
-): { skillStones: number; relicStones: number; medals: number } | null {
+): { items: Record<string, number>; medals: number } | null {
   if (offlineDays < LADDER.RETURN_MIN_OFFLINE_DAYS) return null
   const spec = LADDER_RETURN_REWARDS.find((r) => offlineDays >= r.minDays)
   if (!spec) return null
   return {
-    skillStones: spec.skillStones,
-    relicStones: spec.relicStones,
+    items: { ...spec.items },
     medals: spec.medals,
   }
 }

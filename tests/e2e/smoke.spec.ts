@@ -24,7 +24,8 @@ async function gotoApp(page: Page, hash = '#/expedition') {
 test.describe('《超级圣杯战争》核心链路', () => {
   test('首屏加载并显示底部标签栏', async ({ page }) => {
     await gotoApp(page)
-    for (const label of ['推征', '圣殿', '阵位', '铸造', '传承']) {
+    // ⚠ 资源/背包版本 v10：第 4 个标签「铸造」升级为「背包」（路径 /forge 与路由名保留）
+    for (const label of ['推征', '圣殿', '阵位', '背包', '传承']) {
       await expect(page.getByRole('button', { name: label, exact: false }).first()).toBeVisible()
     }
   })
@@ -87,13 +88,28 @@ test.describe('《超级圣杯战争》核心链路', () => {
 })
 
 test.describe('抽卡入口可达（核心闭环）', () => {
-  test('铸造页提供召唤入口并可跳转到召唤页', async ({ page }) => {
+  test('背包页仍能把玩家送进召唤页（顶栏资源弹窗直达）', async ({ page }) => {
+    // ⚠ 资源/背包版本 v10：「铸造」页升级为「背包」后**不再自带召唤面板**，
+    //   但召唤入口没有丢——它收在顶栏「圣杯结晶」的说明弹窗里（铁律 #10：
+    //   核心循环入口必须可达，不能只剩一句「可前往 XX」的纯文案）。
     await gotoApp(page, '#/forge')
-    const entry = page.getByRole('button', { name: '前往召唤', exact: true })
+    await page.locator('.res-item[data-res="crystals"]').click()
+    const dialog = page.getByTestId('resource-dialog')
+    await expect(dialog).toBeVisible()
+    const entry = dialog.getByRole('button', { name: '前往召唤', exact: true })
     await expect(entry).toBeVisible()
     await entry.click()
     await expect(page).toHaveURL(/#\/gacha/)
     await expect(page.getByText('概率公示').first()).toBeVisible()
+  })
+
+  test('背包页列出 5 个分类，并给出材料 → 副本的直达入口', async ({ page }) => {
+    await gotoApp(page, '#/forge')
+    for (const tab of ['relics', 'skillMat', 'relicStone', 'expBook', 'shards']) {
+      await expect(page.getByTestId(`backpack-tab-${tab}`)).toBeVisible()
+    }
+    await page.getByTestId('backpack-tab-skillMat').click()
+    await expect(page.getByTestId('backpack-go-dungeon-skillMatGold')).toBeVisible()
   })
 
   test('圣殿页提供召唤入口', async ({ page }) => {
@@ -108,22 +124,22 @@ test.describe('抽卡入口可达（核心闭环）', () => {
     // 名称已移到点击后的弹窗里（铁律 #8：名称取 core 的资源登记表）
     await expect(bar).not.toContainText('银两')
     await expect(bar).not.toContainText('圣杯结晶')
-    // 六项资源，每项一个图标 + 一个数量
+    // ⚠ 资源/背包版本 v10：顶栏只有**两种货币**（银两 + 圣杯结晶）
     const items = bar.locator('.res-item')
-    await expect(items).toHaveCount(6)
-    for (let i = 0; i < 6; i++) {
+    await expect(items).toHaveCount(2)
+    for (let i = 0; i < 2; i++) {
       await expect(items.nth(i).locator('img.res-icon')).toHaveCount(1)
     }
   })
 
   test('点击顶栏资源弹出名称与作用描述', async ({ page }) => {
     await gotoApp(page, '#/expedition')
-    await page.locator('.res-item[data-res="skillStones"]').click()
+    await page.locator('.res-item[data-res="silver"]').click()
     const dialog = page.getByTestId('resource-dialog')
     await expect(dialog).toBeVisible()
-    await expect(dialog).toContainText('术式结晶')
+    await expect(dialog).toContainText('银两')
     // 作用描述里有实质内容（不是空壳弹窗）
-    await expect(dialog).toContainText('技能')
+    await expect(dialog).toContainText('强化')
     // 点遮罩关闭
     await page.locator('.mask').click({ position: { x: 5, y: 5 } })
     await expect(dialog).toHaveCount(0)
@@ -216,72 +232,52 @@ test.describe('新手保底（§7.3 第 3 条）', () => {
   })
 })
 
-test.describe('抽卡券可用于十连（逐抽计价）', () => {
-  test('结晶耗尽后十连自动改用抽卡券，余额不会被扣成负数', async ({ page }) => {
+test.describe('抽卡只扣圣杯结晶（逐抽计价）', () => {
+  test('结晶耗尽后十连被拒，余额不会被扣成负数', async ({ page }) => {
     await gotoApp(page, '#/gacha')
 
     const tenBtn = page.getByTestId('pull-ten')
     const crystals = page.getByTestId('gacha-crystals')
-    const tickets = page.getByTestId('gacha-tickets')
 
-    // 新手资源：3000 结晶 + 10 张券 → 结晶优先
-    await expect(tenBtn).toContainText('结晶 3000')
+    // ⚠ 资源/背包版本 v10：抽卡券退役 → 新手资源只有结晶（6,000 = 20 抽）
+    await expect(tenBtn).toContainText('圣杯结晶 3000')
+    await expect(crystals).toHaveText('6,000')
+
+    // 第一次十连：扣 3000 结晶
+    await tenBtn.click()
+    await skipGachaReveal(page)
+    await page.getByRole('button', { name: '收下' }).click()
+    await expect(page.locator('.dialog')).toHaveCount(0)
     await expect(crystals).toHaveText('3,000')
-    await expect(tickets).toHaveText('10')
 
-    // 第一次十连：扣 3000 结晶，抽卡券不动
+    // 第二次十连：再扣 3000
     await tenBtn.click()
     await skipGachaReveal(page)
     await page.getByRole('button', { name: '收下' }).click()
     await expect(page.locator('.dialog')).toHaveCount(0)
     await expect(crystals).toHaveText('0')
-    await expect(tickets).toHaveText('10')
 
-    // 结晶用尽 → 十连改用抽卡券（券够就能召唤）
-    await expect(tenBtn).toContainText('券 10')
-    await tenBtn.click()
-    await skipGachaReveal(page)
-    await page.getByRole('button', { name: '收下' }).click()
-    await expect(page.locator('.dialog')).toHaveCount(0)
-    await expect(crystals).toHaveText('0')
-    await expect(tickets).toHaveText('0')
-
-    // 券也用尽 → 按钮禁用，资源不得出现负数
+    // 结晶用尽 → 按钮禁用，资源不得出现负数
     await expect(tenBtn).toBeDisabled()
     await expect(crystals).toHaveText('0')
-    await expect(tickets).toHaveText('0')
   })
 
-  test('十连混合支付只扣对应余额（结晶 2700 + 券 1）', async ({ page }) => {
+  test('十连按钮文案写的是实际要扣的结晶数', async ({ page }) => {
     await gotoApp(page, '#/gacha')
 
     const singleBtn = page.getByTestId('pull-single')
     const tenBtn = page.getByTestId('pull-ten')
     const crystals = page.getByTestId('gacha-crystals')
-    const tickets = page.getByTestId('gacha-tickets')
 
-    // 新手资源：3000 结晶 + 10 张券
-    await expect(crystals).toHaveText('3,000')
-    await expect(tickets).toHaveText('10')
+    await expect(crystals).toHaveText('6,000')
+    await expect(tenBtn).toContainText('圣杯结晶 3000')
 
-    // 先单抽一次（结晶优先 → 扣 300 结晶），把结晶压到只够 9 抽
+    // 先单抽一次（扣 300 结晶）
     await singleBtn.click()
     await skipGachaReveal(page)
     await page.getByRole('button', { name: '收下' }).click()
     await expect(page.locator('.dialog')).toHaveCount(0)
-    await expect(crystals).toHaveText('2,700')
-    await expect(tickets).toHaveText('10')
-
-    // 结晶只够 9 抽 → 十连必须用 9 抽结晶 + 1 张券补齐，按钮文案与实际扣费一致
-    await expect(tenBtn).toContainText('结晶 2700 + 券 1')
-    await tenBtn.click()
-    await skipGachaReveal(page)
-    await page.getByRole('button', { name: '收下' }).click()
-    await expect(page.locator('.dialog')).toHaveCount(0)
-
-    // 只扣对应余额：结晶清零（2700），抽卡券只扣 1 张（10 → 9）
-    await expect(crystals).toHaveText('0')
-    await expect(tickets).toHaveText('9')
+    await expect(crystals).toHaveText('5,700')
   })
 })
 

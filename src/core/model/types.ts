@@ -3,6 +3,9 @@
  * 新增系统只在此扩展类型，业务代码不得自行发明结构。
  */
 
+import type { ItemId } from '../config/items.ts'
+import type { DungeonDifficultyId, RelicStoneTierId } from '../config/economy.ts'
+
 // ─────────────────────────── 基础标签 ───────────────────────────
 
 /** 五行相性。相克环：金 → 木 → 土 → 水 → 火 → 金 */
@@ -507,12 +510,10 @@ export interface DropTable {
 
 export interface RewardBundle {
   silver?: number
-  exp?: number
-  emblems?: number
   crystals?: number
-  tickets?: number
-  skillStones?: number
-  relicStones?: number
+  /** 堆叠道具（经验书 / 五行技能材料 / 强化石等） */
+  items?: Partial<Record<ItemId, number>>
+  /** 同名英灵碎片（按英灵 id 分堆） */
   shards?: Record<string, number>
   relics?: string[]
   heroes?: string[]
@@ -585,6 +586,19 @@ export interface PoolState {
   totalPulls: number
 }
 
+/**
+ * **挂机去向**（资源/背包版本 v10）。
+ *
+ * ⚠ 三个去向共用**同一份时间账本**（`save.idle.measuredAt` / `effectiveMs` …），
+ *   切换时先按**旧去向**结清，再换新去向（设计稿 §3）。
+ *
+ * ⚠ 副本**不写** `campaign`（进度与主线记录分别记账）。
+ */
+export type IdleTarget =
+  | { kind: 'campaign' }
+  | { kind: 'skill'; element: Element; difficulty: DungeonDifficultyId }
+  | { kind: 'enhance'; tier: RelicStoneTierId; difficulty: DungeonDifficultyId }
+
 export interface SaveData {
   version: number
   createdAt: number
@@ -606,15 +620,41 @@ export interface SaveData {
   rng: { seed: number; counter: number }
   player: {
     silver: number
-    exp: number
-    shards: Record<string, number>
-    emblems: number
     crystals: number
-    tickets: number
-    skillStones: number
-    relicStones: number
+    /**
+     * 同名英灵碎片（英灵 id → 数量）。
+     *
+     * ⚠ **实施修正（资源/背包版本 v10）**：它不进 `items`——
+     *   碎片是「按英灵分堆」，形状与普通堆叠物不同（键是英灵 id，不是道具 id）。
+     */
+    shards: Record<string, number>
     permBoost: number
     rebirthCount: number
+  }
+  /**
+   * **背包堆叠物**（道具 id → 数量）。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：新增通用堆叠道具系统。
+   *   玩家经验池 / 术式结晶 / 遗物强化石 / 抽卡券 / 英灵印记全部退役，
+   *   统一由这里承载（道具定义见 `core/config/items.ts`）。
+   *
+   * ⚠ 它是**顶层字段**而不是 `player` 上的字段：`player` 只留钱包
+   *   （银两 + 圣杯结晶），背包是另一回事（设计稿 §1「钱包只有银两和圣杯结晶」）。
+   */
+  items: Record<ItemId, number>
+  /**
+   * 旧档的一次性分配权益（v9 → v10 迁移产物）。
+   *
+   * ⚠ 术式结晶 / 遗物强化石**不自动折算**：玩家自己选一个五行 / 一个石档，
+   *   分配后立即核销（避免强塞无用材料或按件数放大高阶价值，实现文档 §2）。
+   */
+  legacy: {
+    /** 旧术式结晶待分配额 */
+    skillStones: number
+    /** 旧遗物强化石待分配额 */
+    relicStones: number
+    /** 是否已分配（一次性） */
+    allocated: boolean
   }
   heroes: Record<string, HeroState>
   relics: RelicInstance[]
@@ -641,12 +681,31 @@ export interface SaveData {
     clearedStage: number
     stageStars: Record<string, number>
     chapterProgress: number
+    /**
+     * **已发放首通结晶的关卡数**（账号级首通记录）。
+     *
+     * ⚠ **实施修正（资源/背包版本 v10）**：主线首通首次通关奖励圣杯结晶
+     *   （设计稿 §3）。判定依据是 `clearedStage` 这个**单调高水位**的增量：
+     *   `clearedStage` 从 N 涨到 M 时，第 N+1..M 关就是本次首次通关。
+     *
+     * ⚠ 圣杯重启**不重置**它（`performRebirth` 从不碰 `campaign`）→
+     *   它天然是**账号级**记录，跨设备、跨重启都在（实现文档 §2）。
+     */
+    creditedStages: number
   }
   idle: {
     /** 玩家选定或自动推进的挑战目标。 */
     currentStage: number
     /** 挑战受阻时的刷取关卡及下次重试前所需的胜场。 */
     farm?: { stage: number | null; winsUntilRetry: number }
+    /**
+     * **挂机去向**（主线 / 技能副本 / 强化副本）。
+     *
+     * ⚠ **实施修正（资源/背包版本 v10）**：三个去向**共用一份挂机时间账本**
+     *   （`measuredAt` / `effectiveMs` / …），切换时先结清旧目标再换新目标
+     *   （设计稿 §3「三个去向共用一份挂机时间」）。
+     */
+    target: IdleTarget
     autoAdvance: boolean
     totalIdleSeconds: number
     /** 服务端已计量水位/有效预算；旧档缺失时惰性迁移。 */

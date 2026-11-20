@@ -45,6 +45,10 @@
  * npx tsx tools/capture/screenshot.ts --relic --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/relic.png
  *
+ * # 背包场景（导入前置 → 背包 5 分类 + 五行筛选 + 材料→副本直达 + 副本页）
+ * npx tsx tools/capture/screenshot.ts --backpack --api http://127.0.0.1:8791 \
+ *   --url http://127.0.0.1:4188 --out artifacts/art-preview/backpack.png
+ *
  * # 每日任务场景（注册账号 → 十连 → 每日页：签到 / 每日任务 / 周目标）
  * npx tsx tools/capture/screenshot.ts --daily --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/daily.png
@@ -62,7 +66,7 @@ import { chromium, webkit, type Browser, type BrowserContext, type Page } from '
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { assertSafeOrigin, ISOLATED_PREVIEW_URL } from './origin-guard.ts'
-import { buildRelicFixture, importRelicFixture } from './relic-fixture.ts'
+import { buildRelicFixture, buildBackpackFixture, importRelicFixture } from './relic-fixture.ts'
 
 /** 隔离预览服务默认端口（与 dev server 刻意不同） */
 const DEFAULT_URL = ISOLATED_PREVIEW_URL
@@ -81,6 +85,8 @@ interface Options {
   gachaReveal: boolean
   /** 遗物场景：登录 → 十连 → 编队 → 推征产遗物 → 铸造页 + 英灵页 */
   relic: boolean
+  /** 背包场景：导入前置 → 背包 5 分类 + 五行筛选 + 材料→副本直达 + 副本页 */
+  backpack: boolean
   /** 每日任务场景：登录 → 十连 → 每日页（签到 / 每日任务 / 周目标） */
   daily: boolean
   /** 演武场场景：登录 → 十连 → 演武场页（三队编成 / 敌方梯队 / 挑战） */
@@ -116,6 +122,7 @@ function parseArgs(argv: string[]): Options {
     gachaTicket: argv.includes('--gacha-ticket'),
     gachaReveal: argv.includes('--gacha-reveal'),
     relic: argv.includes('--relic'),
+    backpack: argv.includes('--backpack'),
     daily: argv.includes('--daily'),
     ladder: argv.includes('--ladder'),
     compat: argv.includes('--compat'),
@@ -507,8 +514,80 @@ async function runRelicScenario(
   return ''
 }
 
-// ─────────────────────────── 浏览器兼容性测量 ───────────────────────────
+/**
+ * 背包场景（资源/背包版本 v10）：导入前置存档 → 背包 5 分类 + 五行筛选 + 副本页。
+ *
+ * 截图用于验收四件事：
+ * 1. **5 个分类**都在（遗物 / 技能材料 / 强化材料 / 经验书 / 卡碎片），
+ *    分类与筛选条件写在 URL 上（分享链接能还原同一屏）；
+ * 2. **道具名称与数量**来自登记表（`ITEM_DEFS`），不是就地写的中文串；
+ * 3. **材料 → 副本直达入口**摆在玩家眼前（铁律 #27「养成规则必须在玩家眼前」）；
+ * 4. **副本页**的变体 / 难度 / 每胜产量与「设为挂机去向」。
+ *
+ * ⚠ 走「导入前置」而不是真去刷副本：副本一场要真实等 6 秒，
+ *   而截图要的是「5 个分类都有货」的**版面**，不是产出速度。
+ */
+async function runBackpackScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  const session = await registerSession(opts.api)
+  await importRelicFixture(opts.api, session.accessToken, buildBackpackFixture())
+  await injectSession(context, opts, session)
+  const base = opts.url.replace(/\/$/, '')
 
+  // ① 技能材料分类（五行筛选 + 「去副本」直达入口）
+  await page.goto(`${base}/#/forge?tab=skillMat`, { waitUntil: 'networkidle' })
+  await page.getByTestId('backpack-tab-skillMat').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(600)
+  await assertResourceBarFullyVisible(page)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-skillMat.png'), fullPage: opts.fullPage })
+
+  // ② 切到「火」筛选（筛选项在 URL 上）
+  await page.getByTestId('backpack-element-火').click()
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-skillMat-fire.png'), fullPage: opts.fullPage })
+
+  // ③ 强化材料分类（三档强化石）
+  await page.goto(`${base}/#/forge?tab=relicStone`, { waitUntil: 'networkidle' })
+  await page.getByTestId('backpack-tab-relicStone').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-relicStone.png'), fullPage: opts.fullPage })
+
+  // ④ 经验书分类（面额 + 投喂入口）
+  await page.goto(`${base}/#/forge?tab=expBook`, { waitUntil: 'networkidle' })
+  await page.getByTestId('backpack-tab-expBook').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-expBook.png'), fullPage: opts.fullPage })
+
+  // ⑤ 卡碎片分类（点一下跳英灵页）
+  await page.goto(`${base}/#/forge?tab=shards`, { waitUntil: 'networkidle' })
+  await page.getByTestId('backpack-tab-shards').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-shards.png'), fullPage: opts.fullPage })
+
+  // ⑥ 材料 → 副本直达（点「去副本」应当真的跳到副本页）
+  await page.goto(`${base}/#/forge?tab=skillMat`, { waitUntil: 'networkidle' })
+  await page.getByTestId('backpack-go-dungeon-skillMatFire').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.getByTestId('backpack-go-dungeon-skillMatFire').click()
+  await page.getByTestId('dungeon-kind-skill').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-dungeon.png'), fullPage: opts.fullPage })
+
+  // ⑦ 强化副本页（三档石 + 每胜产量 + 设为挂机去向）
+  await page.goto(`${base}/#/dungeon?kind=enhance&tier=relicStoneTier1&difficulty=easy`, {
+    waitUntil: 'networkidle',
+  })
+  await page.getByTestId('dungeon-variant-enhanceTier1').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-dungeon-enhance.png'), fullPage: opts.fullPage })
+
+  return ''
+}
+
+// ─────────────────────────── 浏览器兼容性测量 ───────────────────────────
 /**
  * 兼容性测量（roadmap P1-3「按设计基线实测 Safari、微信内置浏览器、低端 Android 及 4G 首屏」）。
  *
@@ -875,8 +954,8 @@ async function main(): Promise<void> {
     await runCompatScenario(opts)
     return
   }
-  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic || opts.daily || opts.ladder) && !opts.api) {
-    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物 / 每日任务 / 演武场场景需要 --api <隔离后端地址>（用于注册临时账号）')
+  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic || opts.backpack || opts.daily || opts.ladder) && !opts.api) {
+    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物 / 背包 / 每日任务 / 演武场场景需要 --api <隔离后端地址>（用于注册临时账号）')
   }
 
   const target = `${opts.url.replace(/\/$/, '')}/#${opts.route}`
@@ -902,6 +981,8 @@ async function main(): Promise<void> {
       resultPath = await runBattleScenario(context, page, opts, outPath)
     } else if (opts.relic) {
       await runRelicScenario(context, page, opts, outPath)
+    } else if (opts.backpack) {
+      await runBackpackScenario(context, page, opts, outPath)
     } else if (opts.daily) {
       await runDailyScenario(context, page, opts, outPath)
     } else if (opts.ladder) {
@@ -929,7 +1010,7 @@ async function main(): Promise<void> {
       await page.waitForTimeout(400)
     }
 
-    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic && !opts.daily && !opts.ladder) {
+    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic && !opts.backpack && !opts.daily && !opts.ladder) {
       await page.screenshot({ path: outPath, fullPage: opts.fullPage })
     }
     if (resultPath) {

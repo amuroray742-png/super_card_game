@@ -22,15 +22,13 @@ export interface InventoryOverflowResult {
   salvaged: number
   /** 折算出的银两 */
   silver: number
-  /** 折算出的遗物强化石 */
-  stones: number
   /** 因受保护（锁定 / 已装备）而保留、仍超出上限的件数 */
   skipped: number
 }
 
 /** 空结果（未触发溢出时返回） */
 export function emptyOverflow(): InventoryOverflowResult {
-  return { salvaged: 0, silver: 0, stones: 0, skipped: 0 }
+  return { salvaged: 0, silver: 0, skipped: 0 }
 }
 
 /** 存档里已装备的遗物 uid */
@@ -77,19 +75,15 @@ export function enforceInventoryCap(save: SaveData): InventoryOverflowResult {
 
   const taken = new Set(take.map((relic) => relic.uid))
   let silver = 0
-  let stones = 0
   for (const relic of take) {
     const value = decomposeValue(relic)
     silver += value.silver
-    stones += value.stones
   }
   save.relics = save.relics.filter((relic) => !taken.has(relic.uid))
   save.player.silver += silver
-  save.player.relicStones += stones
 
   result.salvaged = take.length
   result.silver = silver
-  result.stones = stones
   result.skipped = surplus - take.length
   return result
 }

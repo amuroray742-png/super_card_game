@@ -60,12 +60,14 @@ describe('资源登记表', () => {
     // 占位符取值直接引用配置常量，不写死
     expect(RESOURCE_TEXT_VARS.gachaCost).toBe(GACHA.COST_SINGLE)
     expect(RESOURCE_TEXT_VARS.tenPullCount).toBe(GACHA.TEN_PULL_COUNT)
-    expect(RESOURCE_TEXT_VARS.ticketPerPull).toBe(GACHA.TICKET_PER_PULL)
-    expect(RESOURCE_TEXT_VARS.skillStoneCost).toBe(SKILL.SKILL_STONES_PER_LEVEL)
+    expect(RESOURCE_TEXT_VARS.skillMaterialCost).toBe(SKILL.MATERIAL_PER_LEVEL)
     expect(RESOURCE_TEXT_VARS.skillSilverCost).toBe(SKILL.SILVER_PER_LEVEL)
     expect(RESOURCE_TEXT_VARS.relicStoneCost).toBe(RELIC.STONES_PER_LEVEL)
     expect(RESOURCE_TEXT_VARS.relicSilverCost).toBe(RELIC.SILVER_PER_LEVEL)
-    expect(RESOURCE_TEXT_VARS.overSegmentStart).toBe(RELIC.OVER_SEGMENT_START)
+    // 强化石分三档，档位区间取自 RELIC.STONE_TIERS（不是淬炼段边界——两套口径）
+    expect(RESOURCE_TEXT_VARS.relicStoneTier1Max).toBe(RELIC.STONE_TIERS[0].maxLevel)
+    expect(RESOURCE_TEXT_VARS.relicStoneTier2Min).toBe(RELIC.STONE_TIERS[1].minLevel)
+    expect(RESOURCE_TEXT_VARS.relicStoneTier3Max).toBe(RELIC.STONE_TIERS[2].maxLevel)
 
     // 渲染后的文案里确实出现了当前配置值（而不是模板里的旧数字）
     for (const key of RESOURCE_ICON_KEYS) {
@@ -104,7 +106,8 @@ describe('顶栏资源口径', () => {
       .filter(([, def]) => def.gachaEntry)
       .map(([key]) => key)
       .sort()
-    expect(withEntry).toEqual(['crystals', 'tickets'])
+    // ⚠ 资源/背包版本 v10：抽卡券已退役 → 只有圣杯结晶一个召唤入口
+    expect(withEntry).toEqual(['crystals'])
   })
 
   it('取名与取描述的便捷函数与登记表一致', () => {

@@ -75,6 +75,18 @@ export const GAME_ERROR_CODES = {
   SAVE_EXISTS: 'SAVE_EXISTS',
   /** 动作已执行，原结果超过重放保留期 */
   ACTION_REPLAY_EXPIRED: 'ACTION_REPLAY_EXPIRED',
+  /**
+   * 客户端版本过旧（调用了已退役的动作）。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：`hero.feedExp` 保留在动作联合类型里，
+   *   但恒定返回本码——旧客户端调它时得到一个**明确**的拒绝，
+   *   而不是静默失败（静默失败会让玩家以为「经验不足」）。
+   */
+  CLIENT_OUTDATED: 'CLIENT_OUTDATED',
+  /** 材料副本未解锁 */
+  MATERIAL_UNLOCKED: 'MATERIAL_UNLOCKED',
+  /** 旧档的一次性分配权益已经分配过了 */
+  LEGACY_ALREADY_ALLOCATED: 'LEGACY_ALREADY_ALLOCATED',
 } as const
 
 export type GameErrorCode = (typeof GAME_ERROR_CODES)[keyof typeof GAME_ERROR_CODES]
@@ -117,6 +129,9 @@ export const GAME_ERROR_MESSAGES: Record<GameErrorCode, string> = {
   SAVE_MISSING: '账号还没有存档',
   SAVE_EXISTS: '账号已经有存档了',
   ACTION_REPLAY_EXPIRED: '该操作已执行，结果已过重试期限，请查看当前进度',
+  CLIENT_OUTDATED: '客户端版本过旧，请刷新页面',
+  MATERIAL_UNLOCKED: '该副本尚未解锁',
+  LEGACY_ALREADY_ALLOCATED: '旧档权益已经分配过了',
 }
 
 /** 是否属于「已知的动作错误码」 */

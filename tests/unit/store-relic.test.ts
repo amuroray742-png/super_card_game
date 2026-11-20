@@ -226,14 +226,17 @@ describe('遗物强化', () => {
       save.relics = [relic]
     })
     const silver0 = store.save.player.silver
-    const stones0 = store.save.player.relicStones
+    const stones0 = store.save.items.relicStoneTier1
 
     await store.upgradeRelic(relic.uid)
 
     const upgraded = (await serverRelics()).find((r) => r.uid === relic.uid)
     expect(upgraded?.level).toBe(2)
     expect(store.save.player.silver).toBe(silver0 - RELIC_UPGRADE.silver)
-    expect(store.save.player.relicStones).toBe(stones0 - RELIC_UPGRADE.stones)
+    // ⚠ 资源/背包版本 v10：强化石按**档位**扣（Lv1 → Lv2 落在初阶）
+    expect(store.save.items.relicStoneTier1).toBe(
+      stones0 - (RELIC_UPGRADE.stones.relicStoneTier1 ?? 0),
+    )
   })
 
   it('资源不足时拒绝强化：不扣资源、等级不变', async () => {
@@ -243,7 +246,7 @@ describe('遗物强化', () => {
     await seedSave((save) => {
       save.relics = [relic]
       save.player.silver = 0
-      save.player.relicStones = 0
+      save.items.relicStoneTier1 = 0
     })
 
     await store.upgradeRelic(relic.uid)
@@ -251,7 +254,7 @@ describe('遗物强化', () => {
     const unchanged = (await serverRelics()).find((r) => r.uid === relic.uid)
     expect(unchanged?.level).toBe(1)
     expect(store.save.player.silver).toBe(0)
-    expect(store.save.player.relicStones).toBe(0)
+    expect(store.save.items.relicStoneTier1).toBe(0)
   })
 
   it('强化会真的提升属性（主词条随等级缩放）', async () => {
@@ -458,7 +461,9 @@ describe('遗物批量操作与锁定', () => {
     await seedSave((save) => {
       save.relics = relics
       save.player.silver = 0
-      save.player.relicStones = 0
+      // ⚠ 资源/背包版本 v10：强化石不再是 `player.relicStones`，
+      //   而是背包里的**分档道具**（目标等级落在哪一档就扣哪一档）。
+      for (const id of Object.keys(save.items)) save.items[id as keyof typeof save.items] = 0
     })
 
     const res = await store.upgradeRelics(relics.map((r) => r.uid))

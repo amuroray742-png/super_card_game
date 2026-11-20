@@ -1,14 +1,17 @@
 import type { SaveData } from '../model/types.ts'
-import { normalizeSave, SAVE_VERSION } from './schema.ts'
+import { migrate, normalizeSave, SAVE_VERSION } from './schema.ts'
 import { SAVE_IMPORT } from '../config/save-import.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { RELIC_INDEX } from '../config/relics.ts'
 import { POOLS } from '../config/pools.ts'
 import { STAGES } from '../config/stages.ts'
 import { BATTLE, LEVEL, STAR, SKILL, RELIC, REBIRTH, GACHA } from '../config/economy.ts'
+import { ITEM_IDS } from '../config/items.ts'
 import { parseEquipKey } from '../systems/loadout.ts'
 import { emptyLadderSquads } from '../config/ladder.ts'
 import { dayIndex, arenaWeekIndex } from '../time.ts'
+
+const ITEM_ID_SET = new Set<string>(ITEM_IDS)
 
 function requireValid(ok: unknown): asserts ok {
   if (!ok) throw new Error('Invalid legacy save')
@@ -44,12 +47,26 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   for (const k of ['relics', 'codes']) requireValid(Array.isArray(raw[k]))
   requireValid(Array.isArray(raw.team.slots) && raw.team.slots.length === 6 && Array.isArray(raw.team.presets))
   const save = normalizeSave(raw)
+  // ⚠ **实施修正（资源/背包版本 v10）**：导入路径**必须**走迁移。
+  //   `normalizeSave` 保留原始版本号（它曾把版本改写成当前版本 →
+  //   迁移对导入档完全不跑 → 导入的 v9 旧档会保留 `player.tickets` 等退役字段）。
+  //   迁移后退役字段被折算（券 → 结晶、印记 → 银两、经验池 → 经验书）。
+  migrate(save)
   for (const [k, v] of Object.entries(save.player)) {
     if (k === 'shards') {
       requireValid(record(v))
       for (const [id, n] of Object.entries(v)) requireValid(HERO_INDEX.has(id) && integer(n))
     } else requireValid(typeof v === 'number' && (k === 'permBoost' ? v <= REBIRTH.PERM_BOOST_CAP : integer(v)))
   }
+  // 背包堆叠物：只认已登记的道具 id，数量取非负整数
+  requireValid(record(save.items))
+  for (const [id, n] of Object.entries(save.items)) {
+    requireValid(ITEM_ID_SET.has(id) && integer(n))
+  }
+  // 旧档一次性分配权益
+  requireValid(record(save.legacy))
+  requireValid(integer(save.legacy.skillStones) && integer(save.legacy.relicStones))
+  requireValid(typeof save.legacy.allocated === 'boolean')
   for (const [id, hero] of Object.entries(save.heroes)) {
     requireValid(HERO_INDEX.has(id) && record(hero) && hero.id === id)
     requireValid(integer(hero.level, LEVEL.MIN, LEVEL.MAX) && integer(hero.star, STAR.MIN, STAR.MAX))
@@ -82,6 +99,7 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
     equipped.add(entry.relicId)
   }
   requireValid(integer(save.campaign.clearedStage, 0, STAGES.length) && STAGES.some(s => s.id === save.idle.currentStage))
+  requireValid(integer(save.campaign.creditedStages, 0, STAGES.length))
   requireValid(integer(save.gacha.pitySSR, 0, GACHA.PITY_SSR_MAX) && integer(save.gacha.pity10, 0, 10))
   requireValid(record(save.gacha.pools) && Array.isArray(save.gacha.history) && typeof save.gacha.newbieUsed === 'boolean')
   requireValid(record(save.arena) && Array.isArray(save.arena.runes))
@@ -127,5 +145,10 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   save.arena.ladder.lastReturnAt = 0
   save.arena.ladder.returnPending = false
   save.arena.ladder.returnDays = 0
+  // ⚠ **实施修正（资源/背包版本 v10）**：导入档**不拿**首通结晶的一次性补发
+  //   （实现文档 §2「客户端导入数据不能作为历史补偿凭证」），
+  //   所以把「已发放首通结晶的关卡数」直接对齐到导入的高水位——
+  //   否则下一次结算会把导入进度当成「本次首通」再发一遍（凭空几千万结晶）。
+  save.campaign.creditedStages = save.campaign.clearedStage
   return save
 }

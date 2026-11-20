@@ -108,13 +108,14 @@ describe('境界突破（境界门槛）', () => {
     expect(atRealmGate(LEVEL.MAX)).toBe(false)
   })
 
-  it('突破消耗是英灵印记，且逐境界递增', () => {
+  it('突破消耗是银两，且逐境界递增', () => {
     const c1 = realmBreakCost(60)!
     const c2 = realmBreakCost(120)!
     const c3 = realmBreakCost(180)!
-    expect(c1.emblems).toBeGreaterThan(0)
-    expect(c2.emblems).toBeGreaterThan(c1.emblems)
-    expect(c3.emblems).toBeGreaterThan(c2.emblems)
+    // ⚠ 资源/背包版本 v10：英灵印记退役 → 境界突破改扣银两（设计稿 §2）
+    expect(c1.silver).toBeGreaterThan(0)
+    expect(c2.silver).toBeGreaterThan(c1.silver)
+    expect(c3.silver).toBeGreaterThan(c2.silver)
     // 突破后进入新境界的第 1 级
     expect(c1.targetLevel).toBe(61)
     expect(c2.targetLevel).toBe(121)
@@ -129,10 +130,10 @@ describe('境界突破（境界门槛）', () => {
     expect(canBreakRealm(LEVEL.MIN, 9999)).toBe(false)
   })
 
-  it('印记不足时不能突破', () => {
+  it('银两不足时不能突破', () => {
     const cost = realmBreakCost(60)!
-    expect(canBreakRealm(60, cost.emblems)).toBe(true)
-    expect(canBreakRealm(60, cost.emblems - 1)).toBe(false)
+    expect(canBreakRealm(60, cost.silver)).toBe(true)
+    expect(canBreakRealm(60, cost.silver - 1)).toBe(false)
   })
 
   it('未到门槛时不能突破', () => {

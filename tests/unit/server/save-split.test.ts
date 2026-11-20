@@ -270,5 +270,8 @@ describe('仓库分页接口', () => {
     expect(stats.total).toBe(2)
     expect(stats.byDefId['set_zhanshen_1']).toBe(1)
     expect(stats.byDefId['set_zhanshen_5']).toBe(1)
+    // 仓库最高等级：强化副本的解锁线要用它
+    // （客户端镜像里 save.relics 只有已装备件 → 客户端算不出来）
+    expect(stats.maxLevel).toBe(7)
   })
 })

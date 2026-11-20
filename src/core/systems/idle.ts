@@ -160,6 +160,20 @@ export interface OfflineSettlementResult {
    *   否则「掉落被悄悄吞掉」会被当成 bug。
    */
   overflow: InventoryOverflowResult
+  /**
+   * 副本结算明细（**只在挂机去向是副本时出现**）。
+   *
+   * ⚠ 副本战败要**直接给出「降一档难度」的建议**
+   *   （设计稿「副本失败给出可刷的低难度选择」）。
+   */
+  dungeon?: {
+    /** 产出的道具 id */
+    itemId: string
+    /** 战败发生在第几场（1 起） */
+    blockedAtBattle: number | null
+    /** 建议降到的难度（已最低时为 null） */
+    suggestDifficulty: string | null
+  }
 }
 
 /**
@@ -221,7 +235,13 @@ interface RollResult {
   relics: string[]
 }
 
-/** 按关卡掉落表结算一次战斗的收益 */
+/**
+ * 按关卡掉落表结算一次战斗的收益。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：经验池退役 → 掉落**经验书**；
+ *   术式结晶 / 遗物强化石 / 英灵印记退役 → 不再投放。
+ *   掉落表里每一类道具**各自独立**掷一次概率（见 `economy.ts` 的 `ItemDrop`）。
+ */
 export function rollRewards(stage: StageDef, rng: Rng): RollResult {
   const table = DROP_TABLES[stage.dropTableId]
   const rewards: RewardBundle = {}
@@ -230,13 +250,19 @@ export function rollRewards(stage: StageDef, rng: Rng): RollResult {
   if (!table) return { rewards, relics }
 
   rewards.silver = rng.int(table.silver[0], table.silver[1])
-  rewards.exp = rng.int(table.exp[0], table.exp[1])
-  rewards.skillStones = rng.int(table.skillStones[0], table.skillStones[1])
-  rewards.relicStones = rng.int(table.relicStones[0], table.relicStones[1])
 
-  const emblemRange = table.emblems
-  if (emblemRange[1] > 0) {
-    rewards.emblems = rng.int(emblemRange[0], emblemRange[1])
+  // 堆叠道具：各自独立掷概率（概率 × 数量 = 期望产量）
+  if (table.items.length > 0) {
+    const items: Record<string, number> = {}
+    for (const drop of table.items) {
+      if (rng.next() * 100 >= drop.chance) continue
+      const count = rng.int(drop.min, drop.max)
+      if (count <= 0) continue
+      items[drop.id] = (items[drop.id] ?? 0) + count
+    }
+    if (Object.keys(items).length > 0) {
+      rewards.items = items as RewardBundle['items']
+    }
   }
 
   // 遗物掉落：按稀有度权重抽取
@@ -268,10 +294,14 @@ export function rollRewards(stage: StageDef, rng: Rng): RollResult {
 
 function mergeRewards(target: RewardBundle, source: RewardBundle, shards: Record<string, number>) {
   target.silver = (target.silver ?? 0) + (source.silver ?? 0)
-  target.exp = (target.exp ?? 0) + (source.exp ?? 0)
-  target.skillStones = (target.skillStones ?? 0) + (source.skillStones ?? 0)
-  target.relicStones = (target.relicStones ?? 0) + (source.relicStones ?? 0)
-  target.emblems = (target.emblems ?? 0) + (source.emblems ?? 0)
+  target.crystals = (target.crystals ?? 0) + (source.crystals ?? 0)
+  if (source.items) {
+    const bucket = { ...(target.items ?? {}) }
+    for (const [k, v] of Object.entries(source.items)) {
+      bucket[k as keyof typeof bucket] = (bucket[k as keyof typeof bucket] ?? 0) + v
+    }
+    target.items = bucket
+  }
   if (source.shards) {
     for (const [k, v] of Object.entries(source.shards)) shards[k] = (shards[k] ?? 0) + v
   }

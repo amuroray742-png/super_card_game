@@ -8,19 +8,29 @@ import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { BONDS } from '../../core/config/bonds.ts'
-import { SKILL, LEVEL } from '../../core/config/economy.ts'
+import { SKILL, LEVEL, EXP_BOOK } from '../../core/config/economy.ts'
+import {
+  EXP_BOOK_ITEM_EXP,
+  ITEM_BY_ELEMENT,
+  ITEM_DEFS,
+  ITEM_LIST,
+  type ItemId,
+} from '../../core/config/items.ts'
 import {
   expToNext,
   starUpCost,
   applyExp,
+  previewFeed,
   getHeroPassiveMods,
   skillLevelCap,
+  skillUpCost,
   realmBreakCost,
   atRealmGate,
 } from '../../core/systems/growth.ts'
+import { findDungeonVariant, dungeonDropAmount } from '../../core/config/dungeons.ts'
 import { RELIC_DEFS, RELIC_SETS, getHeroSetMods, relicUpgradeCost } from '../../core/systems/relic.ts'
 import type { RelicAdvice } from '../../core/systems/relic-advice.ts'
-import { relicIconPath } from '../../core/config/art.ts'
+import { relicIconPath, resourceIconPath } from '../../core/config/art.ts'
 import { resolveStats, computePower, getRealm, nextRealm } from '../../core/systems/stats.ts'
 import { RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { formatNumber } from '../utils/format'
@@ -35,16 +45,35 @@ const def = computed(() => HERO_INDEX.get(heroId.value) ?? null)
 const state = computed(() => store.save.heroes[heroId.value] ?? null)
 const owned = computed(() => !!state.value)
 
-/** 喂经验的档位（单位：经验）——经济数值，取自 core 配置（铁律 #5） */
-const EXP_FEEDS = LEVEL.EXP_FEED_OPTIONS
+/**
+ * 可用的经验书（背包里有的那些）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：玩家经验池退役 →
+ *   喂经验改为「选经验书 + 选数量 + 预览 + 使用」（设计稿 §2）。
+ */
+const bookList = computed(() => ITEM_LIST.filter((b) => b.category === 'expBook'))
+
+/** 选中的经验书 */
+const selectedBook = ref<ItemId>(EXP_BOOK.small.id)
+
+/** 选中的书当前持有量 */
+const bookOwned = computed(() => store.save.items[selectedBook.value] ?? 0)
+
+/** 想喂的本数 */
+const feedCount = ref(1)
 
 /**
- * 玩家经验池。
+ * 喂书预览（**纯计算**，不改存档）。
  *
- * ⚠ 喂经验的**唯一来源**——战斗 / 挂机掉落的经验进池子，喂给英灵时从池子里扣。
- *   （原实现只加不减，等于白嫖等级。）
+ * ⚠ 预览走 core 的 `previewFeed()`——表现层不得自己算「能升几级」
+ *   （铁律 #4：口径只有一份）。
  */
-const expPool = computed(() => store.save.player.exp)
+const feedPreview = computed(() => {
+  const s = state.value
+  if (!s) return null
+  const exp = EXP_BOOK_ITEM_EXP[selectedBook.value] ?? 0
+  return previewFeed(s, exp, feedCount.value)
+})
 
 /** 当前境界 */
 const realmLabel = computed(() => {
@@ -56,6 +85,8 @@ const realmLabel = computed(() => {
 
 /**
  * 境界门槛信息。卡在门槛（凡阶末 Lv60 / 名阶末 Lv120 / 圣阶末 Lv180）时才非空。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：突破改扣**银两**（印记已退役）。
  */
 const realmGate = computed(() => {
   const s = state.value
@@ -64,19 +95,19 @@ const realmGate = computed(() => {
   const cost = realmBreakCost(s.level)
   if (!cost) return null
   const next = nextRealm(s.level)
-  const emblems = store.save.player.emblems
-  return { cost, nextName: next?.name ?? '', emblems, ok: emblems >= cost.emblems }
+  const silver = store.save.player.silver
+  return { cost, nextName: next?.name ?? '', silver, ok: silver >= cost.silver }
 })
 
-/** 喂经验的可用性与提示 */
-function feedHint(amount: number): { ok: boolean; text: string } {
+/** 喂书的可用性与提示 */
+function feedHint(): { ok: boolean; text: string } {
   const s = state.value
   if (!s) return { ok: false, text: '' }
   if (s.level >= LEVEL.MAX) return { ok: false, text: '已达最高等级' }
-  if (expPool.value < amount) {
+  if (bookOwned.value < feedCount.value) {
     return {
       ok: false,
-      text: `经验不足（${formatNumber(expPool.value)} / ${formatNumber(amount)}）`,
+      text: `${ITEM_DEFS[selectedBook.value].name}不足（${formatNumber(bookOwned.value)} / ${formatNumber(feedCount.value)}）`,
     }
   }
   return { ok: true, text: '' }
@@ -89,9 +120,16 @@ const expPct = computed(() => {
   return Math.min(100, (state.value.exp / expNeed.value) * 100)
 })
 
-/** 升星消耗 */
+/** 升星消耗（**只扣同名碎片**，印记已退役） */
 const starCost = computed(() => (state.value ? starUpCost(state.value.star) : null))
 const shards = computed(() => store.save.player.shards[heroId.value] ?? 0)
+
+/** 升技能用的五行材料名（取登记表，不就地写中文名） */
+const skillMaterialName = computed(() => {
+  const element = def.value?.element
+  if (!element) return ''
+  return ITEM_DEFS[ITEM_BY_ELEMENT[element]].name
+})
 
 /** 6 个遗物槽 */
 const relicSlots = computed<(RelicInstance | null)[]>(
@@ -176,17 +214,22 @@ function gainOf(pre: FinalStats, cur: FinalStats) {
  *   是「喂 10.0万」的收益，预览与实际不符。
  *   试算用 `applyExp` 的**同一套语义**在克隆体上做（不碰真实存档），
  *   所以预览显示的等级与实际喂经验的结果必然一致。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：档位从「喂 N 经验」改成
+ *   「喂一本经验书」——经验池退役后，玩家能选的单位是**本数**。
  */
 const levelPreviews = computed(() => {
   const rt = runtime.value
   const cur = currentStats.value
   if (!rt || !cur) return []
   const out: { feed: number; levels: number; gain: ReturnType<typeof gainOf> }[] = []
-  for (const feed of EXP_FEEDS) {
+  for (const book of bookList.value) {
+    const exp = EXP_BOOK_ITEM_EXP[book.id] ?? 0
+    if (exp <= 0) continue
     const clone: HeroRuntime = { ...rt, state: { ...rt.state } }
-    const res = applyExp(clone.state, feed)
+    const res = applyExp(clone.state, exp)
     if (res.levelsGained <= 0) continue
-    out.push({ feed, levels: res.levelsGained, gain: gainOf(statsOf(clone), cur) })
+    out.push({ feed: exp, levels: res.levelsGained, gain: gainOf(statsOf(clone), cur) })
   }
   return out
 })
@@ -240,7 +283,12 @@ const menuRelic = computed(() =>
 /** 分解二次确认 */
 const confirmRelic = ref<RelicInstance | null>(null)
 
-/** 菜单里那件遗物的强化花费与可用性（银两 / 强化石不够就把差额写出来） */
+/**
+ * 菜单里那件遗物的强化花费与可用性（银两 / 强化石不够就把差额写出来）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：强化石分三档，扣的是**目标等级所属档**，
+ *   持有量与花费都按档读 `save.items`（不再是单一的 `player.relicStones`）。
+ */
 const menuUpgrade = computed(() => {
   const r = menuRelic.value
   if (!r) return { cost: null, ok: false, text: '' }
@@ -250,18 +298,29 @@ const menuUpgrade = computed(() => {
   if (p.silver < cost.silver) {
     return { cost, ok: false, text: `银两不足（${formatNumber(p.silver)} / ${formatNumber(cost.silver)}）` }
   }
-  if (p.relicStones < cost.stones) {
-    return {
-      cost,
-      ok: false,
-      text: `强化石不足（${formatNumber(p.relicStones)} / ${formatNumber(cost.stones)}）`,
+  for (const [id, need] of Object.entries(cost.stones)) {
+    const owned = store.save.items[id as ItemId] ?? 0
+    if (owned < (need ?? 0)) {
+      const name = ITEM_DEFS[id as ItemId]?.name ?? id
+      return {
+        cost,
+        ok: false,
+        text: `${name}不足（${formatNumber(owned)} / ${formatNumber(need ?? 0)}）`,
+      }
     }
   }
   return { cost, ok: true, text: '' }
 })
 
-function openPicker(slot: number) {
-  pickerSlot.value = slot
+/** 遗物强化石消耗文案（**按档位**，名称取登记表） */
+const menuStoneCostText = computed(() => {
+  const stones = menuUpgrade.value.cost?.stones ?? {}
+  return Object.entries(stones)
+    .map(([id, n]) => `${ITEM_DEFS[id as ItemId]?.name ?? id} ${n}`)
+    .join(' · ')
+})
+
+function openPicker(slot: number) {  pickerSlot.value = slot
   menuSlot.value = null
   pickerOpen.value = true
   void loadPicker(1)
@@ -381,8 +440,9 @@ async function applyRecommendation() {
 /**
  * 技能升级按钮的可用性与提示。
  *
- * ⚠ 消耗的是**术式结晶**（skillStones），与圣杯结晶是两回事；
- *   这里直接把「差多少」写出来，玩家不必自己换算。
+ * ⚠ **实施修正（资源/背包版本 v10）**：消耗的是**该英灵五行对应的技能材料**
+ *   （金 → 金系技能材料 …，材料 id 取 core 的 `ITEM_BY_ELEMENT`）+ 银两，
+ *   不再是单一的术式结晶。这里直接把「差多少」写出来，玩家不必自己换算。
  */
 function skillUpHint(index: number): { ok: boolean; text: string } {
   const s = state.value
@@ -391,21 +451,47 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
   if (cur >= skillLevelCap(s.level)) {
     return { ok: false, text: '当前等级无法继续提升（需先提升英灵等级）' }
   }
-  const p = store.save.player
-  if (p.skillStones < SKILL.SKILL_STONES_PER_LEVEL) {
+  const element = def.value?.element
+  if (!element) return { ok: false, text: '' }
+  const cost = skillUpCost(cur, element)
+  if (!cost) return { ok: false, text: '当前等级无法继续提升' }
+  const owned = store.save.items[cost.materialId] ?? 0
+  if (owned < cost.material) {
     return {
       ok: false,
-      text: `术式结晶不足（${formatNumber(p.skillStones)} / ${SKILL.SKILL_STONES_PER_LEVEL}）`,
+      text: `${ITEM_DEFS[cost.materialId].name}不足（${formatNumber(owned)} / ${formatNumber(cost.material)}）`,
     }
   }
-  if (p.silver < SKILL.SILVER_PER_LEVEL) {
+  if (store.save.player.silver < cost.silver) {
     return {
       ok: false,
-      text: `银两不足（${formatNumber(p.silver)} / ${formatNumber(SKILL.SILVER_PER_LEVEL)}）`,
+      text: `银两不足（${formatNumber(store.save.player.silver)} / ${formatNumber(cost.silver)}）`,
     }
   }
   return { ok: true, text: '' }
 }
+
+/**
+ * 技能材料对应的**副本入口**（闭环）。
+ *
+ * ⚠ 设计稿 §3「材料不足时，养成页直接打开匹配的副本，
+ *   并显示差额、每胜产量和返回主线入口」。
+ *
+ * ⚠ 每胜产量取自 core 的 `dungeonDropAmount`——表现层不自己算（铁律 #4）。
+ */
+const skillDungeon = computed(() => {
+  const element = def.value?.element
+  if (!element) return null
+  const variant = findDungeonVariant('skill', element)
+  if (!variant) return null
+  const drop = dungeonDropAmount(variant, 'easy')
+  return {
+    variant,
+    materialName: ITEM_DEFS[variant.itemId].name,
+    perWin: `${drop.min} ~ ${drop.max}`,
+    query: `/dungeon?kind=skill&element=${element}&difficulty=easy`,
+  }
+})
 </script>
 
 <template>
@@ -461,10 +547,6 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
             </div>
             <div class="bar" style="margin: 4px 0 6px">
               <i :style="{ width: `${expPct}%` }"></i>
-            </div>
-            <div class="row-between tiny">
-              <span class="muted">经验池</span>
-              <span data-testid="exp-pool">{{ formatNumber(expPool) }}</span>
             </div>
             <div class="row-between tiny">
               <span class="muted">境界</span>
@@ -531,48 +613,88 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
               :disabled="!realmGate.ok"
               @click="store.breakRealm(heroId)"
             >
-              境界突破（英灵印记 {{ realmGate.cost.emblems }}）
+              境界突破（银两 {{ formatNumber(realmGate.cost.silver) }}）
             </button>
             <div v-if="!realmGate.ok" class="tiny warn-text" style="margin-top: 3px">
-              英灵印记不足（{{ formatNumber(realmGate.emblems) }} / {{ realmGate.cost.emblems }}）
+              银两不足（{{ formatNumber(realmGate.silver) }} / {{ formatNumber(realmGate.cost.silver) }}）
             </div>
           </div>
 
-          <!-- 养成 -->
-          <div class="row" style="margin-top: 10px; gap: 6px; flex-wrap: wrap">
+          <!--
+            喂经验书（**实施修正 · 资源/背包版本 v10**）：
+            玩家经验池退役 → 改为「选书 + 选数量 + 预览 + 使用」。
+            预览走 core 的 `previewFeed()`，表现层不自己算能升几级（铁律 #4）。
+          -->
+          <div class="preview-box" style="margin-top: 8px">
+            <div class="tiny muted">喂经验书</div>
+            <div class="row" style="gap: 6px; margin-top: 4px; flex-wrap: wrap">
+              <button
+                v-for="book in bookList"
+                :key="book.id"
+                class="btn btn-sm"
+                :class="{ 'btn-primary': selectedBook === book.id }"
+                :data-book="book.id"
+                :disabled="(store.save.items[book.id] ?? 0) <= 0"
+                @click="selectedBook = book.id"
+              >
+                {{ book.name }}（{{ formatNumber(store.save.items[book.id] ?? 0) }}）
+              </button>
+            </div>
+            <div class="row" style="gap: 6px; margin-top: 6px; align-items: center">
+              <span class="tiny muted">数量</span>
+              <input
+                v-model.number="feedCount"
+                class="input"
+                type="number"
+                min="1"
+                :max="Math.max(1, bookOwned)"
+                data-testid="feed-count"
+                style="width: 90px"
+              />
+              <button
+                class="btn btn-sm"
+                :disabled="bookOwned <= 0"
+                data-testid="feed-max"
+                @click="feedCount = Math.max(1, bookOwned)"
+              >
+                最大
+              </button>
+            </div>
+            <div v-if="feedPreview" class="tiny muted" style="margin-top: 4px" data-testid="feed-preview">
+              预计：投入 {{ formatNumber(feedPreview.applied) }} 经验
+              <template v-if="feedPreview.levelsGained > 0">
+                · 提升 {{ feedPreview.levelsGained }} 级
+              </template>
+              <template v-else-if="feedPreview.blockedByRealm">· 已达境界门槛</template>
+              <template v-else>· 不足以升 1 级</template>
+              <template v-if="feedPreview.expRemaining > 0">
+                · 存于该英灵 {{ formatNumber(feedPreview.expRemaining) }} 经验
+              </template>
+            </div>
+            <div v-if="!feedHint().ok" class="tiny warn-text" style="margin-top: 3px">
+              {{ feedHint().text }}
+            </div>
             <button
-              v-for="n in EXP_FEEDS"
-              :key="n"
-              class="btn btn-sm"
-              style="flex: 1; min-width: 96px"
-              :data-feed="n"
-              :disabled="!feedHint(n).ok"
-              @click="store.feedExp(heroId, n)"
+              class="btn btn-sm btn-primary btn-block"
+              style="margin-top: 6px"
+              data-testid="feed-books"
+              :disabled="!feedHint().ok"
+              @click="store.feedBooks(heroId, selectedBook, feedCount)"
             >
-              喂 {{ formatNumber(n) }} 经验
+              使用{{ ITEM_DEFS[selectedBook].name }} ×{{ feedCount }}
             </button>
           </div>
-          <div v-if="EXP_FEEDS.some((n) => !feedHint(n).ok)" class="tiny warn-text" style="margin-top: 3px">
-            {{ feedHint(EXP_FEEDS.find((n) => !feedHint(n).ok)!).text }}
-          </div>
+
           <button
             class="btn btn-sm btn-block"
             style="margin-top: 6px"
-            data-testid="feed-all"
-            :disabled="expPool <= 0"
-            @click="store.feedExp(heroId, expPool)"
-          >
-            全部喂入（{{ formatNumber(expPool) }}）
-          </button>
-          <button
-            class="btn btn-sm btn-block"
-            style="margin-top: 6px"
-            :disabled="!starCost || shards < starCost.shards || store.save.player.emblems < starCost.emblems"
+            :disabled="!starCost || shards < starCost.shards"
+            data-testid="upgrade-star"
             @click="store.upgradeStar(heroId)"
           >
             升星
             <template v-if="starCost">
-              （碎片 {{ starCost.shards }} · 印记 {{ starCost.emblems }}）
+              （同名碎片 {{ starCost.shards }}）
             </template>
             <template v-else>（已达上限）</template>
           </button>
@@ -607,11 +729,22 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
             :disabled="!skillUpHint(i).ok"
             @click="store.upgradeSkill(heroId, i)"
           >
-            提升等级（术式结晶 {{ SKILL.SKILL_STONES_PER_LEVEL }} · 银两
+            提升等级（{{ skillMaterialName }} {{ SKILL.MATERIAL_PER_LEVEL }} · 银两
             {{ formatNumber(SKILL.SILVER_PER_LEVEL) }}）
           </button>
           <div v-if="state && !skillUpHint(i).ok" class="tiny warn-text" style="margin-top: 3px">
             {{ skillUpHint(i).text }}
+          </div>
+          <!--
+            闭环（设计稿 §3）：材料不足时**直接打开匹配的副本**，
+            并显示「每胜产量」——玩家不必自己换算缺多少。
+          -->
+          <div v-if="state && skillDungeon" class="tiny muted" style="margin-top: 4px">
+            {{ skillDungeon.materialName }} 来源：{{ skillDungeon.variant.name }} · 每胜
+            {{ skillDungeon.perWin }} 个
+            <button class="btn btn-sm btn-ghost" style="margin-left: 6px" @click="router.push(skillDungeon.query)">
+              前往副本
+            </button>
           </div>
         </div>
       </section>
@@ -824,8 +957,7 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
           </button>
         </div>
         <div v-if="menuUpgrade.cost" class="tiny muted" style="margin-top: 4px">
-          强化消耗：银两 {{ formatNumber(menuUpgrade.cost.silver) }} · 强化石
-          {{ menuUpgrade.cost.stones }}
+          强化消耗：银两 {{ formatNumber(menuUpgrade.cost.silver) }} · {{ menuStoneCostText }}
         </div>
         <div v-if="menuUpgrade.cost && !menuUpgrade.ok" class="tiny warn-text" style="margin-top: 2px">
           {{ menuUpgrade.text }}
@@ -838,7 +970,7 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
       <div class="dialog">
         <div class="panel-title">分解确认</div>
         <p class="tiny muted" style="margin: 0 0 10px; line-height: 1.8">
-          分解后该遗物会被移除，对应槽位同时清空，返还银两与强化石。
+          分解后该遗物会被移除，对应槽位同时清空，返还银两（不返还副本材料）。
         </p>
         <div class="row" style="gap: 8px">
           <button class="btn btn-sm" style="flex: 1" @click="confirmRelic = null">取消</button>

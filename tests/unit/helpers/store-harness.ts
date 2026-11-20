@@ -31,6 +31,11 @@ export async function registerAndLoad(username: string) {
  *
  * 默认给一支满养成队伍（240 级 / 6★ / 满技能）与充足资源，
  * 让「挂机 / 强化 / 一键推荐」这类链路能真正跑起来。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：术式结晶 / 遗物强化石退役 →
+ *   资源改放**背包堆叠物**（`save.items`）：
+ *   - 五行技能材料（土系，项羽是土属性）× 21,000；
+ *   - 三档强化石各 × 500。
  */
 export async function seedSave(patch?: (save: SaveData) => void): Promise<SaveData> {
   const store = useGameStore()
@@ -43,8 +48,10 @@ export async function seedSave(patch?: (save: SaveData) => void): Promise<SaveDa
   }
   save.team.slots[0] = 'xiangyu'
   save.player.silver = 1_000_000
-  save.player.skillStones = 21_000
-  save.player.relicStones = 500
+  save.items.skillMatEarth = 21_000
+  save.items.relicStoneTier1 = 500
+  save.items.relicStoneTier2 = 500
+  save.items.relicStoneTier3 = 500
   patch?.(save)
   const userId = useAccountStore().user?.id
   if (!userId) throw new Error('Seed requires authenticated user')

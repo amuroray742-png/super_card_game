@@ -11,6 +11,8 @@
  *   C. 数值合法性：概率和、倍率上下界、区间顺序、等级/星级边界
  *   D. 平衡性不变量：关卡门槛单调递增、章边界不倒挂
  *   E. 合规红线：敌人全部非历史人物、概率公示可复现
+ *   F. 经济红线：任务 / 周目标 / 回流 / 签到的奖励形状与投放预算
+ *   H. 道具登记与副本配置（资源/背包版本 v10 新增）
  *
  * 退出码：0 = 全通过；1 = 有 ERROR。
  */
@@ -25,6 +27,9 @@ import {
   BASE_RATES,
   BATTLE,
   DAILY,
+  DUNGEON_DIFFICULTIES,
+  DUNGEON_DROPS,
+  EXP_BOOK,
   GACHA,
   LEVEL,
   RELIC,
@@ -36,11 +41,22 @@ import {
   TIERS,
   ZONE,
   DROP_TABLES,
+  type DropTableDef,
 } from '../src/core/config/economy.ts'
 import { rarityProbabilities } from '../src/core/systems/gachaRates.ts'
-import { DAILY_TASKS, TASKS, WEEKLY_TASKS } from '../src/core/config/tasks.ts'
+import { DAILY_TASKS, TASKS, WEEKLY_TASKS, type TaskReward } from '../src/core/config/tasks.ts'
 import { LADDER, LADDER_RETURN_REWARDS, LADDER_SEASON_REWARDS } from '../src/core/config/economy.ts'
 import { LADDER_TIERS } from '../src/core/config/ladder.ts'
+import { RESOURCE_ICON_KEYS } from '../src/core/config/art.ts'
+import {
+  EXP_BOOK_ITEM_EXP,
+  ITEM_DEFS,
+  ITEM_IDS,
+  itemText,
+  type ItemId,
+} from '../src/core/config/items.ts'
+import { DUNGEON_VARIANTS } from '../src/core/config/dungeons.ts'
+import { computeOfflineEfficiency } from '../src/core/systems/idle.ts'
 import type { Rarity } from '../src/core/model/types.ts'
 
 // 加载注册型配置
@@ -50,6 +66,12 @@ import '../src/core/config/enemies.ts'
 /** BOSS 由 bossMechanic 字段标识 */
 const ENEMY_DEFS = ENEMY_INDEX
 const BOSS_DEFS = new Map([...ENEMY_INDEX].filter(([, e]) => e.bossMechanic !== undefined))
+
+/** 已登记的道具 id 集合（O(1) 判定，来源唯一口径 `config/items.ts`） */
+const ITEM_ID_SET = new Set<string>(ITEM_IDS)
+
+/** 需要出图的资源 key 集合（`config/art.ts` 的唯一口径） */
+const RESOURCE_ICON_KEY_SET = new Set<string>(RESOURCE_ICON_KEYS)
 
 interface Issue {
   level: 'ERROR' | 'WARN'
@@ -215,19 +237,33 @@ for (const stage of STAGES) {
   }
 }
 
+/**
+ * 主线掉落表校验。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：掉落表不再有 `exp` / `skillStones` /
+ *   `relicStones` / `emblems` 四个字段——经验改由**经验书**承载，
+ *   材料改由**副本**产出（主线只掉经验书与银两）。
+ */
 for (const [key, table] of Object.entries(DROP_TABLES)) {
-  for (const [field, range] of Object.entries({
-    silver: table.silver,
-    exp: table.exp,
-    skillStones: table.skillStones,
-    relicStones: table.relicStones,
-    emblems: table.emblems,
-  })) {
-    if (range[0] > range[1]) {
-      err('C/NUM', `掉落表 ${key} 的 ${field} 区间反了：${range[0]} > ${range[1]}`)
+  const silver = table.silver
+  if (silver[0] > silver[1]) {
+    err('C/NUM', `掉落表 ${key} 的 silver 区间反了：${silver[0]} > ${silver[1]}`)
+  }
+  if (silver[0] < 0) {
+    err('C/NUM', `掉落表 ${key} 的 silver 下界为负：${silver[0]}`)
+  }
+  for (const drop of table.items) {
+    if (!ITEM_ID_SET.has(drop.id)) {
+      err('B/REF', `掉落表 ${key} 的道具 ${drop.id} 未在 ITEM_DEFS 登记`)
     }
-    if (range[0] < 0) {
-      err('C/NUM', `掉落表 ${key} 的 ${field} 下界为负：${range[0]}`)
+    if (drop.chance < 0 || drop.chance > 100) {
+      err('C/NUM', `掉落表 ${key} 的道具 ${drop.id} 掉落概率 ${drop.chance} 不在 0~100`)
+    }
+    if (drop.min > drop.max) {
+      err('C/NUM', `掉落表 ${key} 的道具 ${drop.id} 数量区间反了：${drop.min} > ${drop.max}`)
+    }
+    if (drop.min < 1) {
+      err('C/NUM', `掉落表 ${key} 的道具 ${drop.id} 数量下界为 ${drop.min}，应 ≥ 1`)
     }
   }
 }
@@ -258,9 +294,8 @@ if (GACHA.TEN_PULL_COUNT !== 10) {
 if (GACHA.COST_SINGLE <= 0) {
   err('C/NUM', '单抽价格必须为正')
 }
-if (GACHA.TICKET_PER_PULL !== 1) {
-  err('C/NUM', `每抽消耗抽卡券 ${GACHA.TICKET_PER_PULL} 张，应为 1 张（1 张券恰好抵 1 抽）`)
-}
+// ⚠ **实施修正（资源/背包版本 v10）**：抽卡券已退役——抽卡**只扣圣杯结晶**
+//   （`resolvePayment(count, crystals)`），原来的「每抽消耗 1 张券」校验作废。
 
 if (STAR.MIN < 1 || STAR.MAX < STAR.MIN) err('C/NUM', '星级区间非法')
 if (LEVEL.MIN < 1 || LEVEL.MAX < LEVEL.MIN) err('C/NUM', '等级区间非法')
@@ -400,7 +435,10 @@ for (const r of rarities) {
 
 // 竞技场：段位匹配容差与勋章周上限必须存在，避免 PvP 成为免费抽卡渠道
 if (ARENA.MEDAL_WEEKLY_CAP <= 0) err('C/NUM', '竞技勋章周上限必须为正')
-if (ARENA.TICKET_WEEKLY_CAP <= 0) err('C/NUM', '竞技兑换抽卡券周上限必须为正')
+// ⚠ **实施修正（资源/背包版本 v10）**：竞技兑换抽卡券周上限已随钱包收敛退役
+//   （`ARENA.TICKET_WEEKLY_CAP` 不复存在）；竞技材料周上限保留为
+//   **历史余额的只读记录口径**（停止发放、停止消耗，但数值仍须合法）。
+if (ARENA.MATERIAL_WEEKLY_CAP <= 0) err('C/NUM', '竞技材料周上限必须为正')
 
 // 日常签到：7 天一轮，奖励表长度必须匹配
 if (DAILY.SIGN_IN_REWARDS.length !== DAILY.SIGN_IN_CYCLE) {
@@ -412,11 +450,17 @@ if (DAILY.SIGN_IN_REWARDS.length !== DAILY.SIGN_IN_CYCLE) {
 // 三条红线在这里被**静态**挡住（roadmap 验收要求）：
 //   1. 奖励里不能出现圣杯结晶 / 抽卡券 → 不冲击抽卡间隔；
 //   2. 奖励里不能出现竞技专属资源 → 不冲击竞技产出隔离；
-//   3. 奖励总量 ≤ 每小时挂机产出的 2% → 不冲击养成资源回收。
+//   3. 奖励里不能出现**副本专属材料** → 不稀释定向副本这条主线；
+//   4. 奖励总量有上限 → 不冲击养成资源回收。
+//
+// ⚠ **实施修正（资源/背包版本 v10）**：任务 / 周目标**只发通用经验书**
+//   （`TaskReward` 的形状改成 `{ expBooks?: { small?, large? } }`）。
+//   术式结晶 / 遗物强化石退役后，五行技能材料与三档强化石是**副本专属产出**
+//   ——日常白送会把「定向副本」这条主线稀释掉（设计稿 §3）。
 checkUnique('任务', TASKS.map((t) => t.id))
 
 /** 任务奖励允许出现的资源（与 config/tasks.ts 的 TaskReward 类型一致） */
-const ALLOWED_TASK_REWARDS = new Set(['skillStones', 'relicStones'])
+const ALLOWED_TASK_REWARDS = new Set(['expBooks'])
 
 for (const task of TASKS) {
   if (!Number.isInteger(task.target) || task.target <= 0) {
@@ -427,12 +471,21 @@ for (const task of TASKS) {
     if (!ALLOWED_TASK_REWARDS.has(key)) {
       err(
         'E/ECONOMY',
-        `任务 ${task.id} 的奖励含不允许的资源「${key}」：只允许强化石 / 术式结晶`
-          + '（发圣杯结晶会冲击抽卡间隔，发竞技资源会冲击竞技产出隔离）',
+        `任务 ${task.id} 的奖励含不允许的资源「${key}」：只允许通用经验书`
+          + '（发圣杯结晶会冲击抽卡间隔，发竞技资源会冲击竞技产出隔离，'
+          + '发五行技能材料 / 强化石会稀释副本的定向产出）',
       )
     }
-    if (typeof value !== 'number' || !(value > 0)) {
-      err('C/NUM', `任务 ${task.id} 的奖励 ${key} 非法：${String(value)}`)
+    // ⚠ `expBooks` 的值是 `{ small?, large? }`（不是数字）——逐档校验数量为正整数
+    if (key === 'expBooks' && value && typeof value === 'object') {
+      for (const [bookKey, count] of Object.entries(value as Record<string, unknown>)) {
+        if (bookKey !== 'small' && bookKey !== 'large') {
+          err('C/NUM', `任务 ${task.id} 的经验书档位「${bookKey}」非法（只允许 small / large）`)
+        }
+        if (typeof count !== 'number' || !(count > 0)) {
+          err('C/NUM', `任务 ${task.id} 的经验书奖励 ${bookKey} 非法：${String(count)}`)
+        }
+      }
     }
   }
   // 引导路由必须是 vue-router 的 name（小写下划线），不能是路径
@@ -444,36 +497,109 @@ if (DAILY_TASKS.length === 0) err('C/NUM', '每日任务为空')
 if (WEEKLY_TASKS.length === 0) err('C/NUM', '周目标为空')
 
 /**
- * 任务奖励预算：日投放 ≤ 每小时挂机产出的 2%。
+ * 一张掉落表的**期望经验**（经验书折算）。
  *
- * 分母取**第 1 章**的掉落期望（新号与日常玩家的实际产出水平）：
- * 任务奖励必须小到「即使每天都做完，也只是挂机几分钟的量」，
- * 否则等于在替玩家改经济节奏。
+ * ⚠ 经验不再是独立资源，而是「经验书的期望面值总和」——
+ *   口径只有这一份（`EXP_BOOK_ITEM_EXP` 是面额的唯一出处）。
  */
-const mid = ([lo, hi]: readonly [number, number]): number => (lo + hi) / 2
+function expectedExpOf(table: DropTableDef): number {
+  let exp = 0
+  for (const drop of table.items) {
+    const bookExp = EXP_BOOK_ITEM_EXP[drop.id]
+    if (!bookExp) continue
+    const count = (drop.min + drop.max) / 2
+    exp += (drop.chance / 100) * count * bookExp
+  }
+  return exp
+}
+
+/** 道具表 → 折算经验（只认经验书） */
+function itemsToExp(items: Partial<Record<ItemId, number>> | undefined): number {
+  if (!items) return 0
+  let exp = 0
+  for (const [id, count] of Object.entries(items)) {
+    const bookExp = EXP_BOOK_ITEM_EXP[id as ItemId]
+    if (!bookExp) continue
+    exp += (count ?? 0) * bookExp
+  }
+  return exp
+}
+
+/** 任务奖励 → 折算经验 */
+function taskRewardExp(rewards: TaskReward): number {
+  const books = rewards.expBooks
+  if (!books) return 0
+  let exp = 0
+  if (books.small) exp += books.small * (EXP_BOOK_ITEM_EXP[EXP_BOOK.small.id] ?? 0)
+  if (books.large) exp += books.large * (EXP_BOOK_ITEM_EXP[EXP_BOOK.large.id] ?? 0)
+  return exp
+}
+
+/**
+ * 任务奖励里的**副本材料**数量（必须恒为 0）。
+ *
+ * ⚠ `TaskReward` 类型里没有 `items` 字段（编译期就挡住了），这里再查一次运行时形状——
+ *   「副本专属产出不被日常稀释」是设计稿 §3 的红线，值得多一道运行时闸门。
+ */
+function taskMaterialCount(rewards: TaskReward): number {
+  const raw = rewards as unknown as Record<string, unknown>
+  const items = raw.items
+  if (!items || typeof items !== 'object') return 0
+  let count = 0
+  for (const [id, value] of Object.entries(items as Record<string, unknown>)) {
+    if (EXP_BOOK_ITEM_EXP[id as ItemId]) continue // 经验书不算副本材料
+    count += typeof value === 'number' ? value : 1
+  }
+  return count
+}
+
+/**
+ * 任务奖励预算：日投放 ≤ 每日挂机产出的 **1/3**（工具侧临时口径）。
+ *
+ * ⚠ **口径变更说明（资源/背包版本 v10）**：
+ *   原闸门是「日投放 ≤ 每小时挂机产出的 **2%**」，那把尺子是量
+ *   **术式结晶 / 遗物强化石**的——两者已随钱包收敛退役，任务表里也就不再有了。
+ *   现在任务只发**通用经验书**，于是：
+ *     · 材料维度 → 恒为 0（结构性红线，见上面的 `taskMaterialCount`）；
+ *     · 经验维度 → 分母换成**每日**挂机经验产出（任务是「每天」的流量，
+ *       用「一小时」做分母会把尺度差一个数量级）。
+ *   ⚠ 阈值 1/3 是**工具侧临时口径**（数值待策划确认）：
+ *   实测任务日投放 ≈ 每日挂机经验产出的 21%，回流日均 ≈ 6%。
+ */
+const TASK_EXP_BUDGET_RATIO = 1 / 3
+
 const battlesPerHour = Math.round(3600 / BATTLE.SECONDS_PER_BATTLE)
-const stage1 = DROP_TABLES.stage_1
-const hourlyIncome = {
-  relicStones: mid(stage1.relicStones) * battlesPerHour,
-  skillStones: mid(stage1.skillStones) * battlesPerHour,
-}
+/** 第 1 章每场的期望经验（新号与日常玩家的实际产出水平） */
+const stage1ExpPerBattle = expectedExpOf(DROP_TABLES.stage_1)
+/** 每日挂机经验产出 = core 的离线效率曲线 f(24h) × 场次/小时 × 每场期望经验 */
+const dailyIdleExp = computeOfflineEfficiency(24 * 3600) * battlesPerHour * stage1ExpPerBattle
+
 /** 任务日投放 = 每日任务全领 + 周目标摊到每天 */
-const taskDailyBudget = { relicStones: 0, skillStones: 0 }
-for (const task of DAILY_TASKS) {
-  taskDailyBudget.relicStones += task.rewards.relicStones ?? 0
-  taskDailyBudget.skillStones += task.rewards.skillStones ?? 0
+const taskDailyExp =
+  DAILY_TASKS.reduce((sum, t) => sum + taskRewardExp(t.rewards), 0) +
+  WEEKLY_TASKS.reduce((sum, t) => sum + taskRewardExp(t.rewards), 0) / 7
+
+/** 任务 / 周目标里的副本材料（必须为 0） */
+const taskMaterialTotal = [...DAILY_TASKS, ...WEEKLY_TASKS].reduce(
+  (sum, t) => sum + taskMaterialCount(t.rewards),
+  0,
+)
+if (taskMaterialTotal > 0) {
+  err(
+    'E/ECONOMY',
+    `任务 / 周目标含 ${taskMaterialTotal} 个副本材料：`
+      + '五行技能材料与三档强化石是**副本专属产出**，日常投放会稀释定向副本这条主线',
+  )
 }
-for (const task of WEEKLY_TASKS) {
-  taskDailyBudget.relicStones += (task.rewards.relicStones ?? 0) / 7
-  taskDailyBudget.skillStones += (task.rewards.skillStones ?? 0) / 7
-}
-for (const key of ['relicStones', 'skillStones'] as const) {
-  const ratio = taskDailyBudget[key] / hourlyIncome[key]
-  if (ratio > 0.02) {
+
+if (dailyIdleExp > 0) {
+  const ratio = taskDailyExp / dailyIdleExp
+  if (ratio > TASK_EXP_BUDGET_RATIO) {
     err(
       'D/BAL',
-      `任务日投放 ${key} = ${taskDailyBudget[key].toFixed(1)}，`
-        + `达每小时挂机产出（${hourlyIncome[key].toFixed(0)}）的 ${(ratio * 100).toFixed(1)}%，超过 2% 上限`,
+      `任务日投放经验 ${taskDailyExp.toFixed(0)}，`
+        + `达每日挂机经验产出（${dailyIdleExp.toFixed(0)}）的 ${(ratio * 100).toFixed(1)}%，`
+        + `超过 ${(TASK_EXP_BUDGET_RATIO * 100).toFixed(1)}% 上限`,
     )
   }
 }
@@ -548,35 +674,148 @@ for (const spec of LADDER_SEASON_REWARDS) {
 }
 
 // 回流奖励：只允许养成材料 + 竞技勋章；**禁止**圣杯结晶 / 抽卡券（minDays 是档位门槛）
-const ALLOWED_RETURN_REWARDS = new Set(['skillStones', 'relicStones', 'medals', 'minDays'])
+//
+// ⚠ **实施修正（资源/背包版本 v10）**：术式结晶 / 遗物强化石退役 → 回流改发
+//   **通用经验书**（`items`），竞技勋章停发（`medals` 恒为 0）。
+const ALLOWED_RETURN_REWARDS = new Set(['items', 'medals', 'minDays'])
 for (const spec of LADDER_RETURN_REWARDS) {
   for (const key of Object.keys(spec)) {
     if (!ALLOWED_RETURN_REWARDS.has(key)) {
       err(
         'E/ECONOMY',
-        `回流奖励含不允许的资源「${key}」：只允许术式结晶 / 遗物强化石 / 竞技勋章`
-          + '（发圣杯结晶会冲击抽卡间隔，发银两 / 经验会冲击养成回收）',
+        `回流奖励含不允许的资源「${key}」：只允许通用经验书 / 竞技勋章`
+          + '（发圣杯结晶会冲击抽卡间隔，发副本材料会稀释定向副本产出）',
       )
     }
   }
   if (spec.minDays < LADDER.RETURN_MIN_OFFLINE_DAYS) {
     err('C/NUM', `回流档位 ${spec.minDays} 天低于判定阈值 ${LADDER.RETURN_MIN_OFFLINE_DAYS} 天`)
   }
+  // 回流奖励里不得混入副本专属材料（同任务：副本材料只能来自副本）
+  let material = 0
+  for (const [id, count] of Object.entries(spec.items)) {
+    if (EXP_BOOK_ITEM_EXP[id as ItemId]) continue
+    material += count ?? 0
+  }
+  if (material > 0) {
+    err(
+      'E/ECONOMY',
+      `回流奖励含 ${material} 个副本材料：五行技能材料与三档强化石是**副本专属产出**`,
+    )
+  }
 }
 
-// 回流投放预算：日均 ≤ 每小时挂机产出的 2%（与任务同一把尺）
+// 回流投放预算：日均 ≤ 每日挂机经验产出的 1/3（与任务同一把尺，⚠ 工具侧临时口径）
 const returnTop = LADDER_RETURN_REWARDS[0]
-const returnDailyBudget = {
-  relicStones: returnTop.relicStones / LADDER.RETURN_COOLDOWN_DAYS,
-  skillStones: returnTop.skillStones / LADDER.RETURN_COOLDOWN_DAYS,
-}
-for (const key of ['relicStones', 'skillStones'] as const) {
-  const ratio = returnDailyBudget[key] / hourlyIncome[key]
-  if (ratio > 0.02) {
+const returnDailyExp = itemsToExp(returnTop.items) / LADDER.RETURN_COOLDOWN_DAYS
+if (dailyIdleExp > 0) {
+  const ratio = returnDailyExp / dailyIdleExp
+  if (ratio > TASK_EXP_BUDGET_RATIO) {
     err(
       'D/BAL',
-      `回流日均投放 ${key} = ${returnDailyBudget[key].toFixed(1)}，`
-        + `达每小时挂机产出（${hourlyIncome[key].toFixed(0)}）的 ${(ratio * 100).toFixed(2)}%，超过 2% 上限`,
+      `回流日均投放经验 ${returnDailyExp.toFixed(0)}，`
+        + `达每日挂机经验产出（${dailyIdleExp.toFixed(0)}）的 ${(ratio * 100).toFixed(2)}%，`
+        + `超过 ${(TASK_EXP_BUDGET_RATIO * 100).toFixed(1)}% 上限`,
+    )
+  }
+}
+
+// ─────────────────────────── H. 道具登记与副本配置（资源/背包版本 v10） ───────────────────────────
+//
+// ⚠ 为什么单独一节：新模型把「堆叠物」从钱包搬进了背包（`save.items`），
+//   于是多了两条**新的数据链**：
+//     · 道具登记表（`core/config/items.ts`）——「道具没有名字 / 没出图标」；
+//     · 副本配置（`core/config/dungeons.ts` + `economy.ts` 的 `DUNGEON_DROPS`）——
+//       「副本产出的道具没人登记」或「产量没配」。
+//   两者都会让玩家在背包里看到一个「半成品」条目（铁律 #22：配置齐全 ≠ 功能可用）。
+
+// ① 道具名称必须全局唯一（界面上「图标 + 名称」并排，靠名字认道具）
+{
+  const seen = new Map<string, string[]>()
+  for (const id of ITEM_IDS) {
+    const name = ITEM_DEFS[id].name
+    seen.set(name, [...(seen.get(name) ?? []), id])
+  }
+  for (const [name, ids] of seen) {
+    if (ids.length > 1) {
+      err('A/UNIQUE', `道具名称「${name}」重复：${ids.join(', ')}（展示名必须全局唯一）`)
+    }
+  }
+}
+
+for (const id of ITEM_IDS) {
+  const def = ITEM_DEFS[id]
+  // ② 图标 key 必须落在 RESOURCE_ICON_KEYS（新增道具却忘了出图会被这里拦下）
+  if (!RESOURCE_ICON_KEY_SET.has(def.iconKey)) {
+    err('B/REF', `道具 ${id} 的图标 key「${def.iconKey}」不在 RESOURCE_ICON_KEYS 里`)
+  }
+  // ③ 描述里的占位符必须全部能填上（`itemText` 之后不允许再残留 `{xxx}`）
+  const leftover = itemText(def.desc).match(/\{(\w+)\}/)
+  if (leftover) {
+    err('C/NUM', `道具 ${id} 的描述里残留未填充的占位符「${leftover[0]}」`)
+  }
+}
+
+// ④ 副本变体：产出道具必须已登记 + 产量必须已登记 + 数量区间合法
+const dungeonItemIds = new Set<string>()
+for (const variant of DUNGEON_VARIANTS) {
+  if (!ITEM_ID_SET.has(variant.itemId)) {
+    err('B/REF', `副本 ${variant.id} 的产出道具 ${variant.itemId} 未在 ITEM_DEFS 登记`)
+  }
+  dungeonItemIds.add(variant.itemId)
+  const drop = DUNGEON_DROPS[variant.itemId]
+  if (!drop) {
+    err('B/REF', `副本 ${variant.id} 的产出道具 ${variant.itemId} 没有登记 DUNGEON_DROPS 产量`)
+    continue
+  }
+  if (drop.min > drop.max) {
+    err('C/NUM', `副本 ${variant.id} 的产量区间反了：${drop.min} > ${drop.max}`)
+  }
+  if (drop.min < 1) {
+    err('C/NUM', `副本 ${variant.id} 的产量下界为 ${drop.min}，应 ≥ 1`)
+  }
+}
+
+// ⑤ DUNGEON_DROPS 不得登记「没有副本会产出」的道具（死配置）
+for (const id of Object.keys(DUNGEON_DROPS)) {
+  if (!dungeonItemIds.has(id)) {
+    err('B/REF', `DUNGEON_DROPS 登记了没有副本会产出的道具 ${id}`)
+  }
+}
+
+// ⑥ 副本难度必须取材某一章（取材章决定波次），且倍率合法
+for (const difficulty of DUNGEON_DIFFICULTIES) {
+  if (difficulty.chapter < 1 || difficulty.chapter > STAGE.CHAPTERS) {
+    err('C/NUM', `副本难度 ${difficulty.id} 的取材章节 ${difficulty.chapter} 超出 1~${STAGE.CHAPTERS}`)
+  }
+  if (difficulty.dropMul <= 0) {
+    err('C/NUM', `副本难度 ${difficulty.id} 的掉落倍率 ${difficulty.dropMul} 必须为正`)
+  }
+}
+
+// ⑦ 副本专属材料不得出现在主线掉落表里（主线只掉经验书与银两）
+for (const [key, table] of Object.entries(DROP_TABLES)) {
+  for (const drop of table.items) {
+    if (dungeonItemIds.has(drop.id)) {
+      err(
+        'E/ECONOMY',
+        `主线掉落表 ${key} 掉落了副本专属道具 ${drop.id}：副本材料只能来自副本`,
+      )
+    }
+  }
+}
+
+// ⑧ 签到奖励里的道具只能是经验书（副本材料不得进签到）
+for (const [index, reward] of DAILY.SIGN_IN_REWARDS.entries()) {
+  let material = 0
+  for (const [id, count] of Object.entries(reward.items ?? {})) {
+    if (EXP_BOOK_ITEM_EXP[id as ItemId]) continue
+    material += count ?? 0
+  }
+  if (material > 0) {
+    err(
+      'E/ECONOMY',
+      `签到第 ${index + 1} 天含 ${material} 个副本材料：副本材料只能来自副本`,
     )
   }
 }
@@ -594,6 +833,9 @@ console.log(
 )
 console.log(
   `  敌人 ${ENEMY_DEFS.size} · BOSS ${BOSS_DEFS.size} · 关卡 ${STAGES.length} · 卡池 ${POOLS.length} · 掉落表 ${Object.keys(DROP_TABLES).length}`,
+)
+console.log(
+  `  道具 ${ITEM_IDS.length} · 副本变体 ${DUNGEON_VARIANTS.length} · 副本难度 ${DUNGEON_DIFFICULTIES.length}`,
 )
 
 if (warns.length > 0) {

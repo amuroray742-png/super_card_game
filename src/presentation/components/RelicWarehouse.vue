@@ -1,30 +1,35 @@
 <script setup lang="ts">
 /**
- * 铸造：遗物仓库与装备管理。
+ * 遗物仓库（背包页「遗物」分类的内容组件）。
  *
  * ⚠ **仓库走服务端分页**（`GET /api/relics`）：存档分包后客户端镜像里
  *   只有已装备遗物，仓库可能有数千件，整包拉下来会把每个动作的响应
  *   撑到 MB 级。筛选 / 排序 / 分页条件全部传给服务端，不在前端过滤。
  *
  * 套装件数与生效判定取 core 的 RELIC_SETS / getSetModsBySetIds，组件不另立规则。
+ *
+ * ⚠ **强化石按档位扣**（资源/背包版本 v10）：强化石分初阶 / 中阶 / 高阶三档，
+ *   档位由「目标等级」决定（`relicUpgradeCost`）。名称一律取 `ITEM_DEFS`
+ *   （铁律 #8），界面不得就地写中文名。
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { RELIC_DEFS, RELIC_SETS, getRelicMods, getSetModsBySetIds, relicUpgradeCost } from '../../core/systems/relic.ts'
 import { relicTemperRuleHint } from '../utils/relic-hint.ts'
 import { RELIC } from '../../core/config/economy.ts'
 import { relicIconPath } from '../../core/config/art.ts'
+import { ITEM_DEFS, type ItemId } from '../../core/config/items.ts'
 import { formatNumber } from '../utils/format'
 import type { Rarity, RelicInstance, StatMod } from '../../core/model/types.ts'
 
 const store = useGameStore()
-const router = useRouter()
 
 const RARITIES: Rarity[] = ['SSR', 'SR', 'R', 'N']
 
 /** 稀有度筛选（服务端过滤） */
 const rarityFilter = ref<Rarity | '全部'>('全部')
+/** 套装筛选（服务端过滤） */
+const setFilter = ref<string>('全部')
 /** 排序：等级高→低 / 等级低→高（服务端排序） */
 const sortAsc = ref(false)
 /** 当前页码 */
@@ -100,6 +105,7 @@ async function reload(nextPage = page.value) {
     page: nextPage,
     size: pageSize.value,
     rarity: rarityFilter.value === '全部' ? undefined : rarityFilter.value,
+    setId: setFilter.value === '全部' ? undefined : setFilter.value,
     sort: sortAsc.value ? 'level' : undefined,
   })
   await store.loadRelicStats()
@@ -125,6 +131,9 @@ onMounted(() => {
 })
 
 watch(rarityFilter, () => {
+  void reload(1)
+})
+watch(setFilter, () => {
   void reload(1)
 })
 watch(sortAsc, () => {
@@ -265,6 +274,16 @@ const upgradeCost = computed(() =>
 )
 
 /**
+ * 强化石消耗文案（**按档位**，名称取 `ITEM_DEFS`）。
+ */
+const upgradeStoneText = computed(() => {
+  const stones = upgradeCost.value?.stones ?? {}
+  return Object.entries(stones)
+    .map(([id, n]) => `${ITEM_DEFS[id as ItemId]?.name ?? id} ${n}`)
+    .join(' · ')
+})
+
+/**
  * 淬炼段规则提示（Lv60 以上价格递增、收益递减）。
  *
  * ⚠ 文案与数字走 `presentation/utils/relic-hint.ts` 的唯一一份（铁律 #4 / #27）。
@@ -281,10 +300,11 @@ const upgradeHint = computed(() => {
   if (p.silver < cost.silver) {
     return { ok: false, text: `银两不足（${formatNumber(p.silver)} / ${formatNumber(cost.silver)}）` }
   }
-  if (p.relicStones < cost.stones) {
-    return {
-      ok: false,
-      text: `强化石不足（${formatNumber(p.relicStones)} / ${formatNumber(cost.stones)}）`,
+  for (const [id, need] of Object.entries(cost.stones)) {
+    const owned = store.save.items[id as ItemId] ?? 0
+    if (owned < (need ?? 0)) {
+      const name = ITEM_DEFS[id as ItemId]?.name ?? id
+      return { ok: false, text: `${name}不足（${formatNumber(owned)} / ${formatNumber(need ?? 0)}）` }
     }
   }
   return { ok: true, text: '' }
@@ -329,39 +349,7 @@ async function toggleLock() {
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-title">铸造</div>
-
-    <!--
-      召唤入口。
-      方案 §11 规定「铸造」标签页承载抽卡（卡池 / 概率公示 / 保底进度 / 记录）。
-      实现把抽卡拆成了独立路由 /gacha，若此处不放入口，核心循环在游戏内不可达。
-    -->
-    <section class="panel">
-      <div class="panel-title">
-        <span>召唤</span>
-        <span class="tiny muted">卡池 · 概率公示 · 保底进度</span>
-      </div>
-      <div class="row-between tiny">
-        <span class="muted">圣杯结晶</span>
-        <b>{{ formatNumber(store.save.player.crystals) }}</b>
-      </div>
-      <div class="row-between tiny">
-        <span class="muted">抽卡券</span>
-        <b>{{ formatNumber(store.save.player.tickets) }}</b>
-      </div>
-      <div class="row-between tiny">
-        <span class="muted">距必出还差</span>
-        <b>{{ store.rates.pityRemaining }} 抽</b>
-      </div>
-      <p v-if="!store.save.gacha.newbieUsed" class="tiny muted" style="margin: 6px 0 0">
-        新手保底可用：首次十连保底 1 位传说英灵。
-      </p>
-      <button class="btn btn-primary btn-block" style="margin-top: 10px" @click="router.push('/gacha')">
-        前往召唤
-      </button>
-    </section>
-
+  <div>
     <!-- 库存概览 -->
     <section class="panel">
       <div class="row-between">
@@ -394,6 +382,18 @@ async function toggleLock() {
           @click="rarityFilter = r"
         >
           {{ r }}
+        </button>
+      </div>
+      <div class="chips">
+        <button class="chip" :class="{ on: setFilter === '全部' }" @click="setFilter = '全部'">全部套装</button>
+        <button
+          v-for="set in RELIC_SETS.values()"
+          :key="set.id"
+          class="chip"
+          :class="{ on: setFilter === set.id }"
+          @click="setFilter = set.id"
+        >
+          {{ set.name }}
         </button>
       </div>
       <div class="row-between tiny">
@@ -522,7 +522,7 @@ async function toggleLock() {
         </button>
       </div>
       <div v-if="upgradeCost" class="tiny muted" style="margin-top: 4px">
-        强化消耗：银两 {{ formatNumber(upgradeCost.silver) }} · 强化石 {{ upgradeCost.stones }}
+        强化消耗：银两 {{ formatNumber(upgradeCost.silver) }} · {{ upgradeStoneText }}
       </div>
       <div v-if="temperHint" class="tiny muted" style="margin-top: 2px">
         {{ temperHint }}

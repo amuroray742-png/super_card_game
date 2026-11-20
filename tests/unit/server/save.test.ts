@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp, type AppBundle } from '../../../server/src/app.ts'
 import { SAVE_VERSION } from '../../../src/core/save/schema.ts'
+import { START_RESOURCES } from '../../../src/core/config/economy.ts'
 
 let bundle: AppBundle
 
@@ -66,7 +67,8 @@ describe('云存档', () => {
     const save = JSON.parse(body.payload)
     expect(save.version).toBe(SAVE_VERSION)
     expect(save).not.toHaveProperty('rng')
-    expect(save.player.crystals).toBe(3000)
+    // ⚠ 资源/背包版本 v10：抽卡券退役 → 新号起始结晶 6,000（= 20 抽）
+    expect(save.player.crystals).toBe(START_RESOURCES.crystals)
     expect(body.savedAt).toBeGreaterThan(0)
   })
 

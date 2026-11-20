@@ -321,57 +321,50 @@ export function tierPointsFor(multiplier: number): number {
  * ⚠ 此处**只允许**竞技专属资源。
  * 银两 / 英灵经验 / 遗物强化石 / 圣杯结晶 一律不得出现——
  * 由 tests/unit/arena-isolation.test.ts 断言。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：竞技产出**整体退场**
+ *   （设计稿 §3「竞技场、三队天梯｜建议以各自的段位分、已有称号承接竞技成绩｜
+ *   竞技勋章和竞技材料停止新增，旧余额留记录」）。
+ *   本接口保留形状，但**结算值恒为 0**——
+ *   旧余额（`save.arena.medals` / `save.arena.arenaMaterials`）只读保留。
  */
 export interface ArenaReward {
-  /** 竞技勋章（竞技专属） */
+  /** 竞技勋章（竞技专属；已停发，仅保留旧余额口径） */
   medals: number
-  /** 竞技专属材料（仅用于铭文） */
+  /** 竞技专属材料（仅用于铭文；已停发，仅保留旧余额口径） */
   arenaMaterials: number
-  /** 抽卡券（有周上限） */
-  tickets: number
 }
 
 export const ARENA_WEEKLY_CAP = {
   medals: ARENA.MEDAL_WEEKLY_CAP,
-  tickets: ARENA.TICKET_WEEKLY_CAP,
   materials: ARENA.MATERIAL_WEEKLY_CAP,
 }
 
 /**
- * 结算竞技奖励（周上限保护）。
+ * 结算竞技奖励（**恒为 0**）。
  *
- * ⚠ 勋章 / 竞技材料的周上限与**三队天梯共用同一份预算**
- *   （`arena.weeklyMedals` / `arena.weeklyMaterials`）——
- *   两个模式各发一份却各算各的上限，玩家一周能拿到的就是上限的两倍。
+ * ⚠ **实施修正（资源/背包版本 v10）**：竞技只承接**段位分与称号**，
+ *   勋章 / 竞技材料 / 抽卡券全部停发（设计稿 §3）。
+ *   周上限参数保留在签名里，是为了让「周预算」的旧口径不被悄悄删掉——
+ *   但它们**不再参与计算**（返回的累计值原样透传）。
  *
- * @param weeklyMedals 本周已获得的勋章
- * @param weeklyTickets 本周已获得的抽卡券
- * @param weeklyMaterials 本周已获得的竞技专属材料
+ * @param weeklyMedals 本周已获得的勋章（旧余额，只读）
+ * @param weeklyMaterials 本周已获得的竞技专属材料（旧余额，只读）
  */
 export function resolveArenaRewards(
   win: boolean,
   weeklyMedals: number,
-  weeklyTickets: number,
   weeklyMaterials = 0,
 ): {
   reward: ArenaReward
   weeklyMedals: number
-  weeklyTickets: number
   weeklyMaterials: number
 } {
-  const baseMedals = win ? 12 : 3
-  const medals = Math.min(baseMedals, Math.max(0, ARENA_WEEKLY_CAP.medals - weeklyMedals))
-  const tickets =
-    win && weeklyTickets < ARENA_WEEKLY_CAP.tickets ? 1 : 0
-  const arenaMaterials = Math.min(
-    win ? 2 : 0,
-    Math.max(0, ARENA_WEEKLY_CAP.materials - weeklyMaterials),
-  )
+  void win
   return {
-    reward: { medals, arenaMaterials, tickets },
-    weeklyMedals: weeklyMedals + medals,
-    weeklyTickets: weeklyTickets + tickets,
-    weeklyMaterials: weeklyMaterials + arenaMaterials,
+    reward: { medals: 0, arenaMaterials: 0 },
+    weeklyMedals,
+    weeklyMaterials,
   }
 }
 
@@ -379,7 +372,6 @@ export function resolveArenaRewards(
 export const ARENA_REWARD_ALLOWED_KEYS: readonly (keyof ArenaReward)[] = [
   'medals',
   'arenaMaterials',
-  'tickets',
 ]
 
 export type { Rarity }

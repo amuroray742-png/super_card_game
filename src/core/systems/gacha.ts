@@ -16,12 +16,15 @@ export interface PullResult {
   rarity: Rarity
   /** 是否首次获得 */
   isNew: boolean
-  /** 重复转化所得印记 */
-  emblems: number
-  /** 重复转化所得同名碎片 */
+  /**
+   * 重复转化所得**同名碎片**（升星用）。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：重复卡**只**给同名碎片，
+   *   且**全稀有度适用**（设计稿 §2「某英灵的同名卡碎片｜抽到该英灵的重复卡，
+   *   N、R、SR、SSR 均适用｜只给该英灵升星」）。
+   *   印记与「N 卡重复给银两」两条旧路径同时退役。
+   */
   shards: number
-  /** 重复转化所得银两 */
-  silver: number
   /** 是否触发大保底 */
   pityTriggered: boolean
 }
@@ -30,7 +33,6 @@ export interface PullOutcome {
   results: PullResult[]
   pity: PityState
   crystalsUsed: number
-  ticketsUsed: number
   /** 新手池保底是否触发 */
   guaranteedTriggered: boolean
   /** 本次抽卡是否消耗掉了新手保底资格 */
@@ -41,7 +43,6 @@ export interface PullContext {
   pity: PityState
   owned: Record<string, HeroState>
   crystals: number
-  tickets: number
   /**
    * 新手保底是否已被使用。
    *
@@ -74,17 +75,17 @@ export function ratesForPool(pool: PoolDef, pity: PityState, newbieUsed: boolean
 /**
  * 抽卡费用（**逐抽计价**）
  *
- * 口径（§7.5：圣杯结晶为主抽卡货币，抽卡券为免费补充）：
- * - 每一抽的价是「圣杯结晶 300 **或** 抽卡券 1」——单抽与十连**同一个单价**。
- * - 单抽 = 1 抽 → 结晶 300 或 券 1；十连 = 10 抽 → 结晶 3000 或 券 10。
- * - 两者**可混合**：结晶优先，结晶不够的部分用抽卡券补（实际扣哪一项由
- *   `resolvePayment` 决定，表现层只展示、不自行推导）。
+ * 口径（§7.5）：**圣杯结晶是唯一抽卡货币**。
+ * - 每一抽 300 结晶；单抽与十连**同一个单价**。
+ * - 十连 = 10 抽 → 3000 结晶。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：抽卡券已随钱包收敛退役，
+ *   扣费口径里**不再有券**（设计稿 §2「沿用每抽 300、十连 3,000」）。
  */
-export function pullCost(count: 1 | 10): { crystals: number; tickets: number } {
+export function pullCost(count: 1 | 10): { crystals: number } {
   const pulls = pullCount(count)
   return {
     crystals: GACHA.COST_SINGLE * pulls,
-    tickets: GACHA.TICKET_PER_PULL * pulls,
   }
 }
 
@@ -102,13 +103,10 @@ function pullCount(count: 1 | 10): number {
  *   所以 core 里所有类都必须写成「显式字段 + 构造体内赋值」。
  */
 export class InsufficientFundsError extends Error {
-  readonly required: { crystals: number; tickets: number }
-  readonly owned: { crystals: number; tickets: number }
+  readonly required: { crystals: number }
+  readonly owned: { crystals: number }
 
-  constructor(
-    required: { crystals: number; tickets: number },
-    owned: { crystals: number; tickets: number },
-  ) {
+  constructor(required: { crystals: number }, owned: { crystals: number }) {
     super('抽卡货币不足')
     this.name = 'InsufficientFundsError'
     this.required = required
@@ -119,25 +117,17 @@ export class InsufficientFundsError extends Error {
 /**
  * 结算一次抽卡的**实际扣费**（逐抽计价）。
  *
- * 每一抽的价是「圣杯结晶 300 **或** 抽卡券 1」：
- * - 优先用圣杯结晶（主抽卡货币）付，**能整抽用结晶的部分尽量用结晶**；
- * - 结晶不够的差额用抽卡券补（1 张券抵 1 抽）；
- * - 两者都凑不齐本次抽数 → 余额不足，返回 `null`。
+ * 每一抽 300 圣杯结晶；结晶不够本次抽数 → 余额不足，返回 `null`。
  *
  * ⚠ 旧实现无论余额多少都照扣，结晶可被扣成负数，等于取消抽卡总闸门。
  *
  * @returns 实际扣费明细；余额不足时返回 null（调用方必须拒绝本次抽卡）
  */
-export function resolvePayment(
-  count: 1 | 10,
-  crystals: number,
-  tickets: number,
-): { crystals: number; tickets: number } | null {
+export function resolvePayment(count: 1 | 10, crystals: number): { crystals: number } | null {
   const pulls = pullCount(count)
-  const byCrystal = Math.min(pulls, Math.floor(crystals / GACHA.COST_SINGLE))
-  const byTicket = Math.min(pulls - byCrystal, tickets)
-  if (byCrystal + byTicket < pulls) return null
-  return { crystals: byCrystal * GACHA.COST_SINGLE, tickets: byTicket }
+  const need = GACHA.COST_SINGLE * pulls
+  if (crystals < need) return null
+  return { crystals: need }
 }
 
 function rarityRank(rarity: Rarity): number {
@@ -161,12 +151,9 @@ export function executePull(
   const rng = new Rng(seed)
 
   // 余额校验：不足则拒绝本次抽卡（绝不扣成负数）
-  const payment = resolvePayment(count, ctx.crystals, ctx.tickets)
+  const payment = resolvePayment(count, ctx.crystals)
   if (!payment) {
-    throw new InsufficientFundsError(pullCost(count), {
-      crystals: ctx.crystals,
-      tickets: ctx.tickets,
-    })
+    throw new InsufficientFundsError(pullCost(count), { crystals: ctx.crystals })
   }
 
   let pity: PityState = { ...ctx.pity }
@@ -235,26 +222,18 @@ export function executePull(
     const isNew = !ctx.owned[heroId] && !grantedInBatch.has(heroId)
     if (isNew) grantedInBatch.add(heroId)
 
-    let emblems = 0
     let shards = 0
-    let silver = 0
 
     if (!isNew) {
-      emblems = GACHA.DUPLICATE_EMBLEM[rarity]
-      if (rarity === 'SSR') {
-        shards = GACHA.DUPLICATE_SSR_SHARDS
-      } else if (rarity === 'N') {
-        silver = GACHA.DUPLICATE_N_SILVER
-      }
+      // ⚠ **实施修正（资源/背包版本 v10）**：重复卡只给同名碎片，全稀有度适用。
+      shards = GACHA.DUPLICATE_SHARDS[rarity]
     }
 
     results.push({
       heroId,
       rarity,
       isNew,
-      emblems,
       shards,
-      silver,
       pityTriggered:
         rarity === 'SSR' && ctx.pity.pitySSR > 0 && ctx.pity.pitySSR >= GACHA.SOFT_PITY_START - 1,
     })
@@ -264,7 +243,6 @@ export function executePull(
     results,
     pity,
     crystalsUsed: payment.crystals,
-    ticketsUsed: payment.tickets,
     guaranteedTriggered,
     newbieUsedConsumed,
   }
@@ -277,17 +255,18 @@ function pickHero(rng: Rng, pool: string[]): string {
   }
   return rng.pick(pool)
 }
-/** 计算抽卡后应写入的资源变化 */
+/**
+ * 计算抽卡后应写入的资源变化。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：重复卡只给**同名碎片**
+ *   （按英灵分堆 → `player.shards[heroId]`），不再有印记与银两。
+ */
 export function summarizePull(outcome: PullOutcome) {
-  let emblems = 0
-  let shards = 0
-  let silver = 0
+  const shards: Record<string, number> = {}
   const newHeroes: string[] = []
   for (const r of outcome.results) {
-    emblems += r.emblems
-    shards += r.shards
-    silver += r.silver
+    if (r.shards > 0) shards[r.heroId] = (shards[r.heroId] ?? 0) + r.shards
     if (r.isNew) newHeroes.push(r.heroId)
   }
-  return { emblems, shards, silver, newHeroes }
+  return { shards, newHeroes }
 }

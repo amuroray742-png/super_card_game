@@ -19,8 +19,9 @@ import { UserLock } from '../../../server/src/game/lock.ts'
 import { WindowLimiter } from '../../../server/src/rateLimit.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
 import { readActionLog, readSave, writeSave, writeFlag } from '../../../server/src/game/repo.ts'
-import { ACCOUNT, LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
+import { ACCOUNT, FIRST_CLEAR_COMPENSATED_FLAG, LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
 import { deserialize, serialize, exportSave, SAVE_VERSION } from '../../../src/core/save/serialize.ts'
+import { GACHA, START_RESOURCES } from '../../../src/core/config/economy.ts'
 import { grantHero } from '../../../src/core/systems/actions.ts'
 import type { PullActionResult } from '../../../src/core/systems/actions.ts'
 import type { ActionResponse } from '../../../src/core/systems/action-protocol.ts'
@@ -111,7 +112,7 @@ describe('动作接口：建档', () => {
 
     const save = await pullSave(acc.accessToken)
     expect(save).not.toBeNull()
-    expect(save?.player.crystals).toBe(3000)
+    expect(save?.player.crystals).toBe(START_RESOURCES.crystals)
   })
 
   it('重复 save.create → ok:false SAVE_EXISTS（不覆盖已有进度）', async () => {
@@ -153,7 +154,7 @@ describe('动作接口：建档', () => {
 })
 
 describe('动作接口：扣费与幂等', () => {
-  it('十连抽卡：服务端扣结晶（3000 → 0），且不产生负数', async () => {
+  it('十连抽卡：服务端扣结晶（6000 → 3000），且不产生负数', async () => {
     const acc = await withSave('alice')
     const res = await post(acc.accessToken, 'pull-1', {
       type: 'gacha.pull',
@@ -164,8 +165,8 @@ describe('动作接口：扣费与幂等', () => {
     expect(pullResult(res.body).items).toHaveLength(10)
 
     const save = await pullSave(acc.accessToken)
-    expect(save?.player.crystals).toBe(0)
-    expect(save?.player.tickets).toBe(10)
+    // ⚠ 资源/背包版本 v10：抽卡券退役 → 只扣圣杯结晶
+    expect(save?.player.crystals).toBe(START_RESOURCES.crystals - GACHA.COST_SINGLE * 10)
     expect(save?.player.crystals).toBeGreaterThanOrEqual(0)
   })
 
@@ -191,9 +192,8 @@ describe('动作接口：扣费与幂等', () => {
     expect(pullResult(second.body).items).toEqual(pullResult(first.body).items)
 
     const save = await pullSave(acc.accessToken)
-    // 只扣了一次：结晶 3000 → 0，抽卡券 10 → 10（没被第二次抽走）
-    expect(save?.player.crystals).toBe(0)
-    expect(save?.player.tickets).toBe(10)
+    // 只扣了一次：结晶 6000 → 3000（没被第二次抽走）
+    expect(save?.player.crystals).toBe(START_RESOURCES.crystals - GACHA.COST_SINGLE * 10)
   })
 
   it('心跳和大量后续动作不淘汰抽卡结果，逾期重试也不再扣费', async () => {
@@ -220,10 +220,13 @@ describe('动作接口：扣费与幂等', () => {
     expect(readActionLog(bundle.db, acc.user.id, actionId)?.result).toBe('')
     const retried = await post(acc.accessToken, actionId, pull)
     expect(retried.body).toMatchObject({ ok: false, replayed: true, code: 'ACTION_REPLAY_EXPIRED' })
-    expect(await pullSave(acc.accessToken)).toMatchObject({ player: { crystals: 0, tickets: 10 }, stats: { totalPulls: 10 } })
+    expect(await pullSave(acc.accessToken)).toMatchObject({
+      player: { crystals: START_RESOURCES.crystals - GACHA.COST_SINGLE * 10 },
+      stats: { totalPulls: 10 },
+    })
   })
 
-  it('不同 actionId → 各自扣费（结晶见底后改用抽卡券）', async () => {
+  it('不同 actionId → 各自扣费（结晶见底后拒绝，不产生负数）', async () => {
     const acc = await withSave('alice')
     await post(acc.accessToken, 'pull-1', { type: 'gacha.pull', poolId: 'standard', count: 10 })
     const res = await post(acc.accessToken, 'pull-2', {
@@ -232,11 +235,10 @@ describe('动作接口：扣费与幂等', () => {
       count: 10,
     })
     expect(res.body.ok).toBe(true)
-    expect(res.body.result).toMatchObject({ crystalsUsed: 0, ticketsUsed: 10 })
+    expect(res.body.result).toMatchObject({ crystalsUsed: GACHA.COST_SINGLE * 10 })
 
     const save = await pullSave(acc.accessToken)
     expect(save?.player.crystals).toBe(0)
-    expect(save?.player.tickets).toBe(0)
   })
 
   it('余额不足 → ok:false INSUFFICIENT_FUNDS，且存档一字节未变', async () => {
@@ -257,13 +259,12 @@ describe('动作接口：扣费与幂等', () => {
 
     const after = await pullSave(acc.accessToken)
     expect(after?.player.crystals).toBe(before?.player.crystals)
-    expect(after?.player.tickets).toBe(before?.player.tickets)
     expect(after?.stats.totalPulls).toBe(before?.stats.totalPulls)
   })
 
   it('失败的 actionId 不写幂等日志 → 可以重试', async () => {
     const acc = await withSave('alice')
-    // 先把结晶与抽卡券花光，下一次召唤才会失败
+    // 先把结晶花光，下一次召唤才会失败
     await post(acc.accessToken, 'pull-1', { type: 'gacha.pull', poolId: 'standard', count: 10 })
     await post(acc.accessToken, 'pull-2', { type: 'gacha.pull', poolId: 'standard', count: 10 })
 
@@ -292,7 +293,6 @@ describe('动作接口：串行与幂等', () => {
 
     const save = await pullSave(acc.accessToken)
     expect(save?.player.crystals).toBe(0)
-    expect(save?.player.tickets).toBe(0)
     expect(save?.stats.totalPulls).toBe(20)
   })
 
@@ -307,8 +307,7 @@ describe('动作接口：串行与幂等', () => {
 
     const save = await pullSave(acc.accessToken)
     expect(save?.stats.totalPulls).toBe(10)
-    expect(save?.player.crystals).toBe(0)
-    expect(save?.player.tickets).toBe(10)
+    expect(save?.player.crystals).toBe(START_RESOURCES.crystals - GACHA.COST_SINGLE * 10)
   })
 })
 
@@ -356,7 +355,13 @@ describe('动作接口：离线补算与导入', () => {
     expect(stored.rng.seed).not.toBe(42)
     expect(stored.rng.counter).toBe(0)
     expect(save?.lastTickAt).toBeGreaterThan(Date.now() - 5000)
-    expect(bundle.db.prepare('SELECT * FROM user_flags WHERE user_id = ?').all(acc.user.id)).toHaveLength(1)
+    // ⚠ 导入事务写两个账号标记：旧档迁移标记 + 首通结晶一次性补发标记
+    const flags = bundle.db
+      .prepare('SELECT key FROM user_flags WHERE user_id = ?')
+      .all(acc.user.id) as { key: string }[]
+    const flagKeys = flags.map((f) => f.key)
+    expect(flagKeys).toContain(LEGACY_MIGRATED_FLAG)
+    expect(flagKeys).toContain(FIRST_CLEAR_COMPENSATED_FLAG)
   })
 
   it('迁移标记阻止删云档后重新迁移', async () => {

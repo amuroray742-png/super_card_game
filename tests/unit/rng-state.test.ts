@@ -13,6 +13,7 @@ import { Rng } from '../../src/core/rng.ts'
 import { createNewSave, normalizeSave, SAVE_VERSION } from '../../src/core/save/schema.ts'
 import { deserialize, exportSave, serialize } from '../../src/core/save/serialize.ts'
 import { ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../src/core/config/account.ts'
+import { START_RESOURCES } from '../../src/core/config/economy.ts'
 import { readSave } from '../../server/src/game/repo.ts'
 import { startServerHarness, type ServerHarness } from './helpers/server-harness.ts'
 import { registerAndLoad } from './helpers/store-harness.ts'
@@ -110,7 +111,8 @@ describe('core：RNG 快照忠实复原', () => {
 
 describe('存档：随机数状态字段', () => {
   it('存档版本已升级（新增 rng 字段）', () => {
-    expect(SAVE_VERSION).toBe(9)
+    // ⚠ 资源/背包版本 v10（抽卡券 / 印记 / 经验池退役 → 道具系统 + 副本）
+    expect(SAVE_VERSION).toBe(10)
   })
 
   it('新建存档带随机种子', () => {
@@ -149,7 +151,10 @@ describe('存档：随机数状态字段', () => {
     })
     try {
       const adapter = new LocalStorageAdapter()
-      expect(await adapter.load(slot)).toMatchObject({ rng: { seed: 0, counter: 0 }, player: { crystals: 3000 } })
+      expect(await adapter.load(slot)).toMatchObject({
+        rng: { seed: 0, counter: 0 },
+        player: { crystals: START_RESOURCES.crystals },
+      })
       expect(JSON.parse(data.get(prefix + slot)!)).not.toHaveProperty('rng')
       await adapter.load(legacySlot)
       expect(data.get(prefix + legacySlot)).toBe(old)

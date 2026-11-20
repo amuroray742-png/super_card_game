@@ -6,6 +6,7 @@
  */
 import type { SaveData } from '../model/types.ts'
 import { LEVEL, REBIRTH, STAR } from '../config/economy.ts'
+import { STAGES_PER_CHAPTER } from '../config/stages.ts'
 import { realmBreakCost } from './growth.ts'
 
 export interface RebirthPreview {
@@ -33,7 +34,8 @@ export interface RebirthPreview {
 export function previewRebirth(save: SaveData): RebirthPreview {
   const levels = Object.values(save.heroes).map((h) => h.level)
   const maxLevel = levels.length > 0 ? Math.max(...levels) : 0
-  const clearedChapter = Math.floor(save.campaign.clearedStage / 30)
+  // ⚠ 每章 **31** 关（30 普通 + 1 BOSS）——旧值写死 30 会把 BOSS 漏在章外
+  const clearedChapter = Math.floor(save.campaign.clearedStage / STAGES_PER_CHAPTER)
 
   const levelOk = maxLevel >= REBIRTH.MIN_LEVEL
   const chapterOk = clearedChapter >= REBIRTH.MIN_CHAPTER
@@ -65,7 +67,8 @@ export function previewRebirth(save: SaveData): RebirthPreview {
  * 执行圣杯重启。
  *
  * 重置：等级、经验、星级、技能等级、遗物强化等级
- * 保留：英灵本体、印记、同名碎片、图鉴、赛季段位、遗物实例本身
+ * 保留：英灵本体、同名碎片、背包道具、图鉴、赛季段位、遗物实例本身
+ * （⚠ 实施修正（资源/背包版本 v10）：「印记」已退役，不复存在）
  */
 export function performRebirth(save: SaveData): RebirthPreview {
   const preview = previewRebirth(save)
@@ -90,7 +93,8 @@ export function performRebirth(save: SaveData): RebirthPreview {
 
 /**
  * 境界突破消耗检查（用于 UI 提示）。
- * 突破消耗**英灵印记**（emblems）。
+ * 突破消耗**银两**（银两口径见 `core/systems/growth.ts` 的 `realmBreakCost`；
+ * 印记已随钱包收敛而退役）。
  */
 export function realmBreakRequirement(level: number) {
   return realmBreakCost(level)

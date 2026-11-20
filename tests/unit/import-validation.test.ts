@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { applyAction } from '../../src/core/systems/actions.ts'
 import { createNewSave } from '../../src/core/save/schema.ts'
 import { exportSave } from '../../src/core/save/serialize.ts'
+import { START_RESOURCES } from '../../src/core/config/economy.ts'
 import { Rng } from '../../src/core/rng.ts'
 
 describe('旧档导入边界', () => {
@@ -37,6 +38,7 @@ describe('旧档导入边界', () => {
     expect(save.lastTickAt).toBe(5000)
     expect(save.createdAt).toBe(5000)
     expect(save.daily.lastSignInDay).not.toBe(999999)
-    expect(save.player.crystals).toBe(3000)
+    // ⚠ 资源/背包版本 v10：抽卡券退役 → 新号起始结晶 6,000（= 20 抽）
+    expect(save.player.crystals).toBe(START_RESOURCES.crystals)
   })
 })

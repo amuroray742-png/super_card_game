@@ -34,7 +34,7 @@ describe('新手保底', () => {
   it('首次十连含 1 个 SSR，且新手资格被消耗', () => {
     for (let seed = 0; seed < 50; seed++) {
       const outcome = executePull(
-        { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999, tickets: 99 },
+        { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999 },
         POOL_STANDARD,
         10,
         seed,
@@ -60,7 +60,7 @@ describe('新手保底', () => {
       },
     }
     const outcome = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned, crystals: 99999, tickets: 99 },
+      { pity: { pitySSR: 0, pity10: 0 }, owned, crystals: 99999 },
       POOL_STANDARD,
       10,
       7,
@@ -70,7 +70,7 @@ describe('新手保底', () => {
 
   it('单抽不消耗新手资格', () => {
     const outcome = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999, tickets: 99 },
+      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999 },
       POOL_STANDARD,
       1,
       3,
@@ -85,7 +85,6 @@ describe('新手保底', () => {
         pity: { pitySSR: 0, pity10: 0 },
         owned: emptyOwned(),
         crystals: 99999,
-        tickets: 99,
         newbieUsed: true,
       },
       POOL_STANDARD,
@@ -98,7 +97,7 @@ describe('新手保底', () => {
 
   it('保底触发时结果是指定角色', () => {
     const outcome = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999, tickets: 99 },
+      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999 },
       POOL_STANDARD,
       10,
       7,
@@ -111,7 +110,7 @@ describe('新手保底', () => {
   it('保底角色一定属于当前卡池', () => {
     // 纪元池含中国 SSR，保底应落在池内
     const outcome = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999, tickets: 99 },
+      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999 },
       POOL_CHINA,
       10,
       5,
@@ -129,7 +128,7 @@ describe('新手保底', () => {
 
   it('新手池本身也能触发保底，且与常驻池共用同一份资格', () => {
     const outcome = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999, tickets: 99 },
+      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999 },
       POOL_NEWBIE,
       10,
       2,
@@ -139,7 +138,7 @@ describe('新手保底', () => {
 
   it('资格只能消耗一次：第二次十连不再消耗', () => {
     const first = executePull(
-      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999, tickets: 99 },
+      { pity: { pitySSR: 0, pity10: 0 }, owned: emptyOwned(), crystals: 99999 },
       POOL_STANDARD,
       10,
       4,
@@ -150,7 +149,6 @@ describe('新手保底', () => {
         pity: { pitySSR: 0, pity10: 0 },
         owned: emptyOwned(),
         crystals: 99999,
-        tickets: 99,
         newbieUsed: first.newbieUsedConsumed,
       },
       POOL_STANDARD,

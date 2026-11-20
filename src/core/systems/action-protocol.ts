@@ -22,9 +22,18 @@
  */
 import type { GameAction, GameActionType, ActionResultMap } from './actions.ts'
 import { SAVE_IMPORT } from '../config/save-import.ts'
-import { LADDER, RELIC } from '../config/economy.ts'
+import {
+  LADDER,
+  RELIC,
+  RELIC_STONE_TIER_IDS,
+  DUNGEON_DIFFICULTY_IDS,
+  type DungeonDifficultyId,
+  type RelicStoneTierId,
+} from '../config/economy.ts'
+import { isExpBook, type ItemId } from '../config/items.ts'
 import type { GameErrorCode } from '../config/game-errors.ts'
-import type { Rarity } from '../model/types.ts'
+import type { Element, Rarity } from '../model/types.ts'
+import { ELEMENTS } from '../model/types.ts'
 import type { OfflineSettlementResult } from './idle.ts'
 
 /** 动作请求体（客户端 → 服务端） */
@@ -166,9 +175,43 @@ export function parseGameAction(raw: unknown): GameAction | null {
     case 'idle.claimOffline':
       return { type: 'idle.claimOffline' }
     case 'idle.setTarget': {
-      const stageId = int(raw.stageId)
-      if (stageId === null || stageId < 1) return null
-      return { type: 'idle.setTarget', stageId }
+      // ⚠ **实施修正（资源/背包版本 v10）**：负载扩展为「挂机去向」
+      //   （主线 / 技能副本 / 强化副本），三个去向共用一份时间账本。
+      const kind = str(raw.kind)
+      if (kind === 'campaign') {
+        const out: Extract<GameAction, { type: 'idle.setTarget' }> = { type: 'idle.setTarget', kind: 'campaign' }
+        if (raw.stageId !== undefined) {
+          const stageId = int(raw.stageId)
+          if (stageId === null || stageId < 1) return null
+          out.stageId = stageId
+        }
+        return out
+      }
+      if (kind === 'skill') {
+        const element = str(raw.element)
+        if (!element || !ELEMENTS.includes(element as Element)) return null
+        const difficulty = str(raw.difficulty) ?? 'easy'
+        if (!DUNGEON_DIFFICULTY_IDS.includes(difficulty as DungeonDifficultyId)) return null
+        return {
+          type: 'idle.setTarget',
+          kind: 'skill',
+          element: element as Element,
+          difficulty: difficulty as DungeonDifficultyId,
+        }
+      }
+      if (kind === 'enhance') {
+        const tier = str(raw.tier)
+        if (!tier || !RELIC_STONE_TIER_IDS.includes(tier as RelicStoneTierId)) return null
+        const difficulty = str(raw.difficulty) ?? 'easy'
+        if (!DUNGEON_DIFFICULTY_IDS.includes(difficulty as DungeonDifficultyId)) return null
+        return {
+          type: 'idle.setTarget',
+          kind: 'enhance',
+          tier: tier as RelicStoneTierId,
+          difficulty: difficulty as DungeonDifficultyId,
+        }
+      }
+      return null
     }
     case 'settings.update': {
       const out: Extract<GameAction, { type: 'settings.update' }> = { type: 'settings.update' }
@@ -194,6 +237,15 @@ export function parseGameAction(raw: unknown): GameAction | null {
       const amount = int(raw.amount)
       if (!heroId || heroId.length > 64 || amount === null || amount < 1) return null
       return { type: 'hero.feedExp', heroId, amount }
+    }
+    case 'hero.feedBooks': {
+      const heroId = str(raw.heroId)
+      const bookId = str(raw.bookId)
+      const count = int(raw.count)
+      if (!heroId || heroId.length > 64) return null
+      if (!bookId || !isExpBook(bookId as ItemId)) return null
+      if (count === null || count < 1 || count > 9999) return null
+      return { type: 'hero.feedBooks', heroId, bookId: bookId as ItemId, count }
     }
     case 'hero.breakRealm': {
       const heroId = str(raw.heroId)
@@ -322,6 +374,17 @@ export function parseGameAction(raw: unknown): GameAction | null {
       const code = str(raw.code)
       if (!code || code.length > 64) return null
       return { type: 'code.redeem', code }
+    }
+    case 'legacy.allocateMaterials': {
+      const skillElement = str(raw.skillElement)
+      const relicTier = str(raw.relicTier)
+      if (!skillElement || !ELEMENTS.includes(skillElement as Element)) return null
+      if (!relicTier || !RELIC_STONE_TIER_IDS.includes(relicTier as RelicStoneTierId)) return null
+      return {
+        type: 'legacy.allocateMaterials',
+        skillElement: skillElement as Element,
+        relicTier: relicTier as RelicStoneTierId,
+      }
     }
     case 'save.create':
       return { type: 'save.create' }

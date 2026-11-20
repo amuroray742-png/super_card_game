@@ -155,7 +155,7 @@ test.describe('三队天梯', () => {
     expect(afterSecond.arena.tierPoints).toBe(afterFirst.arena.tierPoints)
   })
 
-  test('天梯产出隔离：银两 / 经验 / 强化石 / 术式结晶 / 圣杯结晶都不动', async ({ page }) => {
+  test('天梯产出隔离：银两 / 圣杯结晶 / 背包道具都不动', async ({ page }) => {
     const session = await registerAccount(uniqueUsername('ladder'))
     await seedSession(page, session)
     await pullTen(page)
@@ -173,10 +173,10 @@ test.describe('三队天梯', () => {
     const after = await cachedSaveOf(page, session.user.id)
 
     expect(after?.player?.silver).toBe(before?.player?.silver)
-    expect(after?.player?.skillStones).toBe(before?.player?.skillStones)
-    expect(after?.player?.relicStones).toBe(before?.player?.relicStones)
     expect(after?.player?.crystals).toBe(before?.player?.crystals)
-    expect(after?.player?.exp).toBe(before?.player?.exp)
+    // ⚠ 资源/背包版本 v10：术式结晶 / 遗物强化石 / 玩家经验池已退役，
+    //   天梯同样**不得**发背包里的任何道具（经验书 / 五行材料 / 强化石）。
+    expect(after?.items ?? {}).toEqual(before?.items ?? {})
   })
 
   test('未编队就挑战 → 服务端拒绝，资源不变', async () => {

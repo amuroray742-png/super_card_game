@@ -82,33 +82,27 @@ const singleRates = computed(() => rates.value.rows.map((r) => `${r.rarity} ${fo
 
 /** 抽卡结果弹窗 */
 const resultOpen = ref(false)
-const result = ref<{ emblems: number; shards: number; silver: number; newHeroes: string[] } | null>(null)
+const result = ref<{ shards: Record<string, number>; newHeroes: string[] } | null>(null)
 
 /**
  * 抽卡的实际扣费口径：**直接取 core 的 `resolvePayment`**，表现层不自行推导。
  *
- * 逐抽计价：每一抽是「结晶 300 或 券 1」，结晶优先、券补差额。
- * 余额不足时显示需求（结晶 N 或券 M），按钮同时禁用。
+ * ⚠ **实施修正（资源/背包版本 v10）**：钱包只有银两与圣杯结晶，
+ *   抽卡券已退役 → 扣费**只扣结晶**（设计稿 §2「沿用每抽 300、十连 3,000」）。
  */
 function costText(count: 1 | 10): string {
   const p = store.save.player
   const cost = pullCost(count)
-  const pay = resolvePayment(count, p.crystals, p.tickets)
-  if (!pay) return `结晶 ${cost.crystals} 或券 ${cost.tickets}`
-  if (pay.tickets === 0) return `结晶 ${pay.crystals}`
-  if (pay.crystals === 0) return `券 ${pay.tickets}`
-  return `结晶 ${pay.crystals} + 券 ${pay.tickets}`
+  const pay = resolvePayment(count, p.crystals)
+  if (!pay) return `圣杯结晶 ${cost.crystals}`
+  return `圣杯结晶 ${pay.crystals}`
 }
 
 const singleCostText = computed(() => costText(1))
 const tenCostText = computed(() => costText(10))
 
-const canSingle = computed(
-  () => resolvePayment(1, store.save.player.crystals, store.save.player.tickets) !== null,
-)
-const canTen = computed(
-  () => resolvePayment(10, store.save.player.crystals, store.save.player.tickets) !== null,
-)
+const canSingle = computed(() => resolvePayment(1, store.save.player.crystals) !== null)
+const canTen = computed(() => resolvePayment(10, store.save.player.crystals) !== null)
 
 /** 演出中的名册（非空 = 正在演出；演完才出结算弹窗） */
 const revealItems = ref<RevealItem[] | null>(null)
@@ -144,13 +138,27 @@ function heroName(id: string | undefined): string {
   return HERO_INDEX.get(id)?.name ?? id
 }
 
-/** 重复转化收益 */
-const DUPLICATE_ROWS: { rarity: Rarity; note: string }[] = [
-  { rarity: 'SSR', note: `印记 ${GACHA.DUPLICATE_EMBLEM.SSR} · 同名碎片 ${GACHA.DUPLICATE_SSR_SHARDS}` },
-  { rarity: 'SR', note: `印记 ${GACHA.DUPLICATE_EMBLEM.SR}` },
-  { rarity: 'R', note: `印记 ${GACHA.DUPLICATE_EMBLEM.R}` },
-  { rarity: 'N', note: `印记 ${GACHA.DUPLICATE_EMBLEM.N} · 银两 ${GACHA.DUPLICATE_N_SILVER}` },
-]
+/**
+ * 重复转化收益。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：重复卡**只给同名碎片**，全稀有度适用
+ *   （设计稿 §2「某英灵的同名卡碎片｜抽到该英灵的重复卡，N、R、SR、SSR 均适用｜
+ *   只给该英灵升星」）。英灵印记与「N 卡重复给银两」两条旧路径同时退役。
+ */
+const DUPLICATE_ROWS: { rarity: Rarity; note: string }[] = (
+  ['SSR', 'SR', 'R', 'N'] as Rarity[]
+).map((rarity) => ({ rarity, note: `同名碎片 ${GACHA.DUPLICATE_SHARDS[rarity]}` }))
+
+/** 结算弹窗里的碎片明细（按英灵分堆） */
+const shardRows = computed(() => {
+  if (!result.value) return []
+  return Object.entries(result.value.shards).map(([heroId, n]) => ({
+    heroId,
+    name: heroName(heroId),
+    n,
+  }))
+})
+const shardTotal = computed(() => shardRows.value.reduce((s, r) => s + r.n, 0))
 </script>
 
 <template>
@@ -277,15 +285,11 @@ const DUPLICATE_ROWS: { rarity: Rarity; note: string }[] = [
         </button>
       </div>
       <p class="tiny muted" style="margin: 8px 0 0; line-height: 1.7">
-        抽卡券 1 张抵 1 抽（单抽与十连通用）。结算时优先扣圣杯结晶，结晶不够的部分自动改用抽卡券。
+        每抽 {GACHA.COST_SINGLE} 圣杯结晶，单抽与十连同价（十连 {GACHA.COST_SINGLE * GACHA.TEN_PULL_COUNT} 结晶）。
       </p>
       <div class="row-between tiny" style="margin-top: 8px">
         <span class="muted">圣杯结晶</span>
         <b data-testid="gacha-crystals">{{ formatNumber(store.save.player.crystals) }}</b>
-      </div>
-      <div class="row-between tiny">
-        <span class="muted">抽卡券</span>
-        <b data-testid="gacha-tickets">{{ formatNumber(store.save.player.tickets) }}</b>
       </div>
     </section>
 
@@ -293,7 +297,7 @@ const DUPLICATE_ROWS: { rarity: Rarity; note: string }[] = [
     <section class="panel">
       <div class="panel-title"><span>重复获取转化</span></div>
       <p class="tiny muted" style="margin: 0 0 8px">
-        重复获得的英灵不会直接提升强度，统一转化为通用英灵印记与同名碎片。
+        重复获得的英灵不会直接提升强度，统一转化为该英灵的<b>同名碎片</b>（只用于升星）。
       </p>
       <div v-for="row in DUPLICATE_ROWS" :key="row.rarity" class="row-between tiny dup-row">
         <span class="tag" :class="`tag-${row.rarity.toLowerCase()}`">{{ row.rarity }}</span>
@@ -346,16 +350,12 @@ const DUPLICATE_ROWS: { rarity: Rarity; note: string }[] = [
         </div>
         <div v-else class="tiny muted" style="margin-bottom: 8px">本次没有新获得英灵。</div>
         <div class="row-between tiny">
-          <span class="muted">英灵印记</span>
-          <b>+{{ formatNumber(result.emblems) }}</b>
-        </div>
-        <div class="row-between tiny">
           <span class="muted">同名碎片</span>
-          <b>+{{ formatNumber(result.shards) }}</b>
+          <b>+{{ formatNumber(shardTotal) }}</b>
         </div>
-        <div class="row-between tiny">
-          <span class="muted">银两</span>
-          <b>+{{ formatNumber(result.silver) }}</b>
+        <div v-for="row in shardRows" :key="row.heroId" class="row-between tiny">
+          <span class="muted">{{ row.name }}</span>
+          <b>+{{ formatNumber(row.n) }}</b>
         </div>
         <button class="btn btn-primary btn-block" style="margin-top: 12px" @click="resultOpen = false">收下</button>
       </div>

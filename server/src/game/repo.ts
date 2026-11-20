@@ -148,16 +148,21 @@ export function readRelicsByUids(db: Db, userId: number, uids: string[]): RelicI
 }
 
 /**
- * 遗物统计（件数 + 按定义 id 分组）。
+ * 遗物统计（件数 + 按定义 id 分组 + 仓库最高等级）。
  *
  * 客户端镜像里只有已装备遗物（≤36 件），仓库总数与「每个定义有几件」
  * 只能由服务端统计——否则顶栏与图鉴的收藏数会永远显示 0。
  * 用 `GROUP BY` 一条 SQL 出结果，不把整表拉进内存。
+ *
+ * ⚠ `maxLevel`（仓库里的最高等级）同样是客户端算不出来的：
+ *   强化副本的解锁线就是「持有该档解锁线以上的遗物」，
+ *   而客户端镜像里 `save.relics` 只有**已装备**件 → 仓库里那件 Lv60 的
+ *   客户端根本看不见 → 不由服务端统计，副本就会一直显示「未解锁」。
  */
 export function readRelicStats(
   db: Db,
   userId: number,
-): { total: number; byDefId: Record<string, number> } {
+): { total: number; byDefId: Record<string, number>; maxLevel: number } {
   const rows = db
     .prepare('SELECT def_id, COUNT(*) AS n FROM relic_instances WHERE user_id = ? GROUP BY def_id')
     .all(userId) as unknown as { def_id: string; n: number }[]
@@ -167,7 +172,10 @@ export function readRelicStats(
     byDefId[row.def_id] = row.n
     total += row.n
   }
-  return { total, byDefId }
+  const maxRow = db
+    .prepare('SELECT MAX(level) AS max_level FROM relic_instances WHERE user_id = ?')
+    .get(userId) as unknown as { max_level: number | null } | undefined
+  return { total, byDefId, maxLevel: maxRow?.max_level ?? 0 }
 }
 
 /**

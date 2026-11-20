@@ -5,6 +5,7 @@
  * 数值调参只改本文件（Phase 10 调参流程）。
  */
 import type { ArenaProfile, Element, Rarity, Role, Stats } from '../model/types.ts'
+import type { ItemId } from './items.ts'
 
 // ─────────────────────────── 战力公式（§5.2） ───────────────────────────
 
@@ -52,14 +53,26 @@ export const LEVEL = {
    * 数值挂机游戏的标准做法是让等级成长同为指数，才能与指数难度对齐。
    */
   MULT: 1.03,
-  /**
-   * 喂经验的档位（单位：经验）。
-   *
-   * ⚠ 这些是**经济数值**，不是 UI 常量——表现层必须从此处取（铁律 #5）。
-   *   最小档 1000 大致对应第 1 章 10 场推征的产出。
-   */
-  EXP_FEED_OPTIONS: [1000, 10000, 100000] as const,
 } as const
+
+/**
+ * 经验书（**喂经验的唯一来源**）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：玩家经验池（`player.exp`）已退役，
+ *   经验改由「主线掉落经验书 → 手动喂给英灵」产出（设计稿 §2）。
+ *   书是**离散单位**，所以掉落表必须按「期望经验」换算成书的投放概率与数量
+ *   （见 `DROP_TABLES` 的 `items` 口径）。
+ *
+ * ⚠ 面值待策划确认（实现文档 §5）：本轮取 1,000 / 10,000，
+ *   与旧 `EXP_FEED_OPTIONS` 的前两档对齐（喂一次的量级不变）。
+ */
+export const EXP_BOOK = {
+  /** 小经验书 */
+  small: { id: 'expBookSmall' as ItemId, exp: 1_000 },
+  /** 大经验书 */
+  large: { id: 'expBookLarge' as ItemId, exp: 10_000 },
+} as const
+
 
 /** 境界分段。每个境界给 realm 乘区一份累计加成。 */
 export interface Realm {
@@ -72,15 +85,15 @@ export interface Realm {
   /** 经验曲线基准缩放（境界间重置基准） */
   expScale: number
   /**
-   * **进入本境界**所需的突破消耗（英灵印记）。null = 起始境界，无需突破。
+   * **进入本境界**所需的突破消耗。null = 起始境界，无需突破。
    *
-   * ⚠ 原字段是 `breakMaterial: 'realm_book_famed'` 这类**道具 id**，
-   *   但那些 id 在整个项目里没有任何定义、掉落来源或 UI——境界突破因此
-   *   从未真正实现过：实测喂经验时英灵卡死在 Lv60（`applyExp` 的硬上限是
-   *   `next.minLevel - 1`），玩家经验池喂干也升不了级。
-   *   现改为复用**已存在**的通用养成资源「英灵印记」，无需新增道具系统。
+   * ⚠ **实施修正（资源/背包版本 v10）**：消耗品从「英灵印记」改为**银两**。
+   *   印记已随钱包收敛而退役（设计稿 §2「升星与突破分开……建议 Lv60、120、180
+   *   的境界突破改扣银两，维持低星英灵通往满级的路线」）。
+   *
+   * ⚠ 银两档位待策划确认（实现文档 §5）：本轮按「旧印记购买力」折算的初值。
    */
-  breakCost: { emblems: number } | null
+  breakCost: { silver: number } | null
 }
 
 /**
@@ -96,24 +109,30 @@ export interface Realm {
  * 与 6 人编队总需求 1.8×10⁸ 同关卡经验投放（4.0×10⁸）同量级。
  *
  * ⚠ `breakCost` 是**进入本境界**的消耗（进入名阶才付名阶的价）。
- *   印记消耗定为 10 / 20 / 40（单人三次突破共 70 枚，6 人编队共 420 枚），
+ *   银两消耗暂定 20,000 / 40,000 / 80,000（单人三次突破共 14 万银两），
  *   与印记总投放配套（见 tools/balance/report.ts）：
- *   升星 1200 + 突破 420 = 1620 枚。
+ *   升星碎片 + 突破银两。
  */
 export const REALMS: readonly Realm[] = [
   { id: 'mortal', name: '凡阶', minLevel: 1, maxLevel: 60, bonusPct: 0, expScale: 1, breakCost: null },
-  { id: 'famed', name: '名阶', minLevel: 61, maxLevel: 120, bonusPct: 0.15, expScale: 5, breakCost: { emblems: 10 } },
-  { id: 'saint', name: '圣阶', minLevel: 121, maxLevel: 180, bonusPct: 0.35, expScale: 15, breakCost: { emblems: 20 } },
-  { id: 'divine', name: '神阶', minLevel: 181, maxLevel: 240, bonusPct: 0.6, expScale: 40, breakCost: { emblems: 40 } },
+  { id: 'famed', name: '名阶', minLevel: 61, maxLevel: 120, bonusPct: 0.15, expScale: 5, breakCost: { silver: 20_000 } },
+  { id: 'saint', name: '圣阶', minLevel: 121, maxLevel: 180, bonusPct: 0.35, expScale: 15, breakCost: { silver: 40_000 } },
+  { id: 'divine', name: '神阶', minLevel: 181, maxLevel: 240, bonusPct: 0.6, expScale: 40, breakCost: { silver: 80_000 } },
 ] as const
 
-/** 星级 → 基础属性倍率。重复抽卡不直接走这条路（合规 §2.1），只走印记兑换。 */
+/** 星级 → 基础属性倍率。重复抽卡不直接走这条路（合规 §2.1），只走同名碎片。 */
 export const STAR = {
   MIN: 1,
   MAX: 6,
   /** 每星 +8% 基础属性 */
   BASE_PCT_PER_STAR: 0.08,
-  /** 升星所需同名碎片 */
+  /**
+   * 升星所需同名碎片。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：升星**只**扣同名碎片，印记需求已取消
+   *   （设计稿 §2「升星与突破分开。所有稀有度都能靠同名碎片升星。
+   *   升星只扣同名碎片」）。
+   */
   SHARDS_PER_STAR: 20,
 } as const
 
@@ -124,13 +143,33 @@ export const SKILL = {
   MAX_LEVEL: 20,
   /** 每级技能效果强度 +2% */
   PCT_PER_LEVEL: 0.02,
-  /** 升 1 级所需**术式结晶**（skillStones，不是圣杯结晶） */
-  SKILL_STONES_PER_LEVEL: 12,
+  /**
+   * 升 1 级所需**五行技能材料**数量（另需银两）。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：术式结晶（单一通用材料）已退役，
+   *   改为**按英灵五行**匹配的材料（金→金系技能材料 …）。
+   *   材料的 id 由 `core/config/items.ts` 的 `ITEM_BY_ELEMENT` 给出。
+   */
+  MATERIAL_PER_LEVEL: 12,
   /** 升 1 级所需银两 */
   SILVER_PER_LEVEL: 800,
 } as const
 
 // ─────────────────────────── 遗物（§5.4） ───────────────────────────
+
+/** 遗物强化石档位 id（全集）。道具 id 与之一一对应。 */
+export const RELIC_STONE_TIER_IDS = ['relicStoneTier1', 'relicStoneTier2', 'relicStoneTier3'] as const
+export type RelicStoneTierId = (typeof RELIC_STONE_TIER_IDS)[number]
+
+export interface RelicStoneTier {
+  id: RelicStoneTierId
+  name: string
+  /** 该档覆盖的目标等级区间（含） */
+  minLevel: number
+  maxLevel: number
+  /** 该档的解锁线：持有遗物最高等级达到它才可刷（设计稿 §3） */
+  unlockRelicLevel: number
+}
 
 export const RELIC = {
   MIN_LEVEL: 1,
@@ -202,12 +241,32 @@ export const RELIC = {
   /** 强化 1 级所需遗物强化石（标准段恒定；淬炼段按 STONE_COST_GROWTH 递增） */
   STONES_PER_LEVEL: 2,
   /**
+   * **强化石三档表**（实施修正 · 资源/背包版本 v10）。
+   *
+   * ⚠ 档位由「**目标等级**」决定：升到 Lv60 用初阶石，升到 Lv61/Lv62 用中阶石
+   *   （设计稿 §2「一次从 59 升到 62，消耗 1 个初阶段升级步骤和 2 个中阶段升级步骤
+   *   对应的石量」）。
+   *
+   * ⚠ 档位区间与淬炼段边界**刻意不对齐**：
+   *   淬炼段（成本指数段）从 Lv61 起算，三档石从 Lv61~130 算——
+   *   两者是**两套口径**（成本曲线 vs 材料种类），不要合并。
+   */
+  STONE_TIERS: [
+    { id: 'relicStoneTier1', name: '初阶强化石', minLevel: 1, maxLevel: 60, unlockRelicLevel: 1 },
+    { id: 'relicStoneTier2', name: '中阶强化石', minLevel: 61, maxLevel: 130, unlockRelicLevel: 60 },
+    { id: 'relicStoneTier3', name: '高阶强化石', minLevel: 131, maxLevel: 200, unlockRelicLevel: 130 },
+  ] as readonly RelicStoneTier[],
+  /**
    * 分解返还比例（占「累计投入 + 稀有度残值」）。
    *
    * ⚠ 口径由「500 × 等级 × 稀有度系数」改为**按累计投入折算**：
    *   旧公式让 SSR 遗物「强化到 60 级再分解」净赚 2.54×
    *   （投入 29,500 银两、返还 75,000）——那是**造币漏洞**，
    *   不是回收阀门。成本指数上升后若仍按旧公式，返还会相对投入失控。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：分解**只返银两**，不再返还强化石
+   *   （设计稿 §2「建议分解只返银两，获得遗物到满仓处理均不携带副本材料」）。
+   *   强化石是**副本专属产出**，分解若返还它就等于凭空造出副本材料。
    */
   DECOMPOSE_RETURN_PCT: 0.5,
   /**
@@ -435,26 +494,23 @@ export const GACHA = {
   COST_SINGLE: 300,
   /** 十连抽数（十连 = 10 抽，结晶价 = COST_SINGLE × TEN_PULL_COUNT） */
   TEN_PULL_COUNT: 10,
-  /** 每抽消耗的抽卡券数量（1 张券恰好抵 1 抽） */
-  TICKET_PER_PULL: 1,
-  /** 重复转化（§7.4） */
-  DUPLICATE_EMBLEM: {
-    SSR: 50,
-    SR: 12,
-    R: 3,
-    N: 1,
-  } as Record<Rarity, number>,
   /**
-   * 重复 SSR 额外返还同名碎片。
+   * 重复转化（§7.4）——**同名碎片**。
    *
-   * ⚠ 原值 10：600 枚碎片（6 人满星）= 60 张重复 SSR ≈ 全收藏时 3,643 抽
-   *   （109 万圣杯结晶），实测「六人满星」是不可达目标。
-   *   提到 30 后：600 枚碎片 = 20 张重复 SSR ≈ 1,215 抽（36 万结晶），
-   *   单人满星从 10 张重复降到 3~4 张重复，收集党的养成目标变得可追。
+   * ⚠ **实施修正（资源/背包版本 v10）**：英灵印记已随钱包收敛而退役，
+   *   重复卡**只**转化为该英灵的同名碎片，且**全稀有度适用**
+   *   （设计稿 §2「某英灵的同名卡碎片｜抽到该英灵的重复卡，N、R、SR、SSR 均适用
+   *   ｜只给该英灵升星」）。
+   *
+   * ⚠ 满星后碎片仍按同一规则入包，本版不另设兑换货币（设计稿 §2）。
+   * ⚠ 数值待策划确认（实现文档 §5）：按「单英雄满星 100 枚」反推的初值。
    */
-  DUPLICATE_SSR_SHARDS: 30,
-  /** 重复 SSR 额外返还银两 */
-  DUPLICATE_N_SILVER: 500,
+  DUPLICATE_SHARDS: {
+    SSR: 30,
+    SR: 12,
+    R: 6,
+    N: 3,
+  } as Record<Rarity, number>,
 } as const
 
 /** 十连内的稀有度排序（用于判定"是否 SR+"） */
@@ -557,18 +613,17 @@ export const TIERS = [
 export const ARENA = {
   /** 段位匹配容差（±N 段） */
   MATCH_TIER_TOLERANCE: 1,
-  /** 竞技勋章周获取上限（防止 PvP 成为免费抽卡主渠道，§6.11） */
-  MEDAL_WEEKLY_CAP: 300,
   /**
-   * 竞技专属材料周获取上限。
+   * 竞技勋章周获取上限（**历史遗留**）。
    *
-   * ⚠ 镜像试炼与三队天梯**共用同一份周预算**（`arena.weeklyMedals` /
-   *   `arena.weeklyMaterials`）——两个模式各发一份却各算各的上限，
-   *   玩家一周实际能拿到的就是上限的两倍（铁律 #4：单一数据源）。
+   * ⚠ **实施修正（资源/背包版本 v10）**：竞技勋章 / 竞技材料**停止新增**
+   *   （设计稿 §3「竞技勋章和竞技材料停止新增，旧余额留记录」），
+   *   抽卡券更早已随钱包收敛退役。
+   *   这两个上限**不再参与结算**，只作为旧余额的只读记录口径保留
+   *   （`save.arena.medals` / `save.arena.arenaMaterials` 照旧存档、照旧展示）。
    */
+  MEDAL_WEEKLY_CAP: 300,
   MATERIAL_WEEKLY_CAP: 200,
-  /** 竞技兑换抽卡券周上限 */
-  TICKET_WEEKLY_CAP: 10,
   /** 竞技等级来源权重 */
   ARENA_LEVEL_FROM_PASSIVES: 4,
   ARENA_LEVEL_FROM_SKILLS: 2,
@@ -644,38 +699,138 @@ export const LADDER = {
 /**
  * 赛季结算奖励分档（按**赛季内累计**的段位分）。
  *
- * ⚠ 奖励只含**竞技专属资源**与**外观**：勋章 / 竞技材料 / 称号。
- *   **绝不**含银两 / 经验 / 强化石 / 术式结晶 / 圣杯结晶 / 抽卡券（§6.11 产出隔离）。
+ * ⚠ **实施修正（资源/背包版本 v10）**：勋章与竞技材料**停止新增**
+ *   （设计稿 §3「竞技勋章和竞技材料停止新增，旧余额留记录」），
+ *   赛季奖励只剩**称号**。段位分与称号承接竞技成绩（设计稿 §3）。
  */
 export const LADDER_SEASON_REWARDS = [
-  { minPoints: 6000, medals: 400, arenaMaterials: 200, titleTier: 'gold' },
-  { minPoints: 2400, medals: 200, arenaMaterials: 100, titleTier: 'silver' },
-  { minPoints: 800, medals: 80, arenaMaterials: 40, titleTier: 'bronze' },
-  { minPoints: 0, medals: 30, arenaMaterials: 10, titleTier: null },
+  { minPoints: 6000, titleTier: 'gold' },
+  { minPoints: 2400, titleTier: 'silver' },
+  { minPoints: 800, titleTier: 'bronze' },
+  { minPoints: 0, titleTier: null },
 ] as const
 
 /**
  * 回流奖励分档（按离线天数）。
  *
  * ⚠ 回流奖励属于**留存经济**，不是竞技产出：
- *   - 含养成材料（术式结晶 / 遗物强化石）→ 计入「日常投放」预算闸门；
- *   - **不含**圣杯结晶 / 抽卡券 → 不冲击抽卡间隔（与铁律 #38 同一把尺）。
+ *   - 含养成材料（经验书）→ 计入「日常投放」预算闸门；
+ *   - **不含**圣杯结晶 → 不冲击抽卡间隔（与铁律 #38 同一把尺）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：术式结晶 / 遗物强化石退役，
+ *   改发**经验书**；竞技勋章停发（`medals` 恒为 0）。
  */
 export const LADDER_RETURN_REWARDS = [
-  { minDays: 14, skillStones: 200, relicStones: 150, medals: 80 },
-  { minDays: 7, skillStones: 120, relicStones: 80, medals: 40 },
-  { minDays: 3, skillStones: 60, relicStones: 40, medals: 20 },
+  { minDays: 14, items: { expBookLarge: 20, expBookSmall: 100 } as Record<ItemId, number>, medals: 0 },
+  { minDays: 7, items: { expBookLarge: 12, expBookSmall: 60 } as Record<ItemId, number>, medals: 0 },
+  { minDays: 3, items: { expBookLarge: 6, expBookSmall: 30 } as Record<ItemId, number>, medals: 0 },
 ] as const
+
+// ─────────────────────────── 主线首通结晶（资源/背包版本 v10） ───────────────────────────
+
+/**
+ * 主线**首通**奖励（圣杯结晶）。
+ *
+ * ⚠ 口径（设计稿 §3）：每章 30 个普通关各给 10 结晶、BOSS 给 300
+ *   → 每章 600、十章共 6,000 = **20 个十连**。
+ *
+ * ⚠ 判定依据是**账号级首通记录**（`campaign.creditedStages`），
+ *   与「本周目进度」分开（实现文档 §2）——圣杯重启不重置它。
+ *
+ * ⚠ 数值待策划确认（实现文档 §5）。
+ */
+export const FIRST_CLEAR_CRYSTALS = {
+  /** 普通关首通 */
+  normal: 10,
+  /** 章末 BOSS 首通 */
+  boss: 300,
+} as const
+
+// ─────────────────────────── 材料副本（资源/背包版本 v10） ───────────────────────────
+
+/** 副本难度档 id（全集） */
+export const DUNGEON_DIFFICULTY_IDS = ['easy', 'normal', 'hard'] as const
+export type DungeonDifficultyId = (typeof DUNGEON_DIFFICULTY_IDS)[number]
+
+export interface DungeonDifficulty {
+  id: DungeonDifficultyId
+  name: string
+  /**
+   * 取材章节（1..10）。
+   *
+   * ⚠ **难度即取材章节**（设计稿 §3「难度影响数量」+「副本失败给出可刷的低难度选择」）：
+   *   副本的波次直接取该章的主线关卡，敌人 / 缩放 / 门槛全部原样，
+   *   于是难度**天然落在已标定的锚点上**（铁律 #41：锚点不许手填）。
+   */
+  chapter: number
+  /** 掉落数量倍率（相对基准产量） */
+  dropMul: number
+}
+
+export const DUNGEON_DIFFICULTIES: readonly DungeonDifficulty[] = [
+  { id: 'easy', name: '简易', chapter: 1, dropMul: 1.0 },
+  { id: 'normal', name: '普通', chapter: 4, dropMul: 1.6 },
+  { id: 'hard', name: '困难', chapter: 8, dropMul: 2.6 },
+] as const
+
+/**
+ * 副本基准产量（**每次胜利**）。
+ *
+ * ⚠ 副本胜利**只**发所选的五行材料 / 石档，不发银两 / 经验 / 遗物
+ *   （设计稿 §3「副本胜利只发所选的五行材料或石档」）。
+ *
+ * ⚠ 只登记**副本会产出的道具**（经验书不参与：它由主线产出）。
+ *   键集必须与 `config/dungeons.ts` 的副本变体一一对应。
+ *
+ * ⚠ 数值待策划确认（实现文档 §5）。
+ */
+export const DUNGEON_DROPS: Partial<Record<ItemId, { min: number; max: number }>> = {
+  skillMatGold: { min: 2, max: 5 },
+  skillMatWood: { min: 2, max: 5 },
+  skillMatWater: { min: 2, max: 5 },
+  skillMatFire: { min: 2, max: 5 },
+  skillMatEarth: { min: 2, max: 5 },
+  relicStoneTier1: { min: 2, max: 4 },
+  relicStoneTier2: { min: 2, max: 4 },
+  relicStoneTier3: { min: 1, max: 3 },
+}
+
+// ─────────────────────────── 旧档折算（资源/背包版本 v10） ───────────────────────────
+
+/**
+ * 旧档折算表（v9 → v10）。
+ *
+ * ⚠ **数值待策划确认**（实现文档 §5）——除「抽卡券按 300 结晶折算」外，
+ *   其余均为按「旧购买力」折算的初值。
+ *
+ * ⚠ 术式结晶 / 遗物强化石**不自动折算**，而是走**一次性分配权益**
+ *   （`save.legacy`）：玩家自己选五行 / 石档，避免强塞无用材料
+ *   （实现文档 §2「避免强塞无用材料或按件数放大高阶价值」）。
+ */
+export const LEGACY_CONVERSION = {
+  /** 每张未用抽卡券折算的圣杯结晶（设计稿 §2「原券按每张 300 结晶折算」） */
+  ticketToCrystals: 300,
+  /** 每枚英灵印记折算的银两 */
+  emblemToSilver: 1_000,
+  /** 术式结晶 → 五行技能材料的折算率（每颗术式结晶折多少材料） */
+  skillStoneToMaterial: 1,
+  /** 遗物强化石 → 强化材料的折算率（每颗强化石折多少材料） */
+  relicStoneToMaterial: 1,
+} as const
 
 // ─────────────────────────── 日常（§11） ───────────────────────────
 
-/** 每日签到奖励条目（各条字段可缺省，调用方按存在性取用） */
+/**
+ * 每日签到奖励条目（各条字段可缺省，调用方按存在性取用）。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：抽卡券 / 术式结晶 / 遗物强化石退役，
+ *   改发**经验书**（`items`）。结晶与银两保留（设计稿 §3「签到保留各自的结晶供给」）。
+ */
 export interface DailyReward {
   crystals?: number
   silver?: number
-  tickets?: number
-  skillStones?: number
-  relicStones?: number
+  /** 堆叠道具（经验书等） */
+  items?: Record<ItemId, number>
 }
 
 export const DAILY = {
@@ -683,55 +838,93 @@ export const DAILY = {
   SIGN_IN_REWARDS: [
     { crystals: 300, silver: 5000 },
     { crystals: 300, silver: 5000 },
-    { crystals: 500, tickets: 1 },
+    { crystals: 500, silver: 5000, items: { expBookSmall: 5 } as Record<ItemId, number> },
     { crystals: 500, silver: 10000 },
-    { crystals: 800, skillStones: 20 },
-    { crystals: 800, relicStones: 20 },
-    { crystals: 1500, tickets: 2 },
+    { crystals: 800, items: { expBookSmall: 10 } as Record<ItemId, number> },
+    { crystals: 800, items: { expBookLarge: 2 } as Record<ItemId, number> },
+    { crystals: 1500, silver: 10000, items: { expBookLarge: 3, expBookSmall: 10 } as Record<ItemId, number> },
   ] as readonly DailyReward[],
 } as const
 
 // ─────────────────────────── 初始资源 ───────────────────────────
 
+/**
+ * 新号初始资源。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：钱包只有银两与圣杯结晶；
+ *   抽卡券 / 印记 / 术式结晶 / 遗物强化石 / 经验池全部退役。
+ *
+ * ⚠ 结晶起点按设计稿 §3「新号仍有 20 抽购买力」给 6,000（= 20 × 300）。
+ */
 export const START_RESOURCES = {
-  silver: 50000,
-  exp: 0,
-  emblems: 0,
-  crystals: 3000,
-  tickets: 10,
-  skillStones: 30,
-  relicStones: 30,
+  silver: 50_000,
+  crystals: 6_000,
+} as const
+
+/** 新号初始道具（经验书起步量） */
+export const START_ITEMS: Record<ItemId, number> = {
+  expBookSmall: 10,
+  expBookLarge: 2,
+  skillMatGold: 0,
+  skillMatWood: 0,
+  skillMatWater: 0,
+  skillMatFire: 0,
+  skillMatEarth: 0,
+  relicStoneTier1: 0,
+  relicStoneTier2: 0,
+  relicStoneTier3: 0,
 } as const
 
 /** 内置一次性兑换码表（§13 首发替代方案） */
-export const REDEEM_CODES: Record<string, { crystals?: number; tickets?: number; emblems?: number; silver?: number; note: string }> = {
-  'SGW-WELCOME-2026': { crystals: 3000, tickets: 10, note: '开服体验' },
+export const REDEEM_CODES: Record<
+  string,
+  { crystals?: number; silver?: number; items?: Record<ItemId, number>; note: string }
+> = {
+  'SGW-WELCOME-2026': {
+    crystals: 3_000,
+    silver: 100_000,
+    items: { expBookLarge: 10, expBookSmall: 50 } as Record<ItemId, number>,
+    note: '开服体验',
+  },
   'SGW-TEST-001': { crystals: 600, note: '内部测试' },
 }
 
 // ─────────────────────────── 掉落表（§10.1） ───────────────────────────
 
+/**
+ * 一条道具掉落。
+ *
+ * ⚠ `chance` 是**掉落概率（百分比，0~100）**，不是权重：
+ *   每一类道具**各自独立**掷一次骰子（互不影响）。
+ *   数量在 `[min, max]` 之间均匀取。
+ *
+ * ⚠ 为什么用「概率 + 固定数量」而不是「权重池」：经验书是**离散单位**，
+ *   而每场的期望经验是连续值——用概率表达「这本书这一场出不出」，
+ *   用数量表达「出了给几本」，两者相乘才等于期望经验（见 `expBookDrop`）。
+ */
+export interface ItemDrop {
+  id: ItemId
+  /** 掉落概率（百分比） */
+  chance: number
+  min: number
+  max: number
+}
+
 export interface DropTableDef {
   silver: [number, number]
-  exp: [number, number]
-  skillStones: [number, number]
-  relicStones: [number, number]
+  /** 堆叠道具掉落（各自独立掷概率） */
+  items: ItemDrop[]
   /** 遗物掉落：稀有度 → 权重 */
   relicDrop: { rarity: Rarity; weight: number }[]
-  /** 英灵印记掉落数量区间 */
-  emblems: [number, number]
 }
 
 /**
- * 进阶资源（术式结晶 / 遗物强化石 / 英灵印记）的**章节成长底数**。
+ * 进阶资源的**章节成长底数**。
  *
- * ⚠ 原实现这三类掉落是恒定值（1-3 / 1-2 / 0-1），而养成消耗是固定的，
- * 于是主线推到最后也养不起一队满养成英灵（见 tools/balance/report.ts）：
- *   术式结晶 0.49×、遗物强化石 0.12×、英灵印记 0.16×。
- * 根因是「线性消耗 vs 恒定投放」。改为随章节增长后投放与消耗同量级，
- * 同时符合「越深的关卡资源越丰厚」这一挂机游戏标准设计。
+ * ⚠ 术式结晶 / 遗物强化石退役后，本因子只用于**副本材料**的章节成长参考，
+ *   实际副本产量由 `DUNGEON_DROPS` × 难度倍率给出。
  */
-const ADVANCE_GROWTH = 1.3
+export const ADVANCE_GROWTH = 1.3
 
 /**
  * 掉落（银两 / 经验）随章节的增长倍率。
@@ -750,46 +943,78 @@ const ADVANCE_GROWTH = 1.3
  *   2.7 与 2.725 基本相等 ⇒ 每章耗时大致均等，
  *   境界台阶所在的第 3/6/8 章自然变成长线关卡（那三章本来就是门槛）。
  */
-const DROP_GROWTH = 2.7
+export const DROP_GROWTH = 2.7
+
+/**
+ * 把「每场期望经验」换算成经验书的投放（概率 + 数量）。
+ *
+ * ⚠ 期望经验必须与旧口径一致，否则整条养成曲线会漂：
+ *   旧口径每场经验 = `[60k, 140k]`（普通关）/ `[400k, 840k]`（BOSS），
+ *   平均值 = `100k` / `620k`（k = 2.7^(章-1)）。
+ *
+ * @param avgExp 每场**平均**经验
+ * @param largeShare 大书占据的经验预算比例（0 = 全小书）
+ */
+function expBookDrop(avgExp: number, largeShare: number): ItemDrop[] {
+  const out: ItemDrop[] = []
+  const smallExp = EXP_BOOK.small.exp
+  const largeExp = EXP_BOOK.large.exp
+
+  const largeBudget = avgExp * largeShare
+  if (largeBudget > 0) {
+    // 数量向上取整 → 概率 ≤ 1；期望 = 概率 × 数量 × 面值 = largeBudget
+    const count = Math.max(1, Math.ceil(largeBudget / largeExp))
+    out.push({
+      id: EXP_BOOK.large.id,
+      chance: Math.min(100, (largeBudget / (count * largeExp)) * 100),
+      min: count,
+      max: count,
+    })
+  }
+
+  const smallBudget = avgExp * (1 - largeShare)
+  const count = Math.max(1, Math.ceil(smallBudget / smallExp))
+  out.push({
+    id: EXP_BOOK.small.id,
+    chance: Math.min(100, (smallBudget / (count * smallExp)) * 100),
+    min: count,
+    max: count,
+  })
+  return out
+}
 
 /**
  * 每章一张普通关卡表 + 一张 BOSS 表。
- * 银两 / 经验随章节增长；进阶资源按 ADVANCE_GROWTH 增长。
  *
- * ⚠ 印记投放（2.5a / 4a~11a）是为**境界突破**让路的：
- *   印记是继升星之后的第二大出口（单人 70 枚，6 人编队 420 枚），
- *   原投放（2a / 3a~8a）扣掉突破消耗后回收率只有 0.98×——直接是缺口。
- *   上调后回收率回到 1.2× 以上（见 tools/balance/report.ts）。
+ * ⚠ **实施修正（资源/背包版本 v10）**：经验池退役 → 掉落**经验书**；
+ *   术式结晶 / 遗物强化石 / 英灵印记退役 → 不再投放。
+ *   掉落表不再有 `exp` / `skillStones` / `relicStones` / `emblems` 四个字段。
+ *
+ * ⚠ 大书占比随章节上升（设计稿 §2「大经验书｜主线胜利，中后期提高大书占比」）。
  */
 export const DROP_TABLES: Record<string, DropTableDef> = (() => {
   const tables: Record<string, DropTableDef> = {}
   for (let chapter = 1; chapter <= STAGE.CHAPTERS; chapter++) {
     const k = Math.pow(DROP_GROWTH, chapter - 1)
-    /** 进阶资源成长因子 */
-    const a = Math.pow(ADVANCE_GROWTH, chapter - 1)
+    /** 大书占据的经验预算比例：前期全小书，中后期逐步换成大书 */
+    const largeShare = chapter >= 7 ? 0.5 : chapter >= 5 ? 0.35 : chapter >= 4 ? 0.2 : 0
     tables[`stage_${chapter}`] = {
       silver: [Math.round(20 * k), Math.round(45 * k)],
-      exp: [Math.round(60 * k), Math.round(140 * k)],
-      skillStones: [Math.ceil(1 * a), Math.ceil(3 * a)],
-      relicStones: [Math.ceil(3 * a), Math.ceil(6 * a)],
+      items: expBookDrop(100 * k, largeShare),
       relicDrop: [
         { rarity: 'N', weight: 60 },
         { rarity: 'R', weight: 30 },
         { rarity: 'SR', weight: 10 },
       ],
-      emblems: [0, Math.ceil(2.5 * a)],
     }
     tables[`boss_${chapter}`] = {
       silver: [Math.round(120 * k), Math.round(260 * k)],
-      exp: [Math.round(400 * k), Math.round(840 * k)],
-      skillStones: [Math.ceil(2 * a), Math.ceil(7 * a)],
-      relicStones: [Math.ceil(9 * a), Math.ceil(27 * a)],
+      items: expBookDrop(620 * k, largeShare),
       relicDrop: [
         { rarity: 'R', weight: 45 },
         { rarity: 'SR', weight: 40 },
         { rarity: 'SSR', weight: 15 },
       ],
-      emblems: [Math.ceil(4 * a), Math.ceil(11 * a)],
     }
   }
   return tables

@@ -115,30 +115,26 @@ describe('三队天梯 · 首次参与与结算', () => {
 describe('三队天梯 · 积分与奖励隔离', () => {
   it('天梯产出只有竞技专属资源，绝不回流 PVE 经济', () => {
     const save = ladderSave()
+    // ⚠ 资源/背包版本 v10：钱包只剩**银两 + 圣杯结晶**，
+    //   术式结晶 / 遗物强化石 / 抽卡券 / 玩家经验池已退役 → 改成盯背包道具表。
     const before = {
       silver: save.player.silver,
-      exp: save.player.exp,
-      skillStones: save.player.skillStones,
-      relicStones: save.player.relicStones,
       crystals: save.player.crystals,
-      tickets: save.player.tickets,
+      items: JSON.stringify(save.items),
     }
     apply(save, { type: 'arena.ladderSaveSquads', squads: fillSquads(save, FULL_TEAM) })
     const res = apply(save, { type: 'arena.ladderChallenge' })
     expect(res.ok).toBe(true)
     expect(save.player.silver).toBe(before.silver)
-    expect(save.player.exp).toBe(before.exp)
-    expect(save.player.skillStones).toBe(before.skillStones)
-    expect(save.player.relicStones).toBe(before.relicStones)
     expect(save.player.crystals).toBe(before.crystals)
-    expect(save.player.tickets).toBe(before.tickets)
+    expect(JSON.stringify(save.items)).toBe(before.items)
     // 只进竞技专属池
     expect(save.arena.medals).toBeGreaterThanOrEqual(0)
     expect(save.arena.arenaMaterials).toBeGreaterThanOrEqual(0)
   })
 
   it('天梯产出白名单里没有任何 PVE 资源', () => {
-    for (const key of ['silver', 'exp', 'skillStones', 'relicStones', 'crystals', 'tickets'] as const) {
+    for (const key of ['silver', 'crystals', 'items'] as const) {
       expect(LADDER_REWARD_ALLOWED_KEYS).not.toContain(key as never)
     }
   })
@@ -190,9 +186,9 @@ describe('三队天梯 · 赛季重置', () => {
     // 段位分按保留比例下调
     expect(save.arena.tierPoints).toBe(Math.floor(pointsBefore * LADDER.SEASON_CARRY_PCT))
     expect(save.arena.tierPoints).toBeLessThan(pointsBefore)
-    // 赛季奖励只发竞技专属资源
-    expect(save.arena.medals).toBe(medalsBefore + spec.medals)
-    expect(save.arena.arenaMaterials).toBe(materialsBefore + spec.arenaMaterials)
+    // 赛季奖励**只发称号**（勋章 / 竞技材料已停发，设计稿 §3）
+    expect(save.arena.medals).toBe(medalsBefore)
+    expect(save.arena.arenaMaterials).toBe(materialsBefore)
     // 称号入列
     expect(save.arena.ladder.seasonTitles.length).toBe(1)
   })
@@ -202,15 +198,13 @@ describe('三队天梯 · 赛季重置', () => {
     apply(save, { type: 'arena.ladderSaveSquads', squads: fillSquads(save, FULL_TEAM) })
     const before = {
       silver: save.player.silver,
-      skillStones: save.player.skillStones,
-      relicStones: save.player.relicStones,
       crystals: save.player.crystals,
+      items: JSON.stringify(save.items),
     }
     rollLadderPeriods(save, BASE_TIME + LADDER.SEASON_WEEKS * WEEK_MS + 1000)
     expect(save.player.silver).toBe(before.silver)
-    expect(save.player.skillStones).toBe(before.skillStones)
-    expect(save.player.relicStones).toBe(before.relicStones)
     expect(save.player.crystals).toBe(before.crystals)
+    expect(JSON.stringify(save.items)).toBe(before.items)
   })
 
   it('连续跨多个赛季会逐个结算', () => {
@@ -225,7 +219,7 @@ describe('三队天梯 · 赛季重置', () => {
 })
 
 describe('三队天梯 · 回流奖励', () => {
-  it('离线满 3 天判为回流，领取后给养成材料与勋章（不含结晶与券）', () => {
+  it('离线满 3 天判为回流，领取后给通用经验书（不含结晶、券与竞技产出）', () => {
     const save = ladderSave()
     // 先活跃一次，确立 lastActiveAt
     rollLadderPeriods(save, BASE_TIME)
@@ -237,20 +231,17 @@ describe('三队天梯 · 回流奖励', () => {
     expect(save.arena.ladder.returnPending).toBe(true)
 
     const before = {
-      skillStones: save.player.skillStones,
-      relicStones: save.player.relicStones,
+      books: save.items.expBookSmall,
       crystals: save.player.crystals,
-      tickets: save.player.tickets,
       medals: save.arena.medals,
     }
     const res = apply(save, { type: 'arena.ladderClaimReturn' }, back)
     expect(res.ok).toBe(true)
-    expect(save.player.skillStones).toBeGreaterThan(before.skillStones)
-    expect(save.player.relicStones).toBeGreaterThan(before.relicStones)
-    expect(save.arena.medals).toBeGreaterThan(before.medals)
-    // 不冲击抽卡间隔
+    // ⚠ 资源/背包版本 v10：回流改发**通用经验书**（设计稿 §3）
+    expect(save.items.expBookSmall).toBeGreaterThan(before.books)
+    // 不冲击抽卡间隔，也不发竞技产出
     expect(save.player.crystals).toBe(before.crystals)
-    expect(save.player.tickets).toBe(before.tickets)
+    expect(save.arena.medals).toBe(before.medals)
     expect(save.arena.ladder.returnPending).toBe(false)
   })
 
@@ -278,9 +269,14 @@ describe('三队天梯 · 回流奖励', () => {
 
   it('回流奖励分档：离线越久给得越多', () => {
     expect(resolveReturnReward(2)).toBeNull()
-    expect(resolveReturnReward(3)?.skillStones).toBeGreaterThan(0)
-    expect(resolveReturnReward(7)?.skillStones).toBeGreaterThan(resolveReturnReward(3)!.skillStones)
-    expect(resolveReturnReward(14)?.skillStones).toBeGreaterThan(resolveReturnReward(7)!.skillStones)
+    // ⚠ 回流改发通用经验书（`items`），不再是术式结晶 / 强化石
+    expect(resolveReturnReward(3)?.items.expBookSmall).toBeGreaterThan(0)
+    expect(resolveReturnReward(7)!.items.expBookSmall).toBeGreaterThan(
+      resolveReturnReward(3)!.items.expBookSmall,
+    )
+    expect(resolveReturnReward(14)!.items.expBookSmall).toBeGreaterThan(
+      resolveReturnReward(7)!.items.expBookSmall,
+    )
   })
 })
 

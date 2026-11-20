@@ -159,9 +159,13 @@ export const RESOURCE_ICON_EXT = '.webp'
  * **需要图标的资源 key 全集**（唯一口径）。
  *
  * key 与存档 / 收益包字段一一对应：
- *   `player.silver` / `player.exp` / `player.crystals` / `player.tickets` /
- *   `player.skillStones` / `player.relicStones` / `player.emblems` /
- *   `player.shards` / `arena.medals` / `arena.arenaMaterials`。
+ *   - **钱包**：`player.silver` / `player.crystals`；
+ *   - **堆叠道具**：`save.items[<道具 id>]`（见 `config/items.ts`）；
+ *   - **历史余额（只读）**：`player.shards` / `arena.medals` / `arena.arenaMaterials`。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：抽卡券 / 英灵印记 / 玩家经验池 /
+ *   术式结晶 / 遗物强化石已随钱包收敛而退役，**从本表移除**
+ *   （对应素材文件一并删除）。新增 10 个道具 key。
  *
  * ⚠ 这份清单是**生图侧与表现层的共同契约**：
  *   生图工具（`tools/artgen/icon-prompt.ts`）按它产出素材，
@@ -170,15 +174,20 @@ export const RESOURCE_ICON_EXT = '.webp'
  */
 export const RESOURCE_ICON_KEYS = [
   'silver',
-  'exp',
   'crystals',
-  'tickets',
-  'skillStones',
-  'relicStones',
-  'emblems',
   'shards',
   'medals',
   'arenaMaterials',
+  'expBookSmall',
+  'expBookLarge',
+  'skillMatGold',
+  'skillMatWood',
+  'skillMatWater',
+  'skillMatFire',
+  'skillMatEarth',
+  'relicStoneTier1',
+  'relicStoneTier2',
+  'relicStoneTier3',
 ] as const
 
 /** 资源 key 类型 */

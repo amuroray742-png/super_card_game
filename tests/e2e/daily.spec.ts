@@ -103,7 +103,7 @@ test.describe('每日任务与周目标', () => {
     await expect(page).toHaveURL(/#\/forge/)
   })
 
-  test('签到达成任务 → 领取 → 强化石与术式结晶到账，圣杯结晶不动', async ({ page }) => {
+  test('签到达成任务 → 领取 → 经验书到账，圣杯结晶不动', async ({ page }) => {
     const session = await registerAccount(uniqueUsername('daily'))
     await seedSession(page, session)
     await page.goto('/#/daily')
@@ -122,8 +122,9 @@ test.describe('每日任务与周目标', () => {
     await expect(page.getByTestId('task-claim-d_signin')).toHaveText('已领取')
 
     const after = await cachedSaveOf(page, session.user.id)
-    expect(after?.player?.relicStones).toBe((before?.player?.relicStones ?? 0) + 2)
-    expect(after?.player?.skillStones).toBe((before?.player?.skillStones ?? 0) + 2)
+    // ⚠ 任务奖励口径（资源/背包版本 v10）：只发**通用经验书**，
+    //   术式结晶 / 遗物强化石已退役，副本材料与竞技资源也不在任务奖励里。
+    expect(after?.items?.expBookSmall).toBe((before?.items?.expBookSmall ?? 0) + 1)
     // 任务奖励**不含**圣杯结晶：抽卡间隔不受影响
     expect(after?.player?.crystals).toBe(before?.player?.crystals)
   })
@@ -155,7 +156,7 @@ test.describe('每日任务与周目标', () => {
     expect(first.ok).toBe(true)
 
     const saveAfterFirst = await pullSave(accessToken)
-    const stonesAfterFirst = saveAfterFirst.player.relicStones
+    const booksAfterFirst = saveAfterFirst.items.expBookSmall
 
     // 新 actionId 再领一次 → 服务端拒绝（先校验后修改，资源不变）
     const second = await postAction(accessToken, 'e-claim-2', { type: 'daily.claimTask', taskId: 'd_pull' })
@@ -163,7 +164,7 @@ test.describe('每日任务与周目标', () => {
     expect(second.code).toBe('TASK_ALREADY_CLAIMED')
 
     const saveAfterSecond = await pullSave(accessToken)
-    expect(saveAfterSecond.player.relicStones).toBe(stonesAfterFirst)
+    expect(saveAfterSecond.items.expBookSmall).toBe(booksAfterFirst)
   })
 
   test('任务没完成时领不到（服务端拒绝，资源不变）', async () => {

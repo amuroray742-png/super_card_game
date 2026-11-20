@@ -29,8 +29,9 @@ import {
 } from '../../../src/core/save/serialize.ts'
 import { createNewSave } from '../../../src/core/save/schema.ts'
 import { Rng } from '../../../src/core/rng.ts'
-import { ACCOUNT, LEGACY_MIGRATED_FLAG } from '../../../src/core/config/account.ts'
+import { ACCOUNT, LEGACY_MIGRATED_FLAG, FIRST_CLEAR_COMPENSATED_FLAG } from '../../../src/core/config/account.ts'
 import { IDLE } from '../../../src/core/config/economy.ts'
+import { firstClearCrystalsForRange } from '../../../src/core/systems/first-clear.ts'
 import { GAME_ERROR_CODES, GAME_ERROR_MESSAGES } from '../../../src/core/config/game-errors.ts'
 import {
   applyAction,
@@ -119,6 +120,13 @@ interface PreparedSave {
   offline: OfflineSettlementResult | null
   /** 存档是否被改动（补种子 / 离线结算 → 需要落库） */
   dirty: boolean
+  /**
+   * 本次是否发放了「首通结晶一次性补发」。
+   *
+   * ⚠ 记账标记必须与存档**同一事务**写入（实现文档 §2）——
+   *   所以这里只回报「要不要写标记」，写标记由调用方在事务里做。
+   */
+  firstClearCompensated: boolean
 }
 
 export class GameService {
@@ -152,10 +160,12 @@ export class GameService {
       if (!loaded) return null
       const { save } = loaded
 
-      const prepared = this.prepare(save, now)
+      const prepared = this.prepare(save, now, true, userId)
       if (prepared.dirty) {
         save.savedAt = now
-        this.writeSaveAndRelics(userId, save, loaded.before, now)
+        this.writeSaveAndRelics(userId, save, loaded.before, now, {
+          writeFirstClearFlag: prepared.firstClearCompensated,
+        })
       }
       return {
         save: publicSnapshot(save),
@@ -223,12 +233,15 @@ export class GameService {
     save: SaveData,
     before: Map<string, { level: number; locked: boolean }>,
     now: number,
-    opts: { syncRelics?: boolean } = {},
+    opts: { syncRelics?: boolean; writeFirstClearFlag?: boolean } = {},
   ): void {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       writeSave(this.db, userId, serializeSaveBody(save), save.savedAt, now)
       if (opts.syncRelics !== false) syncRelics(this.db, userId, before, save.relics)
+      // ⚠ 「首通补发已处理」标记与存档**同一事务**写入（实现文档 §2）：
+      //   崩了重来不会重复发，也不会出现「发了钱没记账 / 记了账没发钱」。
+      if (opts.writeFirstClearFlag) writeFlag(this.db, userId, FIRST_CLEAR_COMPENSATED_FLAG, 1)
       this.db.exec('COMMIT')
     } catch (err) {
       this.db.exec('ROLLBACK')
@@ -309,7 +322,15 @@ export class GameService {
     const relicBefore = loaded ? loaded.before : new Map<string, { level: number; locked: boolean }>()
 
     // ③ 挂机动作自己消费账本，避免入口预结算吞掉其上限与返回结果。
-    const prepared = this.prepare(save, now, request.action.type !== 'idle.tick' && request.action.type !== 'idle.claimOffline' && !isHeartbeat)
+    const prepared = this.prepare(
+      save,
+      now,
+      request.action.type !== 'idle.tick' && request.action.type !== 'idle.claimOffline' && !isHeartbeat,
+      // ⚠ **导入路径排除首通补发**：导入的进度不是可信凭证
+      //   （实现文档 §2「客户端导入数据不能作为历史补偿凭证」），
+      //   所以导入时不补发，而是把标记直接置为「已处理」。
+      isImport ? undefined : userId,
+    )
 
     // ④ 执行动作（规则全在 core 里）
     const rngBefore = save.rng
@@ -335,7 +356,10 @@ export class GameService {
       const failedImportWithoutSave = isImport && !row
       if (prepared.dirty && !failedImportWithoutSave) {
         save.savedAt = now
-        this.writeSaveAndRelics(userId, save, relicBefore, now, { syncRelics: !isHeartbeat })
+        this.writeSaveAndRelics(userId, save, relicBefore, now, {
+          syncRelics: !isHeartbeat,
+          writeFirstClearFlag: prepared.firstClearCompensated,
+        })
       }
       return {
         ok: false,
@@ -377,6 +401,12 @@ export class GameService {
       // 存量旧档迁移：记一笔账号标记（同一份旧档不会被迁给第二个账号）
       if (isImport) {
         writeFlag(this.db, userId, LEGACY_MIGRATED_FLAG, 1)
+        // ⚠ 导入档**永远拿不到**首通补发 → 标记直接置为「已处理」
+        writeFlag(this.db, userId, FIRST_CLEAR_COMPENSATED_FLAG, 1)
+      }
+      // 首通补发：标记与存档同一事务写入（崩了重来不会重复发）
+      if (prepared.firstClearCompensated) {
+        writeFlag(this.db, userId, FIRST_CLEAR_COMPENSATED_FLAG, 1)
       }
       this.db.exec('COMMIT')
     } catch (err) {
@@ -398,19 +428,42 @@ export class GameService {
   }
 
   /**
-   * 入口检查：补随机种子 + 补算离线收益。
+   * 入口检查：补随机种子 + 补算离线收益 + 首通结晶一次性补发。
    *
    * 离线收益**不依赖后台常驻 tick**——每次进入游戏 / 每次动作都检查一次，
    * 玩家断网期间不损失挂机收益（服务端时间说了算）。
+   *
+   * @param userId 账号（读「首通补发已处理」标记用）
    */
-  private prepare(save: SaveData, now: number, settle = true): PreparedSave {
+  private prepare(save: SaveData, now: number, settle = true, userId?: number): PreparedSave {
     let dirty = false
     let offline: OfflineSettlementResult | null = null
+    let firstClearCompensated = false
 
     // 旧档没有随机种子 → 服务端补一条（客户端不再持有随机序列，铁律 #24）
     if (!save.rng.seed) {
       save.rng.seed = serverSeed()
       save.rng.counter = 0
+      dirty = true
+    }
+
+    // ── 首通结晶的一次性补发（资源/背包版本 v10） ──
+    //
+    // ⚠ 口径（实现文档 §2）：按**服务端权威**的 `campaign.clearedStage`
+    //   补发本版新增的首通结晶，**并在同一事务登记**账号标记。
+    // ⚠ **导入路径排除**：`save.import` 不走这里（导入的进度不是可信凭证），
+    //   而是由调用方直接把标记置为「已处理」。
+    // ⚠ 补发**幂等**：标记 + 到账明细同事务写入，崩了重来不会重复发；
+    //   且 `campaign.creditedStages` 被推到 `clearedStage`，增量判定也不重复。
+    if (userId !== undefined && !readFlag(this.db, userId, FIRST_CLEAR_COMPENSATED_FLAG)) {
+      const crystals = firstClearCrystalsForRange(1, save.campaign.clearedStage)
+      if (crystals > 0) save.player.crystals += crystals
+      // 已发放的关卡数与高水位对齐 → 之后的增量首通不会被误判成「本次首通」
+      save.campaign.creditedStages = Math.max(
+        save.campaign.creditedStages,
+        save.campaign.clearedStage,
+      )
+      firstClearCompensated = true
       dirty = true
     }
 
@@ -423,13 +476,13 @@ export class GameService {
     const rolled = rollLadderPeriods(save, now)
     dirty ||= rolled.changed
 
-    if (!settle) return { offline, dirty }
+    if (!settle) return { offline, dirty, firstClearCompensated }
     const before = JSON.stringify([save.lastTickAt, save.idle])
     const settleRng = Rng.fromSnapshot(save.rng.seed, save.rng.counter)
     offline = settleIdleLedger(save, { now, rng: settleRng, randomSeed: serverSeed })
     syncRngState(save, settleRng)
     dirty ||= JSON.stringify([save.lastTickAt, save.idle]) !== before
-    return { offline, dirty }
+    return { offline, dirty, firstClearCompensated }
   }
 
   // ─────────────────────────── 只读查询（仓库 / 导出） ───────────────────────────
@@ -478,11 +531,12 @@ export class GameService {
   }
 
   /**
-   * 遗物统计（只读）：仓库总数 + 按定义 id 分组。
+   * 遗物统计（只读）：仓库总数 + 按定义 id 分组 + 仓库最高等级。
    *
-   * 客户端镜像里只有已装备遗物，顶栏件数与图鉴收藏数必须由服务端给。
+   * 客户端镜像里只有已装备遗物，顶栏件数、图鉴收藏数与**强化副本解锁线**
+   * 都必须由服务端给（客户端看不见仓库里那件 Lv60）。
    */
-  async relicStats(userId: number): Promise<{ total: number; byDefId: Record<string, number> }> {
+  async relicStats(userId: number): Promise<{ total: number; byDefId: Record<string, number>; maxLevel: number }> {
     return this.lock.run(userId, () => readRelicStats(this.db, userId))
   }
 

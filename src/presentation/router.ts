@@ -31,8 +31,13 @@ export const router = createRouter({
     { path: '/expedition', name: 'expedition', component: () => import('./views/ExpeditionView.vue'), meta: { tab: 'expedition' } },
     { path: '/temple', name: 'temple', component: () => import('./views/TempleView.vue'), meta: { tab: 'temple' } },
     { path: '/formation', name: 'formation', component: () => import('./views/FormationView.vue'), meta: { tab: 'formation' } },
-    { path: '/forge', name: 'forge', component: () => import('./views/ForgeView.vue'), meta: { tab: 'forge' } },
+    // ⚠ **实施修正（资源/背包版本 v10）**：「铸造」页升级为「背包」。
+    //   路径 `/forge` 与路由名 `forge` **全部保留**（E2E / 截图工具 / 任务跳转都不用改），
+    //   `/backpack` 只是别名，两者 `meta.tab` 都是 `forge` → 底部标签栏高亮一致。
+    { path: '/forge', name: 'forge', component: () => import('./views/BackpackView.vue'), meta: { tab: 'forge' } },
+    { path: '/backpack', name: 'backpack', component: () => import('./views/BackpackView.vue'), meta: { tab: 'forge' } },
     { path: '/legacy', name: 'legacy', component: () => import('./views/LegacyView.vue'), meta: { tab: 'legacy' } },
+    { path: '/dungeon', name: 'dungeon', component: () => import('./views/DungeonView.vue') },
 
     { path: '/hero/:id', name: 'hero', component: () => import('./views/HeroDetailView.vue') },
     { path: '/stage/:id', name: 'stage', component: () => import('./views/StageDetailView.vue') },

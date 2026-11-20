@@ -21,8 +21,13 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'coverage', 'playwrig
  * 生成的中间产物目录：AI 视觉复核原文、批次回执等。
  * 这些是工具链的缓存与日志，不是任何对外文案，
  * 模型复述里出现「极致」「必出」等词不代表游戏文案违规，故排除。
+ *
+ * ⚠ `local-out` 是**本地**生图流水线的缓存与任务清单（.gitignore 已忽略），
+ *   里面存的是**提示词原文**——提示词不是对外文案（对外的是生成出来的图）。
+ *   但提示词本身仍然要守规矩（绝对化用词会真的被画进图标里），
+ *   所以规矩由 `icon-prompt.ts` 自己守，不靠扫描器兜。
  */
-const SKIP_RELATIVE = ['tools/artgen/out']
+const SKIP_RELATIVE = ['tools/artgen/out', 'tools/artgen/local-out']
 
 interface Rule {
   category: string

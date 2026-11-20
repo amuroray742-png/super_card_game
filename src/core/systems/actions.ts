@@ -29,6 +29,9 @@
 import type {
   ArenaMatch,
   ArenaLoadout,
+  BattleContext,
+  Element,
+  IdleTarget,
   LadderRoundResult,
   Rarity,
   RelicInstance,
@@ -37,7 +40,30 @@ import type {
   TeamPreset,
 } from '../model/types.ts'
 import { GAME_ERROR_CODES, type GameErrorCode } from '../config/game-errors.ts'
-import { DAILY, LEVEL, REDEEM_CODES, BATTLE, IDLE, RELIC } from '../config/economy.ts'
+import {
+  DAILY,
+  LEVEL,
+  REDEEM_CODES,
+  BATTLE,
+  IDLE,
+  RELIC,
+  LEGACY_CONVERSION,
+  EXP_BOOK,
+  DUNGEON_DIFFICULTY_IDS,
+  type DungeonDifficultyId,
+  type RelicStoneTierId,
+} from '../config/economy.ts'
+import {
+  EXP_BOOK_ITEM_EXP,
+  ITEM_BY_ELEMENT,
+  RELIC_STONE_ITEM_BY_TIER,
+  isExpBook,
+  itemName,
+  type ItemId,
+} from '../config/items.ts'
+import { findDungeonVariant } from '../config/dungeons.ts'
+import { dungeonUnlocked, runDungeon } from './dungeons.ts'
+import { grantFirstClearCrystals } from './first-clear.ts'
 import { STAGE_INDEX } from '../config/stages.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { getPool } from '../config/pools.ts'
@@ -46,23 +72,27 @@ import { formatNumber } from '../utils/format.ts'
 import { Rng } from '../rng.ts'
 import {
   applyExp,
+  applyFeedBooks,
   applyRealmBreak,
   applySkillUp,
   applyStarUp,
   atRealmGate,
   createHeroState,
+  previewFeed,
   realmBreakCost,
   skillLevelCap,
   skillUpCost,
   starUpCost,
+  type FeedBooksResult,
 } from './growth.ts'
 import {
   applyRelicUpgrade,
   decomposeValue,
   generateRelic,
   nextRelicUid,
-  relicTotalCost,
+  relicCostDelta,
   relicUpgradeCost,
+  type RelicStoneCosts,
   RELIC_DEFS,
   RELIC_SETS,
 } from './relic.ts'
@@ -123,9 +153,22 @@ export type GameAction =
   | { type: 'idle.tick'; battles: number }
   | { type: 'idle.heartbeat' }
   | { type: 'idle.claimOffline' }
-  | { type: 'idle.setTarget'; stageId: number }
+  | {
+      type: 'idle.setTarget'
+      /** 去向种类：主线 / 技能副本 / 强化副本 */
+      kind: IdleTarget['kind']
+      /** 主线去向的目标关卡（省略 = 沿用当前目标） */
+      stageId?: number
+      /** 技能副本：五行 */
+      element?: Element
+      /** 强化副本：石档 */
+      tier?: RelicStoneTierId
+      /** 副本难度 */
+      difficulty?: DungeonDifficultyId
+    }
   | { type: 'settings.update'; speed?: number; sfx?: boolean; skipAnim?: boolean }
   | { type: 'hero.feedExp'; heroId: string; amount: number }
+  | { type: 'hero.feedBooks'; heroId: string; bookId: ItemId; count: number }
   | { type: 'hero.breakRealm'; heroId: string }
   | { type: 'hero.upgradeSkill'; heroId: string; index: number }
   | { type: 'hero.upgradeStar'; heroId: string }
@@ -149,6 +192,7 @@ export type GameAction =
   | { type: 'daily.signIn' }
   | { type: 'daily.claimTask'; taskId: string }
   | { type: 'code.redeem'; code: string }
+  | { type: 'legacy.allocateMaterials'; skillElement: Element; relicTier: RelicStoneTierId }
   | { type: 'save.create' }
   | { type: 'save.reset' }
   | { type: 'save.import'; payload: string; legacy?: boolean }
@@ -160,18 +204,12 @@ export type GameActionType = GameAction['type']
 export interface PullActionResult {
   /** 本次抽到的完整名册（含重复），按抽出顺序 */
   items: { heroId: string; rarity: Rarity; isNew: boolean }[]
-  /** 重复转化的印记总数 */
-  emblems: number
-  /** 重复转化的同名碎片总数 */
-  shards: number
-  /** 重复转化的银两 */
-  silver: number
+  /** 重复转化的**同名碎片**（英灵 id → 数量） */
+  shards: Record<string, number>
   /** 新获得英灵 id 列表 */
   newHeroes: string[]
   /** 本次实际扣的圣杯结晶 */
   crystalsUsed: number
-  /** 本次实际扣的抽卡券 */
-  ticketsUsed: number
   /** 新手保底是否触发 */
   guaranteedTriggered: boolean
   /** 本次是否消耗掉新手保底资格 */
@@ -183,8 +221,27 @@ export interface IdleActionResult {
   rewards: RewardBundle
   reachedStage: number
   blockedAtStage: number | null
+  /**
+   * 副本结算明细（**挂机去向是副本时**才有）。
+   *
+   * ⚠ 副本战败要能直接给出「降一档难度」的建议（设计稿 §3），
+   *   所以这个字段必须跟着动作结果回到界面（铁律 #27：规则要写在玩家眼前）。
+   */
+  dungeon?: OfflineSettlementResult['dungeon']
 }
 
+/**
+ * 喂经验书的结果。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：玩家经验池退役 → 经验改由
+ *   「经验书 → 直接进英灵」产出（设计稿 §2）。
+ *
+ * ⚠ **口径只有一份**：定义在 `core/systems/growth.ts`（真正算出这些数的地方），
+ *   这里**转出**而不是再写一遍——两处各写一份必然对不上（铁律 #4）。
+ */
+export type { FeedBooksResult } from './growth.ts'
+
+/** 旧动作 `hero.feedExp` 的结果形状（动作保留但恒定失败，见 `CLIENT_OUTDATED`） */
 export interface FeedExpResult {
   /** 实际投入的经验 */
   applied: number
@@ -195,13 +252,14 @@ export interface FeedExpResult {
 export interface RelicUpgradeResult {
   uid: string
   level: number
-  cost: { silver: number; stones: number }
+  /** 花费：银两 + 按档位拆分的强化石 */
+  cost: { silver: number; stones: RelicStoneCosts }
 }
 
 export interface DecomposeResult {
   uid: string
+  /** ⚠ 分解**只返银两**（设计稿 §2），不再返强化石 */
   silver: number
-  stones: number
 }
 
 /** 批量分解结果 */
@@ -210,8 +268,6 @@ export interface DecomposeBatchResult {
   decomposed: number
   /** 返还银两 */
   silver: number
-  /** 返还强化石 */
-  stones: number
   /** 因锁定而跳过的 uid（锁定件不会被分解，只会被跳过） */
   skipped: string[]
   /** 因已装备而被卸下的件数 */
@@ -224,8 +280,8 @@ export interface UpgradeBatchResult {
   upgraded: number
   /** 消耗银两 */
   silver: number
-  /** 消耗强化石 */
-  stones: number
+  /** 消耗强化石（按档位拆分） */
+  stones: RelicStoneCosts
   /** 每件强化后的等级 */
   levels: { uid: string; level: number }[]
 }
@@ -256,9 +312,10 @@ export interface ActionResultMap {
   'idle.tick': IdleActionResult
   'idle.heartbeat': true
   'idle.claimOffline': OfflineSettlementResult | null
-  'idle.setTarget': { stageId: number }
+  'idle.setTarget': { target: IdleTarget; stageId: number }
   'settings.update': true
   'hero.feedExp': FeedExpResult
+  'hero.feedBooks': FeedBooksResult
   'hero.breakRealm': { levelsGained: number }
   'hero.upgradeSkill': { level: number }
   'hero.upgradeStar': { star: number }
@@ -282,6 +339,7 @@ export interface ActionResultMap {
   'daily.signIn': RewardBundle
   'daily.claimTask': RewardBundle
   'code.redeem': RewardBundle
+  'legacy.allocateMaterials': { items: Partial<Record<ItemId, number>> }
   'save.create': true
   'save.reset': true
   'save.import': true
@@ -342,6 +400,12 @@ function heroName(heroId: string): string {
  * ⚠ 所有可入库资源都走这里，表现层与客户端**不得**另写一份入库逻辑。
  *   遗物清单只认 `rewards.relics`（core 的 `rollRewards` 已经把它填好了）。
  *
+ * ⚠ **实施修正（资源/背包版本 v10）**：
+ *   - 钱包只留银两 / 圣杯结晶；
+ *   - 堆叠道具走 `rewards.items` → `save.items`（**顶层**，不放 `player`）；
+ *   - 同名碎片走 `rewards.shards` → `player.shards`（按英灵分堆）；
+ *   - 经验池 / 印记 / 抽卡券 / 术式结晶 / 遗物强化石**全部退役**。
+ *
  * @returns 库存溢出处理结果（没有溢出时是空结果）
  */
 export function applyRewardBundle(
@@ -352,12 +416,13 @@ export function applyRewardBundle(
 ): InventoryOverflowResult {
   const p = save.player
   if (rewards.silver) p.silver += rewards.silver
-  if (rewards.exp) p.exp += rewards.exp
-  if (rewards.emblems) p.emblems += rewards.emblems
   if (rewards.crystals) p.crystals += rewards.crystals
-  if (rewards.tickets) p.tickets += rewards.tickets
-  if (rewards.skillStones) p.skillStones += rewards.skillStones
-  if (rewards.relicStones) p.relicStones += rewards.relicStones
+  if (rewards.items) {
+    for (const [id, n] of Object.entries(rewards.items)) {
+      const key = id as ItemId
+      save.items[key] = (save.items[key] ?? 0) + n
+    }
+  }
   if (rewards.shards) {
     for (const [id, n] of Object.entries(rewards.shards)) {
       p.shards[id] = (p.shards[id] ?? 0) + n
@@ -368,7 +433,7 @@ export function applyRewardBundle(
       // uid 由**存档内**计数器派生 → 唯一且可复现（不用随机后缀，避免大档碰撞）
       save.relics.push(generateRelic(defId, rng, 1, nextRelicUid(save)))
     }
-    // 库存上限：溢出的最没用遗物自动分解，折算进银两与强化石。
+    // 库存上限：溢出的最没用遗物自动分解，折算进银两。
     // 锁定件 / 已装备件永不自动分解（宁可突破上限也不销毁玩家标记过的东西）。
     return enforceInventoryCap(save)
   }
@@ -378,6 +443,47 @@ export function applyRewardBundle(
     }
   }
   return emptyOverflow()
+}
+
+/**
+ * 奖励包**通用聚合**（结算明细用）。
+ *
+ * ⚠ 旧实现是硬编码键数组 `['silver','exp','skillStones','relicStones','emblems']`
+ *   → 新增的 `items`（经验书 / 五行材料 / 强化石）根本不会出现在结算面板里
+ *   （铁律 #26：掉落必须有真实链路）。
+ *   现在改为**遍历奖励包**本身，新增资源类型自动出现在明细里。
+ */
+export function mergeRewardBundles(target: RewardBundle, source: RewardBundle): RewardBundle {
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) continue
+    if (key === 'relics' || key === 'heroes') {
+      const list = value as string[]
+      if (list.length === 0) continue
+      const bucket = (target[key] as string[] | undefined) ?? []
+      bucket.push(...list)
+      target[key as 'relics' | 'heroes'] = bucket
+      continue
+    }
+    if (key === 'shards') {
+      const bucket = { ...(target.shards ?? {}) }
+      for (const [id, n] of Object.entries(value as Record<string, number>)) {
+        bucket[id] = (bucket[id] ?? 0) + n
+      }
+      target.shards = bucket
+      continue
+    }
+    if (key === 'items') {
+      const bucket = { ...(target.items ?? {}) }
+      for (const [id, n] of Object.entries(value as Record<string, number>)) {
+        bucket[id as ItemId] = (bucket[id as ItemId] ?? 0) + n
+      }
+      target.items = bucket
+      continue
+    }
+    const num = value as number
+    target[key as 'silver' | 'crystals'] = ((target[key as 'silver' | 'crystals'] as number | undefined) ?? 0) + num
+  }
+  return target
 }
 
 /** 负载内的 uid 去重（重复提交的第一层防护） */
@@ -436,12 +542,12 @@ function actionPull(
   const count = payload.count === 10 ? 10 : 1
 
   // ⚠ 先校验余额再取种子：失败不消耗随机序列（否则会白白跳过一次序列）
-  const payment = resolvePayment(count, save.player.crystals, save.player.tickets)
+  const payment = resolvePayment(count, save.player.crystals)
   if (!payment) {
     const required = pullCost(count)
     return fail(
       GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
-      `余额不足（结晶 ${save.player.crystals}/${required.crystals}、抽卡券 ${save.player.tickets}/${required.tickets}），无法召唤`,
+      `余额不足（圣杯结晶 ${save.player.crystals}/${required.crystals}），无法召唤`,
     )
   }
 
@@ -453,7 +559,6 @@ function actionPull(
         pity: { pitySSR: save.gacha.pitySSR, pity10: save.gacha.pity10 },
         owned: save.heroes,
         crystals: save.player.crystals,
-        tickets: save.player.tickets,
         newbieUsed: save.gacha.newbieUsed,
       },
       pool,
@@ -464,7 +569,7 @@ function actionPull(
     if (err instanceof InsufficientFundsError) {
       return fail(
         GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
-        `余额不足（结晶 ${err.owned.crystals}/${err.required.crystals}、抽卡券 ${err.owned.tickets}/${err.required.tickets}），无法召唤`,
+        `余额不足（圣杯结晶 ${err.owned.crystals}/${err.required.crystals}），无法召唤`,
       )
     }
     throw err
@@ -472,7 +577,6 @@ function actionPull(
 
   // ── 校验通过，开始修改存档 ──
   save.player.crystals -= outcome.crystalsUsed
-  save.player.tickets -= outcome.ticketsUsed
   save.gacha.pitySSR = outcome.pity.pitySSR
   save.gacha.pity10 = outcome.pity.pity10
   if (outcome.newbieUsedConsumed) {
@@ -490,10 +594,8 @@ function actionPull(
     if (r.isNew) {
       grantHero(save, r.heroId, ctx.now)
     } else {
-      // 重复 → 通用英灵印记 + 同名碎片 + 银两（合规：重复不直接提升强度）
-      save.player.emblems += r.emblems
+      // 重复 → **只给同名碎片**（合规：重复不直接提升强度；设计稿 §2）
       save.player.shards[r.heroId] = (save.player.shards[r.heroId] ?? 0) + r.shards
-      save.player.silver += r.silver
     }
   }
   save.stats.totalPulls += count
@@ -508,12 +610,9 @@ function actionPull(
         rarity: r.rarity,
         isNew: r.isNew,
       })),
-      emblems: summary.emblems,
       shards: summary.shards,
-      silver: summary.silver,
       newHeroes: summary.newHeroes,
       crystalsUsed: outcome.crystalsUsed,
-      ticketsUsed: outcome.ticketsUsed,
       guaranteedTriggered: outcome.guaranteedTriggered,
       newbieUsedConsumed: outcome.newbieUsedConsumed,
     },
@@ -566,6 +665,15 @@ export function settleIdleLedger(save: SaveData, ctx: ActionContext, upperLimit:
     efficiency: 1,
     overflow: emptyOverflow(),
   }
+
+  // ── 挂机去向：主线 / 技能副本 / 强化副本 ──
+  // ⚠ 三个去向**共用同一份时间账本**，但产出与进度**分别记账**
+  //   （副本不写 `campaign`，主线首通结晶也只在主线去向结算）。
+  const target = save.idle.target ?? { kind: 'campaign' as const }
+  if (target.kind !== 'campaign') {
+    return settleDungeonLedger(save, ctx, target, run, budgetMs, battleMs, battles, pve)
+  }
+
   let farm = save.idle.farm
   for (let i = 0; i < battles; i++) {
     const farmStage = farm && farm.winsUntilRetry > 0 ? farm.stage : null
@@ -585,17 +693,14 @@ export function settleIdleLedger(save: SaveData, ctx: ActionContext, upperLimit:
     }
 
     const overflow = applyRewardBundle(save, one.rewards, ctx.rng, ctx.now)
-    for (const key of ['silver', 'exp', 'skillStones', 'relicStones', 'emblems'] as const) {
-      if (one.rewards[key] !== undefined) run.rewards[key] = (run.rewards[key] ?? 0) + one.rewards[key]!
-    }
-    if (one.rewards.relics) (run.rewards.relics ??= []).push(...one.rewards.relics)
+    // ⚠ 结算明细用**通用聚合**（遍历奖励包），不再硬编码键数组——
+    //   否则新增的 `items`（经验书 / 五行材料 / 强化石）不会出现在结算面板里。
+    mergeRewardBundles(run.rewards, one.rewards)
     // 溢出自动分解的折算也要进结算明细（玩家看得见，不静默吞掉掉落）
     if (overflow.salvaged > 0) {
       run.overflow.salvaged += overflow.salvaged
       run.overflow.silver += overflow.silver
-      run.overflow.stones += overflow.stones
       run.rewards.silver = (run.rewards.silver ?? 0) + overflow.silver
-      run.rewards.relicStones = (run.rewards.relicStones ?? 0) + overflow.stones
     }
     run.overflow.skipped += overflow.skipped
     run.lastClearedStage = Math.max(run.lastClearedStage ?? 0, stage)
@@ -611,12 +716,74 @@ export function settleIdleLedger(save: SaveData, ctx: ActionContext, upperLimit:
   save.idle.currentStage = run.nextTargetStage
   save.idle.farm = farm
   save.campaign.clearedStage = run.reachedStage
+  // ⚠ **主线首通结晶**（账号级）：按 `clearedStage` 高水位增量判定，
+  //   离线连续过关也**逐关发奖**（设计稿 §3）。
+  //   圣杯重启不重置 `campaign` ⇒ 它天然跨设备、跨重启都在。
+  const firstClear = grantFirstClearCrystals(save)
+  if (firstClear > 0) run.rewards.crystals = (run.rewards.crystals ?? 0) + firstClear
   save.idle.effectiveMs = Math.max(0, budgetMs - run.battles * battleMs)
   // 兼容旧水位展示；实际计量由measuredAt + effectiveMs负责。
   save.lastTickAt = Math.max(save.lastTickAt, (save.idle.measuredAt ?? ctx.now) - save.idle.effectiveMs)
   save.idle.totalIdleSeconds += run.battles * BATTLE.SECONDS_PER_BATTLE
   // 任务计数：推征场次（每日任务与周目标同时推进）
   save.daily = advanceTasks(save.daily, 'battle', run.battles, ctx.now)
+  return run
+}
+
+/**
+ * **副本去向**的挂机结算。
+ *
+ * ⚠ 与主线结算**共用同一份时间账本**（`effectiveMs` 结转），
+ *   但**不写 `campaign`**（副本进度与主线记录分别记账）。
+ *
+ * ⚠ 副本胜利**只发所选材料**：不发银两 / 经验 / 遗物 / 首通结晶。
+ * ⚠ 战败即停，并在结算明细里回报「第 N 场战败」+ 建议降难度。
+ */
+function settleDungeonLedger(
+  save: SaveData,
+  ctx: ActionContext,
+  target: Exclude<IdleTarget, { kind: 'campaign' }>,
+  run: OfflineSettlementResult,
+  budgetMs: number,
+  battleMs: number,
+  battles: number,
+  pve: BattleContext,
+): OfflineSettlementResult {
+  const variant = target.kind === 'skill'
+    ? findDungeonVariant('skill', target.element)
+    : findDungeonVariant('enhance', undefined, target.tier)
+  if (!variant) {
+    // 配置异常：回落到主线去向（宁可刷主线，也不要让挂机空转）
+    save.idle.target = { kind: 'campaign' }
+    return settleIdleLedger(save, ctx, 0) ?? run
+  }
+  const unlock = dungeonUnlocked(save, variant)
+  if (!unlock.unlocked) {
+    // 未解锁：不跑副本，预算**留在账本里**（解锁后还能用），去向回落到主线
+    save.idle.target = { kind: 'campaign' }
+    run.dungeon = { itemId: variant.itemId, blockedAtBattle: null, suggestDifficulty: null }
+    return run
+  }
+
+  const dungeon = runDungeon(save, variant, target.difficulty, battles, ctx.rng.nextSeed(), pve)
+  run.battles = dungeon.battles
+  run.reachedStage = save.campaign.clearedStage
+  run.lastClearedStage = null
+  run.nextTargetStage = save.idle.currentStage
+  run.dungeon = {
+    itemId: variant.itemId,
+    blockedAtBattle: dungeon.blockedAtBattle,
+    suggestDifficulty: dungeon.suggestDifficulty,
+  }
+  if (dungeon.wins > 0) {
+    const rewards: RewardBundle = { items: dungeon.items as RewardBundle['items'] }
+    applyRewardBundle(save, rewards, ctx.rng, ctx.now)
+    mergeRewardBundles(run.rewards, rewards)
+  }
+  save.idle.effectiveMs = Math.max(0, budgetMs - dungeon.battles * battleMs)
+  save.lastTickAt = Math.max(save.lastTickAt, (save.idle.measuredAt ?? ctx.now) - save.idle.effectiveMs)
+  save.idle.totalIdleSeconds += dungeon.battles * BATTLE.SECONDS_PER_BATTLE
+  // ⚠ 副本场次**不计入**「推征」任务口径（那是另一种活动）
   return run
 }
 
@@ -647,23 +814,66 @@ function actionIdleClaimOffline(
 }
 
 /**
- * 设定挂机目标关卡。
+ * 设定挂机去向（主线 / 技能副本 / 强化副本）。
  *
- * 挂机推进到哪一关属于**存档状态**，服务端权威后必须由服务端改——
- * 客户端直接写 `save.idle.currentStage` 会在下一次响应时被服务端版本覆盖。
+ * ⚠ **实施修正（资源/背包版本 v10）**：三个去向**共用一份挂机时间账本**，
+ *   切换时**先按旧去向结清**，再写新去向（设计稿 §3）。
+ *   剩余预算（`idle.effectiveMs`）**结转**到新去向——不因为切换而清零。
+ *
+ * ⚠ 切换本身**不产生场次**：结清时那一场是「旧目标在切换前应得的时间」，
+ *   不是切换发的（实现文档 §3）。
+ *
+ * ⚠ 关卡目标是**存档状态**，服务端权威后必须由服务端改——
+ *   客户端直接写 `save.idle.currentStage` 会在下一次响应时被服务端版本覆盖。
  */
 function actionIdleSetTarget(
   save: SaveData,
   payload: Extract<GameAction, { type: 'idle.setTarget' }>,
-  _ctx: ActionContext,
-): ActionOutcome<{ stageId: number }> {
-  const stageId = Math.floor(payload.stageId)
-  if (!Number.isSafeInteger(payload.stageId) || !STAGE_INDEX.has(stageId) || stageId > save.campaign.clearedStage + 1) {
+  ctx: ActionContext,
+): ActionOutcome<{ target: IdleTarget; stageId: number }> {
+  const kind = payload.kind
+
+  if (kind === 'skill' || kind === 'enhance') {
+    const variant = findDungeonVariant(kind, payload.element, payload.tier)
+    if (!variant) {
+      return fail(GAME_ERROR_CODES.NOT_FOUND, '副本不存在')
+    }
+    const difficulty = payload.difficulty ?? 'easy'
+    if (!DUNGEON_DIFFICULTY_IDS.includes(difficulty)) {
+      return fail(GAME_ERROR_CODES.NOT_FOUND, '副本难度不存在')
+    }
+    const unlock = dungeonUnlocked(save, variant)
+    if (!unlock.unlocked) {
+      return fail(GAME_ERROR_CODES.MATERIAL_UNLOCKED, unlock.reason)
+    }
+    // ── 先结清旧去向（用旧 target 结算），再换新去向 ──
+    settleIdleLedger(save, ctx)
+    save.idle.target = {
+      kind,
+      ...(kind === 'skill'
+        ? { element: payload.element as Element, difficulty }
+        : { tier: payload.tier as RelicStoneTierId, difficulty }),
+    } as IdleTarget
+    delete save.idle.farm
+    return ok<{ target: IdleTarget; stageId: number }>(
+      { target: save.idle.target, stageId: save.idle.currentStage },
+      '挂机去向已更新',
+    )
+  }
+
+  // 主线去向
+  const stageId = payload.stageId ?? save.idle.currentStage
+  if (!Number.isSafeInteger(stageId) || !STAGE_INDEX.has(stageId) || stageId > save.campaign.clearedStage + 1) {
     return fail(GAME_ERROR_CODES.NOT_FOUND, '关卡不存在')
   }
+  settleIdleLedger(save, ctx)
+  save.idle.target = { kind: 'campaign' }
   save.idle.currentStage = stageId
   delete save.idle.farm
-  return ok<{ stageId: number }>({ stageId }, '挂机目标已更新')
+  return ok<{ target: IdleTarget; stageId: number }>(
+    { target: save.idle.target, stageId },
+    '挂机目标已更新',
+  )
 }
 
 /**
@@ -690,30 +900,64 @@ function actionSettingsUpdate(
   return ok<true>(true)
 }
 
-/** 喂经验 */
+/**
+ * 旧动作 `hero.feedExp` —— **已退役**。
+ *
+ * ⚠ **实施修正（资源/背包版本 v10）**：玩家经验池退役，喂经验改为
+ *   「扣经验书 → 直接进英灵」（`hero.feedBooks`）。
+ *   本动作**保留在联合类型里**是为了让旧客户端得到一个**明确**的拒绝，
+ *   而不是静默失败——静默失败会让玩家以为「经验不足」。
+ *
+ *   错误码 `CLIENT_OUTDATED`，文案「客户端版本过旧，请刷新页面」。
+ */
 function actionFeedExp(
   save: SaveData,
-  payload: Extract<GameAction, { type: 'hero.feedExp' }>,
-  ctx: ActionContext,
+  _payload: Extract<GameAction, { type: 'hero.feedExp' }>,
+  _ctx: ActionContext,
 ): ActionOutcome<FeedExpResult> {
+  void save
+  return fail(GAME_ERROR_CODES.CLIENT_OUTDATED, '客户端版本过旧，请刷新页面')
+}
+
+/**
+ * 喂经验书（**新的唯一喂经验入口**）。
+ *
+ * 契约（铁律 #22「资源 → 进度必须闭合」）：
+ *   ① 扣的是**经验书**（`save.items`），不是银两、不是经验池；
+ *   ② 扣费前先校验余额 → 不足直接拒绝，**不产生负数、不吞书**；
+ *   ③ 书换来的经验**真的能被消耗掉**——`applyExp` 里境界门槛仍是硬上限，
+ *      门槛上积压的经验存着，突破后立即兑现。
+ */
+function actionFeedBooks(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'hero.feedBooks' }>,
+  _ctx: ActionContext,
+): ActionOutcome<FeedBooksResult> {
   const state = save.heroes[payload.heroId]
   if (!state) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
-  const need = Math.max(0, Math.floor(payload.amount))
-  if (need <= 0) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
+  if (!isExpBook(payload.bookId)) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '该道具不是经验书')
+  }
+  const count = Math.floor(payload.count)
+  if (!Number.isSafeInteger(count) || count <= 0) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '数量必须是正整数')
+  }
   if (state.level >= LEVEL.MAX) {
     return fail(GAME_ERROR_CODES.MAX_LEVEL, '该英灵已达最高等级')
   }
-  const p = save.player
-  // 先判余额再扣费：余额不足直接拒绝，不允许出现负数资源（铁律 #10）
-  if (p.exp < need) {
+  const owned = save.items[payload.bookId] ?? 0
+  if (owned < count) {
     return fail(
       GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
-      `经验不足（${formatNumber(p.exp)} / ${formatNumber(need)}）`,
+      `${itemName(payload.bookId)}不足（${formatNumber(owned)} / ${formatNumber(count)}）`,
     )
   }
 
-  p.exp -= need
-  const res = applyExp(state, need)
+  // ── 校验通过，开始修改存档 ──
+  const bookExp = EXP_BOOK_ITEM_EXP[payload.bookId] ?? 0
+  const preview = previewFeed(state, bookExp, count)
+  save.items[payload.bookId] = owned - count
+  const res = applyFeedBooks(state, bookExp, count)
 
   const name = heroName(payload.heroId)
   const message =
@@ -721,9 +965,15 @@ function actionFeedExp(
       ? `${name} 提升了 ${res.levelsGained} 级`
       : res.blockedByRealm
         ? `${name} 已达境界门槛，需突破境界才能继续升级`
-        : `已投入 ${formatNumber(need)} 经验`
-  return ok<FeedExpResult>(
-    { applied: need, levelsGained: res.levelsGained, blockedByRealm: res.blockedByRealm },
+        : `已投入 ${formatNumber(res.applied)} 经验`
+  return ok<FeedBooksResult>(
+    {
+      applied: res.applied,
+      booksUsed: res.booksUsed,
+      expRemaining: res.expRemaining,
+      levelsGained: res.levelsGained,
+      blockedByRealm: res.blockedByRealm,
+    },
     message,
   )
 }
@@ -744,17 +994,18 @@ function actionBreakRealm(
     return fail(GAME_ERROR_CODES.REALM_GATE, '尚未达到境界门槛')
   }
   const p = save.player
-  if (p.emblems < cost.emblems) {
+  // ⚠ **实施修正（资源/背包版本 v10）**：突破改扣**银两**（印记已退役）
+  if (p.silver < cost.silver) {
     return fail(
       GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
-      `英灵印记不足（${formatNumber(p.emblems)} / ${cost.emblems}）`,
+      `银两不足（${formatNumber(p.silver)} / ${formatNumber(cost.silver)}）`,
     )
   }
 
-  p.emblems -= cost.emblems
+  p.silver -= cost.silver
   if (!applyRealmBreak(state)) {
-    // 兜底：状态不允许突破时把印记还回去
-    p.emblems += cost.emblems
+    // 兜底：状态不允许突破时把银两还回去
+    p.silver += cost.silver
     return fail(GAME_ERROR_CODES.REALM_GATE, '当前无法突破境界')
   }
   // 突破前已投入但卡在门槛上的经验，立刻兑现成等级
@@ -777,26 +1028,32 @@ function actionUpgradeSkill(
   const state = save.heroes[payload.heroId]
   if (!state) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
   const current = state.skillLevels[payload.index] ?? 0
+  const element = HERO_INDEX.get(payload.heroId)?.element
+  if (!element) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
 
   // 先判上限（受境界门槛约束），再判资源。
   // ⚠ 顺序反了会让技能已满级的玩家看到「资源不足」——那是误导。
   if (current >= skillLevelCap(state.level)) {
     return fail(GAME_ERROR_CODES.SKILL_CAP, '当前等级无法继续提升')
   }
-  const cost = skillUpCost(current)
+  const cost = skillUpCost(current, element)
   if (!cost) {
     return fail(GAME_ERROR_CODES.SKILL_CAP, '当前等级无法继续提升')
   }
-  const p = save.player
-  // ⚠ 扣的是**术式结晶**（skillStones），不是圣杯结晶（crystals）。
-  if (p.skillStones < cost.skillStones || p.silver < cost.silver) {
-    return fail(GAME_ERROR_CODES.INSUFFICIENT_FUNDS, '资源不足')
+  // ⚠ **实施修正（资源/背包版本 v10）**：扣的是**该英灵五行对应的技能材料**
+  //   （金 → 金系技能材料 …），不再是单一的术式结晶。
+  const owned = save.items[cost.materialId] ?? 0
+  if (owned < cost.material || save.player.silver < cost.silver) {
+    return fail(
+      GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
+      `${itemName(cost.materialId)}或银两不足（${itemName(cost.materialId)} ${formatNumber(owned)}/${formatNumber(cost.material)}、银两 ${formatNumber(save.player.silver)}/${formatNumber(cost.silver)}）`,
+    )
   }
   if (!applySkillUp(state, payload.index)) {
     return fail(GAME_ERROR_CODES.SKILL_CAP, '当前等级无法继续提升')
   }
-  p.skillStones -= cost.skillStones
-  p.silver -= cost.silver
+  save.items[cost.materialId] = owned - cost.material
+  save.player.silver -= cost.silver
   return ok<{ level: number }>({ level: state.skillLevels[payload.index] ?? current }, '技能等级已提升')
 }
 
@@ -812,12 +1069,15 @@ function actionUpgradeStar(
   if (!cost) {
     return fail(GAME_ERROR_CODES.MAX_STAR, '已达最高星级')
   }
+  // ⚠ **实施修正（资源/背包版本 v10）**：升星**只扣同名碎片**（印记已退役）
   const shards = save.player.shards[payload.heroId] ?? 0
-  if (shards < cost.shards || save.player.emblems < cost.emblems) {
-    return fail(GAME_ERROR_CODES.INSUFFICIENT_FUNDS, '碎片或印记不足')
+  if (shards < cost.shards) {
+    return fail(
+      GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
+      `同名碎片不足（${formatNumber(shards)} / ${formatNumber(cost.shards)}）`,
+    )
   }
   save.player.shards[payload.heroId] = shards - cost.shards
-  save.player.emblems -= cost.emblems
   applyStarUp(state)
   return ok<{ star: number }>({ star: state.star }, '星级已提升')
 }
@@ -834,15 +1094,46 @@ function actionRelicUpgrade(
   if (!cost) {
     return fail(GAME_ERROR_CODES.MAX_RELIC_LEVEL, '已达最高强化等级')
   }
-  if (save.player.silver < cost.silver || save.player.relicStones < cost.stones) {
-    return fail(GAME_ERROR_CODES.INSUFFICIENT_FUNDS, '银两或强化石不足')
+  // ⚠ **实施修正（资源/背包版本 v10）**：强化石分三档，扣的是**目标等级所属档**。
+  const short = stoneShortfall(save, cost.stones)
+  if (save.player.silver < cost.silver || short) {
+    return fail(
+      GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
+      `银两或强化石不足（${short ? short.message : ''}${short ? '、' : ''}银两 ${formatNumber(save.player.silver)}/${formatNumber(cost.silver)}）`,
+    )
   }
   save.player.silver -= cost.silver
-  save.player.relicStones -= cost.stones
+  payStones(save, cost.stones)
   applyRelicUpgrade(relic)
   // 任务计数：遗物强化件数
   save.daily = advanceTasks(save.daily, 'relicUpgrade', 1, ctx.now)
   return ok<RelicUpgradeResult>({ uid: relic.uid, level: relic.level, cost })
+}
+
+/**
+ * 强化石缺口检查（按档位）。
+ *
+ * @returns null = 够用；否则返回可展示的缺口说明
+ */
+function stoneShortfall(
+  save: SaveData,
+  stones: RelicStoneCosts,
+): { message: string } | null {
+  for (const [id, need] of Object.entries(stones)) {
+    const owned = save.items[id as ItemId] ?? 0
+    if (owned < (need ?? 0)) {
+      return { message: `${itemName(id as ItemId)} ${formatNumber(owned)}/${formatNumber(need ?? 0)}` }
+    }
+  }
+  return null
+}
+
+/** 扣强化石（按档位） */
+function payStones(save: SaveData, stones: RelicStoneCosts): void {
+  for (const [id, need] of Object.entries(stones)) {
+    const key = id as ItemId
+    save.items[key] = (save.items[key] ?? 0) - (need ?? 0)
+  }
 }
 
 /** 遗物分解 */
@@ -857,15 +1148,15 @@ function actionDecomposeRelic(
   if (relic.locked) {
     return fail(GAME_ERROR_CODES.RELIC_LOCKED, '遗物已锁定')
   }
+  // ⚠ **实施修正（资源/背包版本 v10）**：分解**只返银两**
   const value = decomposeValue(relic)
   save.player.silver += value.silver
-  save.player.relicStones += value.stones
   save.relics.splice(idx, 1)
   for (const key of Object.keys(save.equipped)) {
     if (save.equipped[key].relicId === payload.uid) delete save.equipped[key]
   }
   return ok<DecomposeResult>(
-    { uid: payload.uid, silver: value.silver, stones: value.stones },
+    { uid: payload.uid, silver: value.silver },
     '已分解遗物',
   )
 }
@@ -928,7 +1219,7 @@ function actionDecomposeRelicBatch(
   }
   if (targets.length === 0) {
     return ok<DecomposeBatchResult>(
-      { decomposed: 0, silver: 0, stones: 0, skipped, unequipped: 0 },
+      { decomposed: 0, silver: 0, skipped, unequipped: 0 },
       '选中的遗物都已锁定，未做任何改动',
     )
   }
@@ -945,18 +1236,16 @@ function actionDecomposeRelicBatch(
   }
   const removed = new Set(targets.map((r) => r.uid))
   let silver = 0
-  let stones = 0
   for (const relic of targets) {
     const value = decomposeValue(relic)
     silver += value.silver
-    stones += value.stones
   }
   save.relics = save.relics.filter((r) => !removed.has(r.uid))
+  // ⚠ 分解**只返银两**（设计稿 §2）——不返还强化石
   save.player.silver += silver
-  save.player.relicStones += stones
 
   return ok<DecomposeBatchResult>(
-    { decomposed: targets.length, silver, stones, skipped, unequipped },
+    { decomposed: targets.length, silver, skipped, unequipped },
     `已分解 ${targets.length} 件遗物`,
   )
 }
@@ -992,7 +1281,7 @@ function actionDecomposeRelicByFilter(
 
   if (candidates.length === 0) {
     return ok<DecomposeBatchResult>(
-      { decomposed: 0, silver: 0, stones: 0, skipped: [], unequipped: 0 },
+      { decomposed: 0, silver: 0, skipped: [], unequipped: 0 },
       '没有符合条件的遗物',
     )
   }
@@ -1037,7 +1326,7 @@ function actionUpgradeRelicBatch(
   // ── 校验阶段 ──
   const targets: { relic: RelicInstance; to: number }[] = []
   let silver = 0
-  let stones = 0
+  const stones: RelicStoneCosts = {}
   for (const uid of uids) {
     const relic = save.relics.find((r) => r.uid === uid)
     if (!relic) return fail(GAME_ERROR_CODES.NOT_FOUND, '遗物不存在')
@@ -1051,23 +1340,27 @@ function actionUpgradeRelicBatch(
     // ⚠ 批量强化按**累计投入之差**计费，不是「单级价格 × 级数」：
     //   强化价格随等级指数上升（铁律 #4：扣费口径只有一份，
     //   与玩家逐级点的账必须逐位对得上）。
-    const from = relicTotalCost(relic.level)
-    const target = relicTotalCost(to)
-    silver += target.silver - from.silver
-    stones += target.stones - from.stones
+    // ⚠ 强化石**按档位**差值计费（跨档时初阶 + 中阶各算各的）。
+    const delta = relicCostDelta(relic.level, to)
+    silver += delta.silver
+    for (const [id, n] of Object.entries(delta.stones)) {
+      const key = id as ItemId
+      stones[key] = (stones[key] ?? 0) + (n ?? 0)
+    }
     targets.push({ relic, to })
   }
 
-  if (save.player.silver < silver || save.player.relicStones < stones) {
+  const short = stoneShortfall(save, stones)
+  if (save.player.silver < silver || short) {
     return fail(
       GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
-      `银两或强化石不足（需要 银两 ${formatNumber(silver)}、强化石 ${formatNumber(stones)}）`,
+      `银两或强化石不足（需要 银两 ${formatNumber(silver)}${short ? `、${short.message}` : ''}）`,
     )
   }
 
   // ── 修改阶段 ──
   save.player.silver -= silver
-  save.player.relicStones -= stones
+  payStones(save, stones)
   const levels: { uid: string; level: number }[] = []
   for (const { relic, to } of targets) {
     relic.level = to
@@ -1258,19 +1551,17 @@ function actionArenaSettle(
     a.weeklyMaterials = 0
     a.weeklyTickets = 0
   }
-  const { reward, weeklyMedals, weeklyTickets, weeklyMaterials } = resolveArenaRewards(
+  // ⚠ **实施修正（资源/背包版本 v10）**：竞技产出退场（设计稿 §3）
+  //   —— 只承接段位分与称号，勋章 / 竞技材料 / 抽卡券全部停发。
+  const { reward, weeklyMedals, weeklyMaterials } = resolveArenaRewards(
     match.result.win,
     a.weeklyMedals ?? 0,
-    a.weeklyTickets ?? 0,
     a.weeklyMaterials ?? 0,
   )
   a.medals = (a.medals ?? 0) + reward.medals
   a.arenaMaterials = (a.arenaMaterials ?? 0) + reward.arenaMaterials
   a.weeklyMedals = weeklyMedals
   a.weeklyMaterials = weeklyMaterials
-  a.weeklyTickets = weeklyTickets
-  // 兑换券进入玩家背包（竞技专属产出，不回流 PVE 经济）
-  if (reward.tickets) save.player.tickets += reward.tickets
 
   return ok<ArenaSettleResult>({ match, reward })
 }
@@ -1379,12 +1670,10 @@ function actionLadderClaimReturn(
   }
 
   // 入库（先改再清标记，失败即原子：这一步不会失败）
-  applyRewardBundle(
-    save,
-    { skillStones: reward.skillStones, relicStones: reward.relicStones },
-    ctx.rng,
-    ctx.now,
-  )
+  // ⚠ **实施修正（资源/背包版本 v10）**：回流奖励改发**通用经验书**（`items`），
+  //   竞技勋章停发（`medals` 恒为 0）。
+  const rewards: RewardBundle = { items: reward.items as RewardBundle['items'] }
+  applyRewardBundle(save, rewards, ctx.rng, ctx.now)
   save.arena.medals = (save.arena.medals ?? 0) + reward.medals
   ladder.returnPending = false
   ladder.returnDays = 0
@@ -1392,11 +1681,11 @@ function actionLadderClaimReturn(
 
   return ok<LadderReturnResult>(
     {
-      rewards: { skillStones: reward.skillStones, relicStones: reward.relicStones },
+      rewards,
       medals: reward.medals,
       days,
     },
-    `回流奖励已领取（离线 ${days} 天）· 术式结晶 +${reward.skillStones} · 强化石 +${reward.relicStones} · 勋章 +${reward.medals}`,
+    `回流奖励已领取（离线 ${days} 天）`,
   )
 }
 
@@ -1416,18 +1705,19 @@ function actionSignIn(
   const index = continued ? d.signInStreak % DAILY.SIGN_IN_CYCLE : 0
   const reward = DAILY.SIGN_IN_REWARDS[index]
 
-  const p = save.player
-  if (reward.crystals) p.crystals += reward.crystals
-  if (reward.silver) p.silver += reward.silver
-  if (reward.tickets) p.tickets += reward.tickets
-  if (reward.skillStones) p.skillStones += reward.skillStones
-  if (reward.relicStones) p.relicStones += reward.relicStones
+  // 入库（先改再清标记，失败即原子：这一步不会失败）
+  const rewards: RewardBundle = {
+    crystals: reward.crystals,
+    silver: reward.silver,
+    items: reward.items,
+  }
+  applyRewardBundle(save, rewards, ctx.rng, ctx.now)
 
   d.signInStreak = index + 1
   d.lastSignInDay = today
   // 任务计数：签到次数
   save.daily = advanceTasks(save.daily, 'signIn', 1, ctx.now)
-  return ok<RewardBundle>({ ...reward }, '签到成功')
+  return ok<RewardBundle>(rewards, '签到成功')
 }
 
 /**
@@ -1484,13 +1774,59 @@ function actionRedeemCode(
   if (!def) {
     return fail(GAME_ERROR_CODES.CODE_INVALID, '兑换码无效')
   }
-  const p = save.player
-  if (def.crystals) p.crystals += def.crystals
-  if (def.tickets) p.tickets += def.tickets
-  if (def.emblems) p.emblems += def.emblems
-  if (def.silver) p.silver += def.silver
+  const rewards: RewardBundle = {
+    crystals: def.crystals,
+    silver: def.silver,
+    items: def.items,
+  }
+  applyRewardBundle(save, rewards, _ctx.rng, _ctx.now)
   save.codes.push(key)
-  return ok<RewardBundle>({ ...def }, '兑换成功')
+  return ok<RewardBundle>(rewards, '兑换成功')
+}
+
+/**
+ * 旧档一次性分配权益（v9 → v10 迁移产物）。
+ *
+ * ⚠ 术式结晶 / 遗物强化石**不自动折算**：玩家自己选一个五行 / 一个石档
+ *   （实现文档 §2「避免强塞无用材料或按件数放大高阶价值」）。
+ *
+ * 契约：
+ *   - **一次性**：已分配过 → `LEGACY_ALREADY_ALLOCATED`；
+ *   - 两额都为 0 → 没有可分配的东西，直接拒绝；
+ *   - 分配后立即核销（`allocated = true`），原额清零。
+ */
+function actionAllocateMaterials(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'legacy.allocateMaterials' }>,
+  ctx: ActionContext,
+): ActionOutcome<{ items: Partial<Record<ItemId, number>> }> {
+  const legacy = save.legacy
+  if (legacy.allocated) {
+    return fail(GAME_ERROR_CODES.LEGACY_ALREADY_ALLOCATED, '旧档权益已经分配过了')
+  }
+  if (legacy.skillStones <= 0 && legacy.relicStones <= 0) {
+    return fail(GAME_ERROR_CODES.LEGACY_ALREADY_ALLOCATED, '当前没有可分配的旧档权益')
+  }
+  const tier = RELIC.STONE_TIERS.find((t) => t.id === payload.relicTier)
+  if (!tier) return fail(GAME_ERROR_CODES.NOT_FOUND, '强化石档位不存在')
+
+  const items: Partial<Record<ItemId, number>> = {}
+  if (legacy.skillStones > 0) {
+    const materialId = ITEM_BY_ELEMENT[payload.skillElement]
+    const count = Math.floor(legacy.skillStones * LEGACY_CONVERSION.skillStoneToMaterial)
+    if (count > 0) items[materialId] = count
+    legacy.skillStones = 0
+  }
+  if (legacy.relicStones > 0) {
+    const stoneId = RELIC_STONE_ITEM_BY_TIER[tier.id]
+    const count = Math.floor(legacy.relicStones * LEGACY_CONVERSION.relicStoneToMaterial)
+    if (count > 0) items[stoneId] = (items[stoneId] ?? 0) + count
+    legacy.relicStones = 0
+  }
+  legacy.allocated = true
+
+  applyRewardBundle(save, { items }, ctx.rng, ctx.now)
+  return ok<{ items: Partial<Record<ItemId, number>> }>({ items }, '旧档材料已分配')
 }
 
 /**
@@ -1572,6 +1908,7 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
   'idle.setTarget': actionIdleSetTarget,
   'settings.update': actionSettingsUpdate,
   'hero.feedExp': actionFeedExp,
+  'hero.feedBooks': actionFeedBooks,
   'hero.breakRealm': actionBreakRealm,
   'hero.upgradeSkill': actionUpgradeSkill,
   'hero.upgradeStar': actionUpgradeStar,
@@ -1595,6 +1932,7 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
   'daily.signIn': actionSignIn,
   'daily.claimTask': actionClaimTask,
   'code.redeem': actionRedeemCode,
+  'legacy.allocateMaterials': actionAllocateMaterials,
   'save.create': actionCreate,
   'save.reset': actionReset,
   'save.import': actionImport,

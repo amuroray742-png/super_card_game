@@ -26,8 +26,11 @@ import type {
   RewardBundle,
   BattleResult,
   ArenaMatch,
+  Element,
   Rarity,
 } from '../../core/model/types.ts'
+import type { ItemId } from '../../core/config/items.ts'
+import type { DungeonDifficultyId, RelicStoneTierId } from '../../core/config/economy.ts'
 import { createNewSave, normalizeSave } from '../../core/save/schema.ts'
 import { deserializePublicSave } from '../../core/save/serialize.ts'
 import { storage } from '../../platform/storage.ts'
@@ -576,9 +579,25 @@ export const useGameStore = defineStore('game', () => {
     return res
   }
 
-  /** 设定挂机目标关卡 */
-  async function setIdleTarget(stageId: number) {
-    return runAction({ type: 'idle.setTarget', stageId })
+  /**
+   * 设定挂机**去向**。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：主线 / 技能副本 / 强化副本
+   *   共用一份挂机时间账本，切换时服务端**先结清旧去向**再换新去向。
+   */
+  async function setIdleTarget(target: {
+    kind: 'campaign'
+    stageId?: number
+  } | {
+    kind: 'skill'
+    element: Element
+    difficulty: DungeonDifficultyId
+  } | {
+    kind: 'enhance'
+    tier: RelicStoneTierId
+    difficulty: DungeonDifficultyId
+  }) {
+    return runAction({ type: 'idle.setTarget', ...target })
   }
 
   // ─────────────────────────── 英灵 ───────────────────────────
@@ -606,23 +625,21 @@ export const useGameStore = defineStore('game', () => {
   // ─────────────────────────── 养成 ───────────────────────────
 
   /**
-   * 喂经验：从**玩家经验池**取经验投给英灵。
+   * 喂经验书：消耗**背包里的经验书**投给英灵。
    *
-   * ⚠ 原实现只加不减——`applyExp` 直接把经验塞给英灵，玩家经验池
-   *   （`player.exp`，战斗与挂机掉落的主要来源）只增不减，等于**白嫖等级**：
-   *   池子里的经验是死资源，喂经验却凭空给经验。
-   *   现在改为「池子扣 N → 英灵吃 N」，与数值模型一致
-   *   （tools/balance/report.ts 的经验回收表一直按「池子付费」计算）。
-   *
-   * 扣减口径：按**请求量**扣。喂不完的部分（境界门槛卡住 / 已满级）
-   * 不会消失，它存在英灵自己的 `hero.exp` 里，突破境界后立刻兑现。
+   * ⚠ **实施修正（资源/背包版本 v10）**：玩家经验池退役 →
+   *   经验改由「主线掉落经验书 → 手动喂给英灵」产出（设计稿 §2）。
+   *   扣的是**书**（本数），不是银两、不是经验池。
    */
-  async function feedExp(heroId: string, amount: number) {
-    return runAction({ type: 'hero.feedExp', heroId, amount }, true)
+  async function feedBooks(heroId: string, bookId: ItemId, count: number) {
+    return runAction({ type: 'hero.feedBooks', heroId, bookId, count }, true)
   }
 
   /**
-   * 境界突破：消耗**英灵印记**把英灵送进下一个境界。
+   * 境界突破：消耗**银两**把英灵送进下一个境界。
+   *
+   * ⚠ **实施修正（资源/背包版本 v10）**：英灵印记已退役，
+   *   突破改扣银两（设计稿 §2「建议 Lv60、120、180 的境界突破改扣银两」）。
    */
   async function breakRealm(heroId: string) {
     return runAction({ type: 'hero.breakRealm', heroId }, true)
@@ -674,8 +691,17 @@ export const useGameStore = defineStore('game', () => {
   const relicPageLoading = ref(false)
   /** 仓库加载失败的原因（离线 / 未登录 / 服务端错误） */
   const relicPageError = ref<string | null>(null)
-  /** 遗物统计（仓库总数 + 按定义 id 分组）：顶栏件数与图鉴收藏数用它 */
-  const relicStats = ref<RelicStats>({ total: 0, byDefId: {} })
+  /** 遗物统计（仓库总数 + 按定义 id 分组 + 仓库最高等级）：顶栏件数与图鉴收藏数用它 */
+  const relicStats = ref<RelicStats>({ total: 0, byDefId: {}, maxLevel: 0 })
+  /**
+   * 仓库统计是否**已经读到过**服务端数据。
+   *
+   * ⚠ 客户端镜像里 `save.relics` 只有**已装备**件（存档分包），
+   *   仓库里那件 Lv60 的客户端看不见 → 强化副本的解锁线要用服务端统计的
+   *   `relicStats.maxLevel`。**没读到之前不能给结论**，
+   *   否则会把「已解锁」误判成「未解锁」（玩家明明有 Lv60 却点不了）。
+   */
+  const relicStatsLoaded = ref(false)
   /**
    * 最近一次仓库查询条件。
    *
@@ -722,13 +748,14 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  /** 加载遗物统计（仓库总数 / 按定义分组） */
+  /** 加载遗物统计（仓库总数 / 按定义分组 / 仓库最高等级） */
   async function loadRelicStats(): Promise<RelicStats | null> {
     const account = useAccountStore()
     if (offline.value || account.offline || !account.isAuthenticated) return null
     try {
       const stats = await account.fetchRelicStats()
       relicStats.value = stats
+      relicStatsLoaded.value = true
       return stats
     } catch (err) {
       if (isNetworkFailure(err)) offline.value = true
@@ -822,7 +849,6 @@ export const useGameStore = defineStore('game', () => {
   }) {
     let decomposed = 0
     let silver = 0
-    let stones = 0
     let rounds = 0
     // 轮次上限只是防失控（64 × 200 = 12,800 件，远超库存上限）
     for (let i = 0; i < 64; i++) {
@@ -831,7 +857,6 @@ export const useGameStore = defineStore('game', () => {
       rounds += 1
       decomposed += res.decomposed
       silver += res.silver
-      stones += res.stones
       // 不足一批 = 已经清完
       if (res.decomposed < RELIC.BATCH_MAX) break
     }
@@ -839,7 +864,8 @@ export const useGameStore = defineStore('game', () => {
       await loadRelicPage()
       await loadRelicStats()
     }
-    return { decomposed, silver, stones, rounds }
+    // ⚠ 分解**只返银两**（不再返强化石，设计稿 §2）
+    return { decomposed, silver, rounds }
   }
 
   // ─────────────────────────── 编队 ───────────────────────────
@@ -1100,6 +1126,7 @@ export const useGameStore = defineStore('game', () => {
     relicPageLoading,
     relicPageError,
     relicStats,
+    relicStatsLoaded,
     // actions
     load,
     reconnect,
@@ -1114,7 +1141,7 @@ export const useGameStore = defineStore('game', () => {
     setIdleTarget,
     pull,
     nextBattleSeed,
-    feedExp,
+    feedBooks,
     breakRealm,
     upgradeSkill,
     upgradeStar,

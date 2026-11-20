@@ -120,16 +120,14 @@ describe('库存上限', () => {
     expect(save.relics).toHaveLength(CAP + 1)
   })
 
-  it('自动分解的折算进银两与强化石（与手动分解同一口径）', () => {
+  it('自动分解只折算银两（分解不再返还强化石，设计稿 §2）', () => {
     const save = saveWith(many(CAP + 1))
     const silver0 = save.player.silver
-    const stones0 = save.player.relicStones
 
     const result = enforceInventoryCap(save)
     expect(result.salvaged).toBe(1)
     expect(result.silver).toBeGreaterThan(0)
     expect(save.player.silver).toBe(silver0 + result.silver)
-    expect(save.player.relicStones).toBe(stones0 + result.stones)
   })
 
   it('占用率与接近上限的判定按配置走', () => {
