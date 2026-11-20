@@ -9,7 +9,7 @@
 
 1. **主线 / 技能副本 / 强化副本各自一条独立通道**，各自计量同一段墙钟时间、各自记账，产出互不干扰（玩家可同时挂三个）。
 2. **挂机不再跑战斗**：通道目标必须是「已通关」的内容，结算时按掉落表逐次掷奖直接入库——所以永远不会卡关、不会有战败、不会空转。
-3. **主线推进改为纯手动挑战**：新增 `campaign.challenge`（打下一个未通关关卡，真实战斗，首通给奖，重复通关无掉落）；副本同理新增 `dungeon.challenge`（打赢该副本关卡一次即通关）。
+3. **主线推进改为纯手动挑战**。主线首胜发经验书、银两和圣杯结晶，复战胜利与挂机发经验书和银两。技能副本和强化副本每次手动胜利发一份对应材料，首胜同时解锁该关挂机。
 4. **副本独立成 24 个关卡**：`(变体 × 难度) = 1 个关卡`（技能 5×3 + 强化 3×3），有自己的关卡定义、难度锚点、战力门槛与通关记录；**不再借用主线波次**（现状是「难度 = 取材主线某章」）。
 5. **关卡详情改为弹窗**：从推征页直接弹出，不再切页面。
 6. **副本单独入口**：推征页放「技能副本 / 强化副本」两张入口卡，底层仍是同一个副本页的两个 tab，底部导航保持 5 项。
@@ -18,24 +18,18 @@
 
 | 编号 | 决策 | 理由 |
 |---|---|---|
-| D1 | 三通道**各自独立**计量同一段墙钟时间 | 「同时挂机分开计算」= 总量约 3×，需重标定经济 |
+| D1 | 三通道**各自独立**计量同一段墙钟时间 | 全开时三路同时产出，分别评估各资源的投放 |
 | D2 | 挂机**只挂已通关内容**，且**不跑战斗**，直接按掉落表掷奖 | 永不卡关；掉落仍逐次掷骰，保证与概率公示一致 |
-| D3 | 主线推进改**纯手动挑战**（`campaign.challenge`） | 挂机不再承担推进职责，收益全部来自被动通道 |
+| D3 | 主线推进改为**纯手动挑战**（`campaign.challenge`） | 手动胜利发基础掉落，首胜追加一次圣杯结晶 |
 | D4 | 副本同样需**手动挑战通关**才可挂机 | 与 D3 同构，副本进度与主线进度分开记账 |
 | D5 | 主线通道目标**默认 = 最后一个通关的关卡**（`campaign.clearedStage`），可改挂其他已通关关卡 | 「默认挂机最后一个通过了的关卡」 |
 | D6 | 关卡详情改**弹窗组件**，但保留 `/stage/:id` 路由 | E2E（`battle.spec.ts`）与截图工具（`screenshot.ts --stage`）依赖该深链，不能破 |
 | D7 | 副本入口走**推征页入口卡**，底层仍是 `/dungeon` 的两个 tab | 底部导航保持 5 项（360px 窄机型约束，AGENTS.md 已记录） |
-| D8 | 存档版本 **v10 → v11** | 挂机账本结构整体重构 |
+| D8 | 新档直接使用 **v11** | 按未上线项目的新档起步设计 |
 | D9 | **副本是独立关卡**：`(变体 × 难度) = 1 关`，共 24 关，打赢一次即通关 | 副本不再借用主线波次，有自己的关卡实体、门槛与通关记录 |
 | D10 | **副本自建难度锚点表**，用与主线同款的二分流程实测标定 | 铁律 #41：锚点不许手填；副本难度与主线数值解耦 |
 
-**本次交付边界**：**只交付本方案文档本身**——把本文作为文档提交进仓库
-（`artifacts/idle-redesign-plan.md`）并推送到远端 `origin/main`。
-**本次不落地任何代码**：不改 core / server / presentation / tools / tests，不跑基线重标定，
-不改任何数值配置。实施须在本方案获批后另行开工。
-
-**实现阶段的授权范围（本次不执行，供参考）**：届时可读写工程源码、跑测试与构建、跑数值脚本；
-**不得**改动 Git 提交历史以外的任何外部系统状态；不涉及部署、发布、账号操作。
+**本次交付为本文修订。** 下文的开发、标定和测试属于后续实施。项目尚未上线，开发期旧档由项目方自行清理。
 
 ---
 
@@ -45,20 +39,20 @@
 
 - 挂机从「回放战斗」变成「已通关内容的稳定被动产出」，消除卡关 / 战败 / 空转三种负反馈。
 - 三个内容线（主线 / 技能副本 / 强化副本）可**同时**挂机，玩家不再需要为了「今晚刷什么」做取舍。
-- 主线推进变成**玩家主动、可观看**的行为（手动挑战 + 回放演出），收益边界清晰（首通才有奖）。
+- 主线推进由玩家主动挑战完成。首次胜利发经验书、银两和圣杯结晶，后续胜利仍能获得经验书和银两。
 - 副本成为**真正独立的内容线**：有自己的关卡列表、难度曲线与通关进度，而不是主线的附庸。
 - 关卡详情、挂机设置、副本入口都在**一屏之内可达**，不再切页面。
 
-### 1.2 范围内
+### 1.2 后续实施范围
 
-- core：存档结构与迁移、挂机账本（三通道）、结算层、动作层、**副本独立关卡配置（24 关）+ 难度锚点标定**、副本通关判定、首通发奖。
+- core 包括 v11 新档、三通道账本、结算与挑战动作、奖励规则，以及 24 个独立副本关卡的配置、难度标定与通关记录。
 - 服务端：入口预结算、心跳、动作幂等、回包装配（战斗回放不进幂等日志）。
 - 表现层：推征页（挑战 + 三通道面板 + 副本入口卡）、关卡详情弹窗、副本页（24 关列表 + 通关状态 + 挑战）、离线结算弹窗（三段）。
 - 数值工具：`dungeon-loop.ts` / `newplayer.ts` / `recalibrate.ts` / `report.ts` / `validate-config.ts` 适配新模型，**新增** `recalibrate-dungeon.ts` 标定副本 24 关，并重跑基线。
 - 测试：单测重写 + 新增、E2E 改写、截图场景更新。
 - 文档：`artifacts/plan.md` §5.7 与 `AGENTS.md` 铁律同步。
 
-### 1.3 非目标（本次不做）
+### 1.3 后续实施的范围边界
 
 - **不做**：竞技场 / 天梯 / 圣杯重启的挂机化（仍是一次性结算，不产挂机收益）。
 - **不做**：关卡难度锚点（`STAGE.SCALE_ANCHORS` 与新增的 `DUNGEON.SCALE_ANCHORS`）的**手工**调整——只允许按 M5 实测结果重跑 `npm run balance:recalibrate` / `balance:recalibrate:dungeon` 重新标定，禁止手填（铁律 #41）。
@@ -66,6 +60,7 @@
 - **不做**：底部导航扩容（保持 5 项）。
 - **不做**：新的材料 / 货币种类；副本产量仍 = 现有 `DUNGEON_DROPS` × 难度倍率，不新增数值来源。
 - **不做**：抽卡、体检、账号体系的任何改动。
+- 遗物采用独立获取入口，玩法与投放另行设计。首件遗物必须在初阶强化副本解锁前可达，作为完整养成链路的交付依赖。
 
 ---
 
@@ -74,7 +69,7 @@
 | # | 事实 | 出处 |
 |---|---|---|
 | F1 | **主线进度只有挂机一条路**：`campaign.clearedStage` 仅在 `settleIdleLedger()` 内被推进，没有独立的「通关关卡」动作；观战（`fight()`）是纯客户端预览，不发奖、不推进 | `src/core/systems/actions.ts:718`；`src/presentation/views/ExpeditionView.vue:115-133` |
-| F2 | **掉落与战斗已解耦**：`rollRewards(stage, rng)` 不读战斗结果，直接掷银两 / 道具 / 遗物 → 「不跑战斗直接发奖」可直接复用 | `src/core/systems/idle.ts:245` |
+| F2 | **掉落与战斗已解耦**。可复用 `rollRewards(stage, rng)` 的做法，让主线手动胜利、挂机与预览共用更新后的基础掉落配置 | `src/core/systems/idle.ts:245` |
 | F3 | **三去向共用一份时间账本**（`idle.effectiveMs` / `measuredAt` / `offlineElapsedMs`），切换去向时先结清旧去向 | `src/core/systems/actions.ts:628-731` |
 | F4 | **经济工具与「共用一份时间」强耦合**：`dungeon-loop.ts` 的 `decideIdleTarget()` 用「一夜能换多少战力（ln 口径）」在三个去向间**分配**同一份时间 | `tools/balance/dungeon-loop.ts:30-67, 397` |
 | F5 | **`BATTLE.SECONDS_PER_BATTLE = 6`** 是挂机节奏单位（时间 → 场次），被 core 与工具共用 | `src/core/config/economy.ts:304` |
@@ -82,8 +77,8 @@
 | F7 | **副本门槛口径 = 取材章的 BOSS 门槛**（`dungeonGatePower()`） | `tools/balance/dungeon-loop.ts:301` |
 | F8 | **`/stage/:id` 深链被外部依赖**：E2E `battle.spec.ts:201`、截图工具 `screenshot.ts:383` | 见左 |
 | F9 | **`/dungeon?kind=…` 深链被外部依赖**：E2E `backpack.spec.ts:150/163`、`dungeon.spec.ts`、`relic.spec.ts:143`、截图工具 `screenshot.ts:580` | 见左 |
-| F10 | **任务口径**：`TaskMetric = 'battle' | 'pull' | 'relicUpgrade' | 'signIn'`，每日「推征 30 场」/ 周「累计推征 200 场」按 `advanceTasks(daily,'battle',n)` 累计 | `src/core/config/tasks.ts:43`；`src/core/systems/actions.ts:729` |
-| F11 | **遗物是唯一随挂机线性增长的字段**，仓库上限 3000，超限自动分解「最没用」的（锁定件 / 已装备件永不自动分解） | `src/core/config/economy.ts:281`；`src/core/systems/actions.ts:436-438` |
+| F10 | **现行任务按主线场次累计**。每日「推征 30 场」与每周「累计推征 200 场」经 `advanceTasks(daily, 'battle', n)` 累计 | `src/core/config/tasks.ts:43`、`src/core/systems/actions.ts:729` |
+| F11 | **新档的遗物仓库为空**。初阶强化副本要求至少持有一件 Lv1 遗物，独立遗物入口必须先于该副本可用 | `src/core/save/schema.ts:276`、`src/core/systems/dungeons.ts:57` |
 | F12 | **心跳必须保持轻量**：不回传存档主体、只载入已装备遗物（≤36）、不写遗物行 | AGENTS.md 铁律 #33 |
 | F13 | **导入路径会重置控制字段**：`validateImportedSave` 会 `delete save.idle.farm`、重置 `rng`、重置时间戳 → 新的三通道账本同样要在导入路径被重置 | `src/core/save/import-validation.ts:114-117` |
 | F14 | **副本当前没有自己的关卡**：难度 = 取材主线章，波次 = `dungeonStages(chapter)` 取该章主线关卡 id，门槛 = `dungeonGatePower()` 读主线章 BOSS 的 `powerRequired` | `src/core/config/economy.ts:770`；`src/core/systems/dungeons.ts:102-109`；`tools/balance/dungeon-loop.ts:301` |
@@ -95,29 +90,22 @@
 
 ## 3. 目标架构
 
-### 3.1 核心语义
+### 3.1 奖励与通关规则
 
-```
-                 ┌──────────── 墙钟时间（服务端 now）────────────┐
-                 │                                              │
-   通道 A 主线 ──┤  effectiveMs_A ← 在线×3 + 离线曲线          │→ 掷该关掉落表 ×N 次 → rewards
-   通道 B 技能 ──┤  effectiveMs_B ← 同上，但独立累计           │→ 掷该副本关卡产量 ×N 次 → rewards
-   通道 C 强化 ──┤  effectiveMs_C ← 同上，但独立累计           │→ 掷该副本关卡产量 ×N 次 → rewards
-                 └──────────────────────────────────────────────┘
+三条通道分别计量同一段墙钟时间。已通关目标在结算时按表直接发奖，当前编队变化不影响已通关目标的挂机资格。主线与副本分别记录进度，只有手动胜利可以推进。手动挑战独立于挂机时间预算。
 
-   手动挑战（不占时间预算、不产被动收益）：
-     campaign.challenge → 打下一个未通关主线关卡 → 首通给奖（结晶 + 一次掉落）
-     dungeon.challenge  → 打一个副本关卡           → 记入 dungeons.cleared + 一次产量
-```
+| 内容 | 首次手动胜利 | 后续手动胜利 | 已通关挂机（每次结算） |
+|---|---|---|---|
+| 主线 | 经验书、银两、圣杯结晶 | 经验书、银两 | 经验书、银两 |
+| 技能副本 | 对应五行的技能材料 | 对应五行的技能材料 | 对应五行的技能材料 |
+| 强化副本 | 对应档位的强化石 | 对应档位的强化石 | 对应档位的强化石 |
 
-**四条硬规则**：
+- **主线**每次手动胜利或挂机结算按同一张表掷一次基础掉落。首通若未掷到经验书，补发一本小经验书，保证三种首通奖励到账。圣杯结晶按 `FIRST_CLEAR_CRYSTALS` 和账号级 `creditedStages` 发放，每关只发一次。预览与结算共用基础掉落和首通追加的配置。
+- **副本**每次手动胜利发一份材料。首次胜利同时登记通关并解锁该关挂机。复战和挂机使用同一关卡产量区间，每个胜场或挂机结算各掷一次。
+- **手动战败**只返回挑战结果，奖励包为空，通关记录保持原值。同一动作请求在结果保留期内重放原结算，新的挑战胜利照常发奖。
+- **遗物**走独立获取入口，玩法另行设计。三条通道与手动挑战的奖励范围以本节表格为准。强化副本首件遗物的前置条件见 §1.3。
 
-1. **挂机永不失败**。通道目标全是已通关内容 ⇒ 结算只有「产出」，没有「战败 / 卡关 / 回退刷取」分支。`idle.farm` 机制整体退场。
-2. **推进只由手动挑战产生**。`campaign.clearedStage` 只在 `campaign.challenge` 成功时 +1；挂机结算**不碰** `campaign`（含 `creditedStages`）。
-3. **掉落口径不变**。每次「结算次数」都独立掷一次掉落表（银两 / 道具 / 遗物），与现在 `rollRewards` 完全一致 —— 概率公示口径不变。
-4. **副本是独立关卡**。副本关卡有自己的敌人组合、缩放锚点、战力门槛与通关记录；主线进度与副本进度**分开记账**（沿用既有规则）。
-
-### 3.2 存档结构（v10 → v11）
+### 3.2 存档结构（v11）
 
 `src/core/model/types.ts`：
 
@@ -140,10 +128,12 @@ export interface IdleChannelState {
   target: IdleChannelTarget | null
   /** 已计量到的时刻（服务端权威水位） */
   measuredAt: number
-  /** 有效预算（毫秒）= 可结算次数 × IDLE.SECONDS_PER_ROLL */
+  /** 待结算有效预算（毫秒），含不足一次的余数 */
   effectiveMs: number
   /** 连续离线累计时长（衰减曲线用） */
   offlineElapsedMs: number
+  /** 待下次成功结算报告的实际离线时长（毫秒） */
+  pendingOfflineMs: number
 }
 ```
 
@@ -159,6 +149,7 @@ idle: {
   }
   /** 在线租约（服务端向未来续约，三通道共用同一份时间轴） */
   activeUntil: number
+  /** 已消费的有效时长总和（秒），三通道分别累计后相加 */
   totalIdleSeconds: number
 }
 ```
@@ -232,31 +223,21 @@ export const DUNGEON = {
 3. **单调性核对**：**难度段之间**（简易 → 普通 → 困难）严格递增；
    同段内的 8 关因敌人组合不同，**允许互相波动**（与主线「章内允许波动、章首严格递增」同构）。
 
-### 3.3 迁移 v10 → v11（`src/core/save/schema.ts`）
+### 3.3 新建与导入 v11 存档（`src/core/save/schema.ts`）
 
-新增 `MIGRATIONS[10]`：
-
-| 旧字段 | 新字段 | 规则 |
-|---|---|---|
-| `idle.target.kind === 'campaign'` | `channels.main.target = { kind:'main', stageId: null }` | 主线通道恒开；目标跟随最新通关关卡 |
-| `idle.target` 为 `skill` / `enhance` | 对应通道的 `target` 原样搬过去（目标 = 旧 `(变体, 难度)` 对应的新副本关卡 id） | **不**自动写入 `dungeons.cleared`；服务端在结算时校验「已通关」，不通过则该通道回落为 `null`（UI 明示「需先挑战通关」） |
-| `idle.currentStage` | 丢弃 | 新模型下主线目标只允许已通关关卡，旧值可能是 `clearedStage + 1` |
-| `idle.effectiveMs` | 只给**旧去向对应的那个通道** | 其余两通道从 0 起算（避免旧预算被复制三份） |
-| `idle.measuredAt` / `idle.offlineElapsedMs` | 三通道各自继承 | 保持时间轴一致；通道关闭时服务端会把 `measuredAt` 推到 now、`effectiveMs` 清 0 |
-| `idle.activeUntil` | `idle.activeUntil` | 直接继承 |
-| `idle.totalIdleSeconds` | `idle.totalIdleSeconds` | 直接继承 |
-| — | `dungeons.cleared = {}` | 新字段 |
-
-**幂等要求**：`MIGRATIONS` 每次载入都会跑（`migrate()`），所以迁移必须可重复执行（只做「缺失补齐」，不做「累加」）。
+- 新档的 `campaign.clearedStage = 0`、`dungeons.cleared = {}`。主线目标默认跟随最新通关关卡，首胜前显示「挑战第 1 关」，首胜后开始计量。技能和强化通道开局关闭，玩家在首胜后主动设置目标。
+- 建档时各通道的计量水位和在线租约设为服务端当前时刻，有效预算、连续离线时长、待报告时长均为零。
+- 导入仅接受 v11。导入后清空副本通关记录与副本挂机目标，主线恢复跟随模式。按新建账本的方式重置时间字段，并重新生成服务端随机序列。
+- 每条通道在权威存档的私有随机状态中保存独立的种子和计数器，建档和导入时由服务端生成。公开快照、缓存与导出均通过公开存档投影省略这些随机状态。
 
 ### 3.4 数值口径（`src/core/config/economy.ts`）
 
 - **新增** `IDLE.SECONDS_PER_ROLL = 6`（挂机结算节奏单位：每 6 秒结算一次掉落）。
 - **新增** `DUNGEON` 锚点块（3.2.1 ②）。
 - **删除** `BATTLE.SECONDS_PER_BATTLE = 6`，全量替换引用点（core 4 处 + `tools/balance/*` + 测试）——保持「单一数据源」，不做别名兜底（铁律 #4/#5）。
-- `IDLE.MAX_REPLAY_BATTLES = 2000` 语义改为**每通道**上限（三通道合计最多 6000 次结算）。
+- 将 `IDLE.MAX_REPLAY_BATTLES` 改名为 `IDLE.MAX_ROLLS_PER_SETTLEMENT`，保留每通道 2,000 次的保护上限。有效预算另按 `IDLE.CAP_HOURS` 封顶。按当前 3 小时预算和 6 秒一次的配置，在线积满时每通道最多 1,800 次，纯离线积满时每通道 1,560 次。
 - `IDLE.FULL_EFFICIENCY_HOURS / CAP_HOURS / TAIL_RATE / ONLINE_MULTIPLIER / ACTIVE_LEASE_MS / HEARTBEAT_INTERVAL_MS / OFFLINE_SETTLE_THRESHOLD_SEC` **全部不变**（曲线形状不变，只是从 1 条变成 3 条）。
-- **不改**任何掉落表数值（`DROP_TABLES` / `DUNGEON_DROPS` / `FIRST_CLEAR_CRYSTALS`）。
+- 主线掉落表保留经验书概率、数量和银两区间，移除遗物掉落，单独配置 §3.1 的首通经验书保底。首轮标定保留 `DUNGEON_DROPS`、难度产量倍率和 `FIRST_CLEAR_CRYSTALS` 的现有数值。
 
 ### 3.5 动作层（`src/core/systems/actions.ts` + `action-protocol.ts`）
 
@@ -277,7 +258,7 @@ export const DUNGEON = {
   }
 ```
 
-**下线** `idle.setTarget`（旧三态去向整体退场）。老客户端不会被服务到（前后端同构建），无需兼容分支；旧 actionId 仍在幂等日志里防重。
+**下线** `idle.setTarget`。`idle.tick` 作为一键领取动作，由服务端根据三个通道各自的可用预算确定结算次数。`idle.claimOffline` 复用同一结算入口和限额。
 
 新增动作结果：
 
@@ -285,16 +266,14 @@ export const DUNGEON = {
 /** 单条通道的一次结算明细 */
 export interface ChannelSettlement {
   channel: IdleChannelKind
-  /** 目标显示名（取登记表面，不就地写中文名） */
+  /** 目标显示名，由关卡登记表提供 */
   targetName: string
   /** 实际结算次数 */
   rolls: number
   /** 本次产出（唯一入库口径） */
   rewards: RewardBundle
-  /** 仓库溢出（自动分解）明细 */
-  overflow: InventoryOverflowResult
-  /** 本次新获得的遗物（仅提示用） */
-  newRelics: string[]
+  /** 本次结算覆盖的实际离线时长（秒） */
+  elapsedSeconds: number
 }
 
 export interface IdleActionResult {
@@ -309,10 +288,8 @@ export interface CampaignChallengeResult {
   win: boolean
   /** 是否为首通（首次通关） */
   firstClear: boolean
-  /** 首通奖励（重复通关为空） */
+  /** 本次胜利奖励，战败时为空 */
   rewards: RewardBundle
-  /** 战斗回放数据（**不进幂等日志**，见 3.7） */
-  battle?: BattleResult
 }
 
 export interface DungeonChallengeResult {
@@ -322,7 +299,6 @@ export interface DungeonChallengeResult {
   /** 本次是否首次通关（并已记入 dungeons.cleared） */
   firstClear: boolean
   rewards: RewardBundle
-  battle?: BattleResult
 }
 ```
 
@@ -330,70 +306,34 @@ export interface DungeonChallengeResult {
 
 | 动作 | 校验（先校验后修改） | 副作用 |
 |---|---|---|
-| `campaign.challenge` | `stageId` 必须是合法关卡；`stageId ≤ clearedStage + 1`（不能跳关）；队伍非空 | 胜且 `stageId > clearedStage` → `clearedStage = stageId`；`grantFirstClearCrystals()` 发首通结晶；掷**一次**该关掉落表；`advanceTasks(daily,'challenge',1)` |
-| `dungeon.challenge` | 关卡 id 必须存在（= 变体 × 难度）；`dungeonUnlocked()` 通过；队伍非空 | 胜 → `dungeons.cleared[关卡 id] = true`；掷**一次**该关产量 |
-| `idle.setChannel` | main：`stageId` 必须 `1..clearedStage`（**只能挂已通关**），或省略 / null = 跟随最新；skill / enhance：`dungeonStageId` 必须是**该类**副本关卡 id 且已在 `dungeons.cleared`；关闭通道时 `disabled=true` | 写入通道 target；**该通道 `measuredAt = now`、`effectiveMs = 0`**（不追溯） |
-| `idle.tick` | 队伍非空 | 结算三条通道（见 3.6） |
-| `idle.claimOffline` | 队伍非空 | 同 `idle.tick`，但不限次数（走完整预算） |
+| `campaign.challenge` | `stageId` 必须是合法主线关卡且 ≤ `clearedStage + 1`，队伍非空。省略时挑战下一关 | 每次胜利发一次基础掉落。首胜推进 `clearedStage`，补足首通经验书并发放首通结晶。跟随模式在推进前结清旧目标的完整次数 |
+| `dungeon.challenge` | 副本关卡存在、`dungeonUnlocked()` 通过、队伍非空 | 每次胜利发一份对应材料。首胜写入 `dungeons.cleared`，解锁该关的挂机设置 |
+| `idle.setChannel` | 主线可选有效的已通关关卡，或省略／传 `null` 跟随最新。技能和强化必须选对应类型的已通关关卡，也可用 `disabled=true` 关闭 | 相同目标直接返回。切换或关闭前结清旧目标，响应包含通道的新状态及本次产生的旧目标结算明细 |
+| `idle.tick` | 服务端解析各通道目标与可结算次数 | 一次领取所有可结算通道，返回分通道明细 |
+| `idle.claimOffline` | 同 `idle.tick` | 使用同一账本、上限与发奖入口 |
 | `idle.heartbeat` | — | 只计量 + 续约租约，不发奖 |
 
-**任务口径**：`TaskMetric` 新增 `'challenge'`；每日 / 周任务的 `battle` 口径**改为统计挂机结算次数**（`advanceTasks(daily,'battle',rolls)`），手动挑战另计 `'challenge'`。任务标题文案随之调整（「推征 30 场」→「结算 30 次」），保持 `tasks.ts` 单一出处。
+**任务口径**沿用每日 30 次和每周 200 次，只累计主线挂机成功结算次数。通过 `advanceTasks(daily, 'battle', mainRolls)` 累计，任务文案改为「主线挂机结算」，由 `tasks.ts` 统一定义。
 
-### 3.6 结算流程（`src/core/systems/idle.ts` 重写）
+### 3.6 结算流程（`src/core/systems/idle.ts`）
 
-```
-settleIdleChannels(save, ctx) → OfflineSettlementResult
-  ├─ for each channel in [main, skill, enhance]:
-  │    ├─ target = resolveChannelTarget(save, channel)   // 见下
-  │    ├─ if (!target) { ch.measuredAt = now; ch.effectiveMs = 0; continue }   // 未启用
-  │    ├─ elapsedMs = now - ch.measuredAt
-  │    ├─ onlineMs  = max(0, min(now, save.idle.activeUntil) - ch.measuredAt)
-  │    ├─ offlineMs = elapsedMs - onlineMs
-  │    ├─ effectiveOffline = offlineEffectiveSeconds((ch.offlineElapsedMs + offlineMs)/1000)
-  │    │                      - offlineEffectiveSeconds(ch.offlineElapsedMs/1000)
-  │    ├─ ch.offlineElapsedMs += offlineMs
-  │    ├─ ch.effectiveMs = min(capMs, ch.effectiveMs + onlineMs*ONLINE_MULTIPLIER + effectiveOffline)
-  │    ├─ ch.measuredAt = now
-  │    ├─ rolls = min(floor(ch.effectiveMs / SECONDS_PER_ROLL), MAX_REPLAY_BATTLES)
-  │    └─ 按通道产出（见下表）
-  └─ 汇总成 OfflineSettlementResult
-```
+1. **解析目标。** 主线跟随模式取 `campaign.clearedStage`，指定模式只接受有效的已通关关卡。副本目标必须属于该通道并已记录通关。关闭、失效或首胜前尚无目标的通道不计收益，计量水位仍向前推进；失效时返回状态供界面提示。时钟回退时跳过该通道，水位保持原值。
+2. **计量预算。** 用服务端时刻和现有租约，将距 `measuredAt` 的时间切成在线段和离线段。只有 `onlineMs > 0` 时才重置连续离线起点。将离线曲线在本次离线段的累计有效秒数差乘 1,000 转成毫秒，再加在线毫秒乘以在线倍率。更新受封顶约束的 `effectiveMs`、连续离线时长、水位及 `pendingOfflineMs`。心跳只执行计量，计量结束后才续租。
+3. **结算入库。** 用 `rollMs = IDLE.SECONDS_PER_ROLL * 1000` 换算可结算次数，每通道取完整次数与单次限额中的较小值。主线掷经验书与银两，两个副本各掷目标关的材料产量。通过 `applyRewardBundle()` 入库，同一事务扣除 `rolls * rollMs`，并推进私有随机计数器。正数预算即使来自较早的心跳也可领取；无完整次数时不发奖、不耗随机。
+4. **生成回执。** 有产出的通道返回 `ChannelSettlement`，从该通道的 `pendingOfflineMs` 读取实际离线秒数并清除已报告时长。无产出的通道保留待报告时长。离线弹窗取本次有产出通道的最长实际离线时长判断阈值，在线计量不计入该时长。
 
-**通道产出**（**不跑战斗**）：
+**目标变更**先按原目标结清完整次数。启用中的通道换目标时保留不足一次的余数，水位不得回退。主线跟随模式因首胜而前推时也按此处理。关闭通道时结清后清除剩余预算和离线累计；重新打开从开启时刻起算。
 
-| 通道 | 目标解析 | 每次结算产出 |
-|---|---|---|
-| main | `stageId ??= save.campaign.clearedStage`；`stageId < 1` → 无产出 | `rollRewards(stage, rng)`（银两 + 道具 + 1 件遗物） |
-| skill | 目标 = **已通关的技能类副本关卡 id** | `rng.int(drop.min, drop.max)` 件该关 `drop.itemId` |
-| enhance | 目标 = **已通关的强化类副本关卡 id** | 同上 |
+**分批等价**适用于固定目标、等量预算且未触发预算封顶的情形。每条通道用自己的持久化随机序列逐次掷奖，领取次数与顺序不会改变该通道的掉落。挂机只兑现已解锁掉落，`campaign.clearedStage`、`campaign.creditedStages` 和副本通关记录均由手动挑战路径管理。
 
-- **主线通道**：`stageId` 必须 `≤ clearedStage`（服务端强校验；越界即回落为 `null` 并在结算明细里报告）。
-- **副本通道**：目标不是副本关卡 id / 未通关 / 变体种类与通道不符 → 该通道**本次不产出**、`target` 回落为 `null`、结算明细报告「需先挑战通关」。
-- **遗物 / 道具入库**：统一走 `applyRewardBundle()`（`actions.ts:411`）——唯一入库入口，含库存溢出自动分解（`overflow` 必须进结算明细，玩家看得见）。
-- **不写 `campaign`**：挂机结算**绝不**改 `clearedStage` / `creditedStages`（首通只由手动挑战发放）。
-- **不再有 `farm` / `blockedAtStage` / `dungeon.blockedAtBattle`**：挂机永不失败。
-
-**`OfflineSettlementResult` 改形状**：
-
-```ts
-export interface OfflineSettlementResult {
-  /** 本次结算覆盖的最长离线时长（秒） */
-  elapsedSeconds: number
-  /** 折算后的有效时长（秒） */
-  cappedSeconds: number
-  /** 综合效率（0..1） */
-  efficiency: number
-  /** 三通道明细（只含有产出的通道） */
-  channels: ChannelSettlement[]
-}
-```
+**`OfflineSettlementResult`** 含有产出的通道明细、总次数及本次覆盖的最长实际离线秒数。在线领取与服务端入口补结算使用同一份通道明细。
 
 ### 3.7 服务端接线（`server/src/game/service.ts`）
 
-- `prepare()` 里的 `settleIdleLedger(save, ctx)` → `settleIdleChannels(save, ctx)`（返回三通道明细）。
-- `offlineForClient()` 的阈值判定改用 `max(通道 elapsedSeconds)`；仍只影响**是否弹窗**，不影响入账。
+- 载入和普通动作通过 `prepare()` 预结算。`idle.tick` 和 `idle.claimOffline` 自行调用结算入口返回明细。`idle.setChannel` 在动作内校验并比对目标，只有实际变更时才结清对应通道。心跳仅计量。主线首胜跟随模式复用原目标的预结算结果。
+- `offlineForClient()` 以本次有产出的通道所报告的最大实际离线时长判断阈值。先心跳后领取也能拿到完整离线报告。
 - **心跳保持轻量**（铁律 #33）：仍不回传存档主体、只载入已装备遗物、不写遗物行。心跳现在要计量**三条**通道 —— 计量是纯数值运算，成本与单条同量级。
-- **战斗回放不进幂等日志**：`StoredOutcome.result` 只存**轻量结果**（不含 `battle`）；完整 `BattleResult` 通过响应新增字段 `replay?: BattleResult` 一次性回传。
+- **战斗回放不进幂等日志**。`StoredOutcome.result` 只存胜负、通关状态和奖励等轻量结果。完整 `BattleResult` 通过响应的 `replay?: BattleResult` 一次性回传。
   - 理由：`BattleResult.log` 上限 1500 条（铁律 #20），单条约 120 KB；存进 24 小时幂等日志 = 每天几十 MB。
   - 副作用：24 小时内重放同一 actionId 时拿不到回放数据 → 客户端按「已结算」处理，不再重播演出（结果与奖励仍一致）。
 
@@ -406,19 +346,17 @@ export interface OfflineSettlementResult {
 - 推征页「详情 ›」与关卡网格点击 → **就地开弹窗**（不切路由，不改 URL）。
 - 弹窗内按钮语义调整：
   - 「设为挂机目标」→ **仅对已通关关卡可用**（未通关按钮禁用 + 文案「通关后才能挂机」）。
-  - 新增「挑战此关」→ `campaign.challenge`（未通关关卡可用；已通关关卡为「重复挑战（无掉落）」）。
+  - 当前可推进的关卡显示「挑战此关」，已通关关卡显示「再次挑战」。奖励预览分开展示「基础掉落」与未领取的「首通追加」，说明基础掉落也是挂机产出。更后面的关卡显示挑战条件。
 
 #### 3.8.2 推征页（`ExpeditionView.vue`）
 
 自上而下：
 
-1. **主线面板**：当前章节 / 关卡名 / 战力对比条（保留） + 「**挑战下一关**」按钮（`campaign.challenge`，显示第 N+1 关名）+ 「观战」按钮（保留，预览不推进）。
-2. **三通道挂机面板**：三张卡片，每张显示
-   - 通道名 + 目标（主线：关卡名 / 技能副本：副本关卡名 / 强化副本：副本关卡名）
-   - 可结算次数（`floor(effectiveMs / 6)`）
-   - 「领取」按钮 → `idle.tick`
-   - 「更换目标」→ 主线：开关卡选择弹窗（只列已通关）；技能 / 强化：跳 `/dungeon?kind=…`
-   - 未启用 / 未通关的通道：显示解锁原因与「去挑战」入口（铁律 #27：规则写在玩家眼前）
+1. **主线面板**保留当前章节、关卡名、战力对比和观战。初次进入时显示「挑战第 1 关」，普通关胜利结算后可直接「挑战下一关」。回放沿用已有的跳过演出设置。
+2. **三通道挂机面板**用三张卡分别显示通道名称、当前目标、可结算次数和每次产出。可结算次数使用 core 的统一换算口径。
+   - 面板只提供一个「全部领取」，调用 `idle.tick`，分别展示各通道实发奖励。
+   - 主线的「更换目标」打开已通关关卡选择弹窗。技能和强化的设置入口跳到对应副本 tab。
+   - 未启用或未通关时显示具体条件和「去挑战」入口。主线首胜后默认跟随最新通关关卡并开始计量。
 3. **副本入口卡**（D7）：「技能副本」「强化副本」两张卡 → `/dungeon?kind=skill` / `/dungeon?kind=enhance`。
 4. **本章关卡网格**（保留）：点击 → 开关卡详情弹窗。
 5. **编队概览**（保留）。
@@ -428,14 +366,14 @@ export interface OfflineSettlementResult {
 - 保留种类 tab（技能 / 强化）。
 - **关卡列表**：按「难度段（简易 / 普通 / 困难）× 变体」展示 24 关，每行显示
   关卡名 / 难度 / **通关状态** / 战力门槛 vs 当前战力 / 每胜产量。
-- 「**挑战**」按钮 → `dungeon.challenge`（该关一场真实战斗），胜利后播放回放并标记已通关。
+- 「**挑战**」与「**再次挑战**」均调用 `dungeon.challenge`。每次手动胜利展示本场材料产量，首胜额外标记已通关和开放挂机设置。
 - 「**设为挂机通道**」按钮 → `idle.setChannel`（仅已通关可设；已设则显示「已挂机」）。
 - 未解锁的关卡显示解锁原因（`dungeonUnlocked()` 的口径）与直达养成入口（铁律 #27）。
 - 现有「设为挂机去向」按钮改造为「设为挂机通道」（同一通道重复设置 = 无操作，不报错）。
 
 #### 3.8.4 离线结算弹窗（`App.vue`）
 
-- `store.offlineReport` 的类型改为新的 `OfflineSettlementResult`；弹窗按**通道分段**展示（通道名 + 目标 + 场次 + 掉落明细）。
+- `store.offlineReport` 使用新的 `OfflineSettlementResult`，按通道展示目标、结算次数及掉落明细。
 - 阈值仍由 `IDLE.OFFLINE_SETTLE_THRESHOLD_SEC` 控制（服务端 + 客户端双闸门，保持现状）。
 
 #### 3.8.5 入口与导航
@@ -450,17 +388,17 @@ export interface OfflineSettlementResult {
 |---|---|
 | `tools/balance/dungeon-loop.ts` | 「三去向分配一份时间」模型 → 「三通道同时跑」模型：`decideIdleTarget()` 改为 `decideChannels()`，为三通道各选最优目标（主线 = 跟随最新通关关卡；技能 = 缺口最大的五行对应副本关卡中**打得赢的最高一关**；强化 = 缺口最大的石档同理）。**这是本次最大的工具改动** |
 | `tools/balance/recalibrate-dungeon.ts`（**新增**） | **副本 24 关的难度标定**（与主线同款二分 + 参考队伍），产出 `DUNGEON.SCALE_ANCHORS` / `POWER_ANCHORS` / `DESIGN_LEVELS`；锚点禁止手填（铁律 #41） |
-| `tools/balance/newplayer.ts` | 首日模拟改为「手动挑战 N 次 + 三通道并行结算」；新增「手动挑战速率」假设 |
-| `tools/balance/recalibrate.ts` | 40 天曲线改为手动挑战驱动；重跑关卡难度标定（`npm run balance:recalibrate`） |
-| `tools/balance/report.ts` | 回收比口径适配三通道（主线产物 + 两种副本材料） |
+| `tools/balance/newplayer.ts` | 首日模拟分别统计手动挑战与三通道结算，纳入主线首胜前的起步时间 |
+| `tools/balance/recalibrate.ts` | 40 天曲线由手动挑战驱动，对照不同上线和挑战频率，按需重新标定主线锚点 |
+| `tools/balance/report.ts` | 按资源拆分主线基础掉落、首通奖励、手动副本和挂机副本的投放与回收 |
 | `tools/validate-config.ts` | 校验新的通道目标 / **副本 24 关配置（齐全、敌人存在、段间单调、产量登记）** / 掉落口径 |
 | `tools/perf/long-hang.ts` | 长挂压测改为三通道 |
 
-**经济影响预估**（供 M5 验证，非结论）：
+**M5 对照口径**
 
-- 经验 / 银两 / 遗物：仍**只**由主线通道产出 → 相对「玩家整晚刷主线」不变；相对「整晚刷副本」的玩家会**多**出主线产出。
-- 五行材料 / 强化石：此前一晚只能刷一种，现在两种**同时**刷 → 相对「刷材料的玩家」约 ×2。
-- 遗物：每结算次数 1 件，主线通道单独承担 → **不随三通道翻倍**。
+- 一次纯离线完整额度为每通道 1,560 次。三个目标均已开启时共 4,680 次。次数用于校验预算，资源数量按各通道的实际掉落表核算。
+- 在相同时间、关卡与单次产量下，某一种材料的挂机投放保持同一口径。并行增加的是其他通道的投放；手动复战频率另外影响经验书、银两和材料的总产量。
+- 首日和 40 日报告分别统计手动与挂机投放，按资源对照玩家消耗、成长阶梯和逐章回收比。遗物投放由独立入口核算。首轮使用现有数量配置，确认具体资源超出目标后优先调整该资源或对应通道。
 
 ### 3.10 状态、并发、失败与恢复语义
 
@@ -470,38 +408,38 @@ export interface OfflineSettlementResult {
 | **幂等** | 成功动作结果保留 24 小时可重放；已执行 actionId 在账号存续期间永久防重。`campaign.challenge` / `dungeon.challenge` 走同一套（铁律 #11） |
 | **并发** | 同账号动作进 Promise 串行队列（`server/src/game/lock.ts`）；存档与幂等日志同事务落库 |
 | **时钟回退** | `ctx.now < ch.measuredAt` → 该通道本次不计量、不产出（沿用现有 `settleIdleLedger` 的 `if (ctx.now < from) return null` 口径） |
-| **余数保留** | 不足一次结算的毫秒余数留在 `effectiveMs` 里；分批领取与一次领取等价（现有 `idle-authority.test.ts:136` 的性质必须继续成立） |
-| **零时间** | 零时间不产出、**不消耗随机序列**（现有 `idle-authority.test.ts:37`） |
-| **通道关闭** | `target = null` → 不计量；服务端在关闭 / 启用瞬间把该通道 `measuredAt = now`、`effectiveMs = 0`（不追溯、不跨设备重复） |
-| **副本未通关** | 结算时校验失败 → 该通道本次无产出、`target` 回落为 null、明细报告原因；**不产生负数、不报错中断整个结算** |
-| **导入** | `validateImportedSave` 重置三通道账本（`measuredAt = now`、各 `effectiveMs = 0`）、清空 `dungeons.cleared`、重置 `rng` 与时间戳（沿用 F13 的现有口径 + 补新字段） |
+| **余数保留** | 不足一次的毫秒余数留在 `effectiveMs` 中。固定目标、等量预算且未触发封顶时，同一通道的分批掉落与一次领取一致 |
+| **空预算** | 未攒够完整次数时无产出，随机序列保持原值。已有完整预算时可在同一时刻结算 |
+| **通道关闭** | 先结清完整次数，再清除预算和离线累计。重新启用从服务端开启时刻计量 |
+| **失效目标** | 配置无效或失去通关凭证时，该通道停止计量与产出。副本目标清空，界面按服务端状态提示重新挑战或选择目标 |
+| **导入** | 只接受 v11，按 §3.3 初始化账本和私有随机状态 |
 | **离线只读** | 服务端不可达 → 客户端进入只读模式，操作一律拒绝并提示（铁律 #28） |
-| **库存溢出** | 每通道结算都走 `applyRewardBundle` → `enforceInventoryCap`；溢出并入该通道明细，锁定件 / 已装备件永不自动分解（铁律 #32） |
-| **断线** | 挂机收益不依赖后台常驻 tick：每次动作 / 每次载入都补算，断网期间不损失收益 |
+| **仓库容量** | 遗物仓库容量与自动分解由独立获取入口继续遵循。三条挂机通道都只发基础资源或材料 |
+| **断线** | 由下一次加载或动作按离线曲线补算。下次有产出的结算回执带上心跳期间计量的离线时长 |
 
 ---
 
-## 4. 分阶段实施
+## 4. 后续实施阶段
 
-每个里程碑结束都必须 `npm run check`（配置校验 + 禁用词扫描 + 单测 + 类型检查 + 构建）全绿。
+先用主线首关、一个简易技能副本和一个简易强化副本验证三路完整链路，再铺开 24 关。后续实施阶段以对应里程碑的测试和构建检查为验收。
 
-### M1 · Core 数据模型、存档迁移与副本关卡配置
+### M1 · Core 数据模型、v11 新档与副本关卡配置
 
 **落点**：`src/core/model/types.ts`、`src/core/save/schema.ts`、`src/core/save/import-validation.ts`、`src/core/config/economy.ts`、`src/core/config/dungeons.ts`
 
 1. 新增 `IdleChannelKind` / `IdleChannelTarget` / `IdleChannelState`；改写 `SaveData.idle`；新增 `SaveData.dungeons`。
-2. `SAVE_VERSION` 10 → 11；新增 `MIGRATIONS[10]`（表见 3.3，幂等）。
+2. `SAVE_VERSION` 设为 11，按 §3.3 初始化三个账本与私有随机状态。
 3. `normalizeSave()` 改写 `idle` 归一化：逐通道兜底（`target` 形状非法 → 该通道 `target = null`；数值非法 → 0 / `lastTickAt`）；`dungeons.cleared` 只保留 `true` 值的合法 key。
-4. `import-validation.ts`：`requireValid` 补三通道结构；导入路径重置三通道账本 + 清空 `dungeons.cleared`。
+4. `import-validation.ts` 校验 v11 的三通道结构，按 §3.3 重置导入账本与私有随机状态。
 5. `economy.ts`：新增 `IDLE.SECONDS_PER_ROLL = 6` 与 `DUNGEON` 锚点块（锚点值先留占位，由 M5 标定产出）；删除 `BATTLE.SECONDS_PER_BATTLE`，全量替换引用点。
 6. 删除 `IdleTarget`（`core/model/types.ts`）与 `normalizeIdleTarget()`。
-7. **副本关卡配置**：新增 `DungeonStageDef` 与 **24 关定义表**（`core/config/dungeons.ts`）；
+7. **副本关卡配置**先建立 `DungeonStageDef` 和两个简易样例，M5 完成 `core/config/dungeons.ts` 的 24 关定义表。
    每关含 id / 变体 / 难度 / 名称 / 敌人组合 / `enemyScale` / `powerRequired` / `drop`；
    `enemyScale` 与 `powerRequired` 由锚点表算出（**配置里只放锚点，不放手填值**）。
    另提供 `dungeonStageById()` / `dungeonStagesOf(kind)` / `dungeonStageId(variant, difficulty)` 三个索引函数
    （表现层与动作层都从这里取，**禁止自行拼 id**）。
 
-**验收**：`tests/unit/migration-v11.test.ts` 新增 —— v10 旧档迁移后三通道结构正确、旧预算只落在旧去向通道、迁移幂等（跑两次结果一致）、畸形档不崩；`tests/unit/dungeon-stages.test.ts` 新增 —— 24 关齐全、id 唯一、敌人存在、产量与变体材料一致。
+**验收**覆盖 v11 新建、导入重置、异常字段处理、公开投影及两个副本样例的敌人索引与产量。
 
 ### M2 · Core 结算层与动作层重写
 
@@ -521,20 +459,20 @@ export interface OfflineSettlementResult {
    - 删除 `actionIdleSetTarget` 与 `idle.setTarget`。
    - `applyRewardBundle` / `mergeRewardBundles` 复用不变（铁律 #26：入库只认 `rewards`）。
 4. `action-protocol.ts`：新负载校验（`campaign.challenge` / `dungeon.challenge` / `idle.setChannel`），删 `idle.setTarget`；响应加 `replay?: BattleResult`。
-5. `tasks.ts`：`TaskMetric` 加 `'challenge'`；每日 / 周任务 `battle` 口径文案调整。
+5. `tasks.ts` 将每日和每周任务文案改为主线挂机结算次数，保留现有目标数。
 
 **验收**：
-- `tests/unit/idle.test.ts` 重写：曲线不变（三通道各算各的）、通道独立累计、余数保留、零时间不耗随机、溢出并入明细。
+- `tests/unit/idle.test.ts` 覆盖三个通道独立计量、当前离线曲线、余数、空预算和发奖扣账。
 - `tests/unit/idle-authority.test.ts` 重写：分批领取 == 一次领取、时钟回退不重发、通道关闭不追溯、重复领取不重复发。
 - `tests/unit/idle-target.test.ts` 重写为 `idle-channel.test.ts`：主线只能选已通关关卡（未通关被拒）、副本未通关不能设为通道、切换通道立即生效且不追溯。
-- `tests/unit/challenge.test.ts`：推征首通给奖 + 推进 `clearedStage`、重复通关无掉落、不能跳关；副本挑战一次即通关并记入 `dungeons.cleared`、失败不记。
+- `tests/unit/challenge.test.ts` 覆盖主线首胜三项发奖、复战基础掉落、重复请求、跳关校验、副本首胜及复战各发一份、战败不发奖。
 
 ### M3 · 服务端接线
 
 **落点**：`server/src/game/service.ts`、`server/src/game/*.ts`（必要时）
 
 1. `prepare()` 改调 `settleIdleChannels`。
-2. `offlineForClient()` 改用三通道最大 elapsed。
+2. `offlineForClient()` 使用三通道已报告的最大实际离线时长，验证先心跳后领取仍能生成正确回执。
 3. 响应装配：`replay` 字段透传（**不写入幂等日志**）。
 4. `StoredOutcome.result` 保持轻量（不含 battle）。
 
@@ -545,19 +483,19 @@ export interface OfflineSettlementResult {
 **落点**：`src/presentation/components/StageDetailModal.vue`（新）、`src/presentation/views/StageDetailView.vue`、`src/presentation/views/ExpeditionView.vue`、`src/presentation/views/DungeonView.vue`、`src/presentation/App.vue`、`src/presentation/stores/game.ts`
 
 1. `StageDetailModal.vue` 抽离自现 `StageDetailView.vue`；`StageDetailView.vue` 变薄壳（深链保活）。
-2. 推征页改造：挑战按钮 + 三通道面板 + 副本入口卡 + 关卡网格开弹窗。
-3. 副本页改造：**24 关列表** + 通关状态 / 挑战 / 设为挂机通道。
+2. 推征页接入首胜引导、结算后挑战下一关、三通道一键领取、副本直达和关卡详情弹窗。
+3. 副本页接入由配置驱动的关卡列表、通关状态、挑战和挂机设置，完整 24 关在 M5 标定后验收。
 4. `App.vue` 离线结算弹窗改三通道分段。
 5. `stores/game.ts`：`setIdleTarget` → `setIdleChannel`；新增 `challengeStage` / `challengeDungeon`；`offlineReport` 类型更新。
 
-**验收**：`tests/e2e/battle.spec.ts`（深链 `/stage/1` 仍可战斗预览）、`tests/e2e/dungeon.spec.ts`（副本挑战 → 挂机拿材料）、`tests/e2e/smoke.spec.ts`、`tests/e2e/relic.spec.ts`（副本刷石头路径）全部改写并通过。
+**验收**先走通首关与两个副本样例的挑战、结算、全领和深链。全量 E2E 用例见 §5.2。
 
 ### M5 · 数值工具适配、副本标定与基线重跑
 
-**落点**：`tools/balance/*.ts`、`tools/validate-config.ts`、`tools/perf/long-hang.ts`
+**落点**包括副本关卡配置、`tools/balance/*.ts`、`tools/validate-config.ts` 和 `tools/perf/long-hang.ts`。
 
 1. `dungeon-loop.ts` 改为三通道并行模型（见 3.9）。
-2. **新增 `tools/balance/recalibrate-dungeon.ts`**：标定副本 24 关的
+2. 补齐 24 个副本关卡，新增 `tools/balance/recalibrate-dungeon.ts` 标定全部关卡的
    `SCALE_ANCHORS` / `POWER_ANCHORS` / `DESIGN_LEVELS`（见 3.2.1 ④），
    并把结果写回 `core/config/economy.ts` 的 `DUNGEON` 常量块（标定值禁止手填）。
 3. `newplayer.ts` / `recalibrate.ts` 适配手动挑战驱动。
@@ -568,7 +506,7 @@ export interface OfflineSettlementResult {
 6. 若关卡曲线因「手动推进」而失配 → 用 `npm run balance:recalibrate` **重新标定**锚点（禁止手填，铁律 #41）。
 7. 输出一张**副本 vs 主线门槛对照表**（副本关卡门槛 vs 同档主线门槛），供策划核对两条线的相对难度。
 
-**验收**：全部脚本退出码 0；回收比报告口径更新且数值合理；若锚点重标定，产出新旧对照表。
+**验收**包括首日和 40 日报告、手动与挂机按资源拆分的投放、逐章回收比与成长阶梯，以及同难度五行副本用多种阵容测试的可达性。锚点重标定时附调整前后对照表。
 
 ### M6 · 文档与收尾
 
@@ -579,18 +517,18 @@ export interface OfflineSettlementResult {
 
 ---
 
-## 5. 测试与验收标准
+## 5. 后续实施的测试与验收标准
 
 ### 5.1 新增 / 重写的单测
 
 | 文件 | 覆盖 |
 |---|---|
-| `tests/unit/migration-v11.test.ts`（新） | v10→v11 迁移、幂等、畸形档 |
+| v11 存档与公开投影相关单测 | 新建账本、导入重置、异常字段处理、公开快照及导出省略随机状态 |
 | `tests/unit/dungeon-stages.test.ts`（新） | 副本 24 关配置齐全、关卡 id 唯一、段间缩放 / 门槛单调、每关产量与变体材料一致、挑战一次即通关 |
-| `tests/unit/idle.test.ts`（重写） | 曲线、通道独立、余数、溢出、零时间 |
-| `tests/unit/idle-authority.test.ts`（重写） | 分批 == 一次、时钟回退、通道关闭、重复领取 |
+| `tests/unit/idle.test.ts`（重写） | 曲线、通道独立、余数、空预算、扣账 |
+| `tests/unit/idle-authority.test.ts`（重写） | 分批与一次领取逐通道一致、时钟回退、目标切换、关闭再开启、心跳后离线报告 |
 | `tests/unit/idle-channel.test.ts`（重写自 `idle-target`） | 通道目标校验（已通关主线关卡 / 已通关副本关卡）、切换即时生效 |
-| `tests/unit/challenge.test.ts`（新） | 推征首通、重复无掉落、跳关拒绝、副本首通记录 |
+| `tests/unit/challenge.test.ts`（新） | 主线首胜三项奖励（含未掷出经验书时的保底）、复战基础掉落、跳关拒绝、副本首胜及复战材料、战败结果 |
 | `tests/unit/dungeons.test.ts`（扩） | `runDungeonLevel` 口径、`dungeonUnlocked` 不变 |
 | `tests/unit/server/action.test.ts`（扩） | 挑战类动作幂等重放不重复发奖 |
 | `tests/unit/server/idle-authority.test.ts`（重写） | 服务端与动作同账本 |
@@ -600,11 +538,11 @@ export interface OfflineSettlementResult {
 
 | 文件 | 覆盖 |
 |---|---|
-| `tests/e2e/battle.spec.ts` | 关卡详情弹窗（深链 + 推征页开弹窗）、战斗预览仍可用 |
-| `tests/e2e/dungeon.spec.ts` | 副本挑战通关 → 设为挂机通道 → 挂机拿材料 → 未通关不能挂 |
-| `tests/e2e/relic.spec.ts` | 强化副本通道刷石头 |
-| `tests/e2e/growth.spec.ts` | 手动挑战推进主线 → 真实挂机刷经验 → 喂经验 → 境界突破（**前置改用 `save.import` 导入 Lv59 主角**，与 AGENTS.md 铁律 #22 一致） |
-| `tests/e2e/smoke.spec.ts` | 首屏、导航、推征页三通道面板可见 |
+| `tests/e2e/battle.spec.ts` | 关卡详情弹窗与深链、基础掉落与首通追加预览、首胜与复战结算 |
+| `tests/e2e/dungeon.spec.ts` | 副本首胜与复战材料到账、首胜后设置通道、未通关不能挂 |
+| `tests/e2e/relic.spec.ts` | 新档从独立入口取得首件遗物，解锁初阶强化副本，再领强化石 |
+| `tests/e2e/growth.spec.ts` | 主线首胜 → 挂机获取经验书 → 喂经验书 → 消耗银两突破；Lv59 前置用 v11 `save.import` 建立 |
+| `tests/e2e/smoke.spec.ts` | 首屏导航、三通道卡片、面板只有一个「全部领取」入口 |
 
 > ⚠ E2E 必须走真实「上线 → 心跳 → 领奖」序列（铁律：不得直接改 `save.idle.measuredAt` / `activeUntil`）。
 
@@ -612,15 +550,15 @@ export interface OfflineSettlementResult {
 
 1. `npm run check` 全绿（配置校验 / 禁用词扫描 / 全量单测 / 类型检查 / 构建）。
 2. 全量 E2E 全绿。
-3. `npm run balance` / `balance:newplayer` / `balance:recalibrate` / `balance:recalibrate:dungeon` / `balance:report` 全部退出码 0，报告口径已更新。
+3. 执行 `npm run balance` / `balance:newplayer` / `balance:recalibrate` / `balance:recalibrate:dungeon` / `balance:report`，对照 §3.9 与 M5 的数值口径验收。
 4. 人工验收清单：
-   - 挂机结算**不跑战斗**（服务端日志里结算路径无 `runBattle` 调用；单测断言通道结算只调 `rollRewards`）。
-   - 三通道**同时**产出，互不扣减（结算明细三段独立）。
+   - 挂机结算通过配置掷奖，战斗执行只由挑战动作触发。
+   - 点击「全部领取」同时结算三路，结算明细与背包增加量一致。
    - 主线通道只能选已通关关卡；未通关的「设为挂机目标」按钮禁用。
-   - 重复通关无掉落（背包银两不变）。
+   - 主线首次手动胜利三种奖励到账，复战和挂机只走基础掉落。两个副本每次手动胜利各发一份材料。战败不发挑战奖励，重放同一请求不重复入账。
    - 副本页展示 24 个独立关卡，各有通关状态 / 门槛 / 产量；未通关不能挂机。
    - 关卡详情为弹窗（URL 不变），深链 `/stage/:id` 仍可用。
-   - 推征页可直达技能副本 / 强化副本。
+   - 推征页可直达技能副本和强化副本。用弱首抽阵容验证编队至首胜、首胜至首次领取，以及首件遗物至强化副本的起步流程。
 
 ---
 
@@ -630,32 +568,32 @@ export interface OfflineSettlementResult {
 
 | # | 风险 | 影响 | 缓解 |
 |---|---|---|---|
-| R1 | **主线推进从「自动」变成「手动点击」**（F1 + D3）：玩家要通关 310 关需要大量点击 | 主线节奏完全改变，40 天曲线基线失效 | M5 必须按「每会话手动挑战次数」重跑基线；该假设见 6.2-U1 |
-| R2 | **总产出上升**（三通道并行，D1） | 经验 / 银两 / 遗物相对「刷副本的玩家」上升；材料相对「刷材料的玩家」约 ×2 | M5 重跑回收比；若超标，优先收紧 `IDLE.CAP_HOURS` / `ONLINE_MULTIPLIER`（**只改配置**，不改逻辑） |
+| R1 | **主线手动推进的操作量** | 310 关至少需要 310 次成功挑战 | 实测首章和一个中期章节的连续操作耗时、挑战数与重试，再修正 M5 会话模型 |
+| R2 | **并行挂机叠加手动投放** | 材料、银两和经验书的产出与消耗可能失衡 | 按资源拆分手动和挂机来源，先检查超标通道与资源，再调整投放 |
 | R3 | **战斗回放体积**（3.7） | 若把 `BattleResult` 存进幂等日志，SQLite 日志表暴涨 | 已用 `replay` 非持久化字段规避；需在 M3 实测回包大小 |
 | R4 | **大改动面**：core 存档 + 动作 + 服务端 + 表现层 + 工具 + 测试同时改 | 回归面大 | 按 M1→M6 顺序推进，每步 `npm run check`；core 先于表现层 |
-| R5 | **「已通关副本」是新增进度维度**，旧档玩家迁移后没有副本通关记录 | 旧档玩家的副本通道需要重新挑战一次 | 迁移保留旧副本去向但**不自动标记已通关**；UI 明示「需先挑战通关」（不静默丢设置） |
+| R5 | **首件遗物依赖独立入口** | 新档缺少第一件遗物时，初阶强化副本无法开启 | 完整养成链路验收必须覆盖首件遗物 → 初阶强化副本 → 强化石 |
 | R6 | **`dungeon-loop.ts` 的理性玩家模型重写**（F4） | 数值工具可能与真实游戏对不上 | 工具口径与 core 动作层共用同一套函数（铁律 #4）；M5 必须用新模型重跑全部基线 |
-| R7 | **遗物是唯一线性增长的字段**（F11） | 三通道并行后遗物增量不变（只有主线通道产遗物），但若未来某通道也产遗物会击穿 3000 上限 | 当前不产遗物的通道保持不产；库存上限与溢出上报保持不变 |
+| R7 | **首胜前无法挂机** | 弱首抽阵容可能迟迟拿不到第一笔主线产出 | 用初始经验书与银两验证弱阵容首胜，并测试界面的养成引导与再次挑战 |
 | R8 | **副本 24 关的配置与标定是新工作量**（D9 / D10） | 24 关 × (敌人组合 + 锚点 + 门槛 + 产量) 全部要配；标定工具是新建的 | 标定工具与主线同款（复用 F15 的二分与参考队伍）；24 关配置集中在 `core/config/dungeons.ts` 一份，不散落 |
-| R9 | **副本难度与主线解耦后，主线改动不再自动影响副本** | 副本可能与主线难度脱节 | M5 一次性把两者都标定并出对照表（副本关卡门槛 vs 同档主线门槛） |
+| R9 | **同难度的副本实际胜率不一致** | 不同五行的队伍可能在同一养成阶段拿不到所需材料 | 对照主线与副本门槛，多阵容验证同难度五行关卡的可达性 |
 
-### 6.2 未决事项（实施中按默认处理，M5 复核）
+### 6.2 后续设计与标定事项
 
 | # | 未决 | 默认处理 |
 |---|---|---|
-| U1 | **手动挑战速率**（每会话尝试次数） | M5 暂按「每会话 20 次」建模，重跑后由实测曲线反推并写回文档 |
+| U1 | **手动挑战速率**（每会话尝试次数） | 以 20 次为中档，加入低频和高频模拟，再用首章与中期实测校正 |
 | U2 | **副本关卡的「通关」定义** | 打赢该关**一场**真实战斗即通关（D9：`(变体 × 难度) = 1 关`） |
-| U3 | **副本挑战通关的奖励** | 发**一次**该关产量（与挂机每次结算同口径）。不叠加 |
+| U3 | **独立遗物入口的玩法与投放** | 另行设计，须满足 §1.3 的首件遗物可达性要求 |
 | U4 | **主线通道默认跟随最新通关关卡时，玩家能否改挂旧关** | 能（可挂任意已通关关卡，含 BOSS）。`stageId = null` 表示「跟随最新」 |
-| U5 | **三个通道是否需要独立的「关闭」开关** | 技能 / 强化通道可关；主线通道恒开（它是经验与银两的唯一来源，关掉等于卡死养成） |
-| U6 | **经济是否需要同步收紧**（`CAP_HOURS` / `ONLINE_MULTIPLIER` / 掉落概率） | 本次**不改任何数值**，先跑基线看数据；确需调整时走 M5，且只改 `economy.ts` 配置 |
+| U5 | **挂机通道开关** | 技能和强化可关，主线首胜后保持开启 |
+| U6 | **经济是否需要同步收紧** | 首轮按 §3.4 的现有数量与曲线模拟。M5 如发现投放失衡，优先调整对应资源或通道 |
 | U7 | **副本 24 关的设计等级阶梯**（`DUNGEON.DESIGN_LEVELS`） | 默认：难度段 = 主线第 1 / 4 / 8 章的目标等级（Lv24 / Lv96 / Lv192）；段内 8 关按变体顺序在「段起点 ~ 段终点」等比铺开；强化副本 tier2 / tier3 按解锁线向上取整到最近的 24 级档。M5 标定时按实测调整 |
 | U8 | **副本关卡的敌人组合** | 复用现有 30 只敌人的子集，不新增敌人（见 3.2.1 ③）；元素主题仍只体现在产出材料上。若实测某关难度失真 → 回标定工具，不改敌人表 |
 
 ---
 
-## 7. 受影响文件清单（预估）
+## 7. 后续实施的受影响文件（预估）
 
 **core**：`core/model/types.ts`、`core/save/schema.ts`、`core/save/import-validation.ts`、`core/save/serialize.ts`（投影确认）、`core/config/economy.ts`（新增 `IDLE.SECONDS_PER_ROLL` 与 `DUNGEON` 锚点块）、`core/config/dungeons.ts`（**新增 24 关定义表**）、`core/config/tasks.ts`、`core/systems/idle.ts`、`core/systems/actions.ts`、`core/systems/action-protocol.ts`、`core/systems/dungeons.ts`（重写）、`core/systems/tasks.ts`（若有）
 
@@ -665,7 +603,7 @@ export interface OfflineSettlementResult {
 
 **tools**：`tools/balance/{dungeon-loop,newplayer,recalibrate,report}.ts`、`tools/balance/recalibrate-dungeon.ts`（**新增**）、`tools/validate-config.ts`、`tools/perf/long-hang.ts`、`tools/capture/screenshot.ts`
 
-**tests**：`tests/unit/{idle,idle-authority,idle-target→idle-channel,dungeon-loop,dungeons,dungeon-stages,migration-v11,challenge,server/action,server/idle-authority}.test.ts`、`tests/e2e/{battle,dungeon,relic,growth,smoke}.spec.ts`
+**tests**：`tests/unit/{idle,idle-authority,idle-target→idle-channel,dungeon-loop,dungeons,dungeon-stages,challenge,server/action,server/idle-authority}.test.ts`、`tests/e2e/{battle,dungeon,relic,growth,smoke}.spec.ts`
 
 **docs**：`artifacts/plan.md`、`AGENTS.md`
 
@@ -678,7 +616,7 @@ export interface OfflineSettlementResult {
 - **数值常量只进 `core/config/economy.ts`**；本次新增 `IDLE.SECONDS_PER_ROLL` 与 `DUNGEON` 锚点块，删除 `BATTLE.SECONDS_PER_BATTLE`（不做别名）。
 - **难度锚点只由标定工具产出**（主线 `balance:recalibrate` / 副本 `balance:recalibrate:dungeon`），禁止手填（铁律 #41）。
 - **关卡 id 只有一个出处**：副本关卡 id 由 `core/config/dungeons.ts` 的索引函数产出，表现层与动作层不得自行拼接（铁律 #3 / #8）。
-- **收益入库只认 `rewards`**（铁律 #26）：遗物必须在 `rewards.relics`，不得另开旁路数组。
+- **收益入库只认 `rewards`**（铁律 #26）。奖励预览与实际结算共用配置，结算回执从实发奖励生成。
 - **表现层不得自推导战斗事实 / 掉落口径 / 通道状态**：一律取 core 与服务端回包。
 - **心跳保持轻量**（铁律 #33）。
 - **战斗回放是时间的纯函数**（铁律 #20）：本次不改变 `battle-timeline.ts`，只改「回放数据从哪来」。
