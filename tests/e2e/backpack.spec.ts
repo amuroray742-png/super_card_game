@@ -5,6 +5,7 @@ import { exportSave } from '../../src/core/save/serialize.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
 import { EXP_BOOK } from '../../src/core/config/economy.ts'
 import { ITEM_BY_ELEMENT, ITEM_DEFS, type ItemId } from '../../src/core/config/items.ts'
+import { dungeonStageId } from '../../src/core/config/dungeons.ts'
 import { formatNumber } from '../../src/presentation/utils/format'
 import {
   accessTokenOf,
@@ -148,7 +149,11 @@ test.describe('背包 · 5 分类', () => {
     const fireItem = ITEM_BY_ELEMENT.火
     await page.getByTestId(`backpack-go-dungeon-${fireItem}`).click()
     await expect.poll(() => urlText(page)).toContain('/#/dungeon?kind=skill&element=火')
-    await expect(page.getByTestId('dungeon-variant-skillFire')).toBeVisible()
+    // ⚠ **挂机改版 v11**：副本页改成「24 个独立关卡」，按难度段 × 变体平铺，
+    //   变体不再是一个独立分组 ⇒ 断言落在**关卡行**上（关卡 id 唯一出处是 core）。
+    await expect(page.getByTestId(`dungeon-stage-${dungeonStageId('skillFire', 'easy')}`)).toBeVisible()
+    // 深链命中的变体要高亮出来（点「去副本」要真的看到对应关卡）
+    await expect(page.locator('[data-variant="skillFire"].hl')).toHaveCount(3)
   })
 
   test('强化材料能直达强化副本', async ({ page }) => {
@@ -161,7 +166,8 @@ test.describe('背包 · 5 分类', () => {
 
     await page.getByTestId('backpack-go-dungeon-relicStoneTier1').click()
     await expect.poll(() => urlText(page)).toContain('/#/dungeon?kind=enhance&tier=relicStoneTier1')
-    await expect(page.getByTestId('dungeon-variant-enhanceTier1')).toBeVisible()
+    await expect(page.getByTestId(`dungeon-stage-${dungeonStageId('enhanceTier1', 'easy')}`)).toBeVisible()
+    await expect(page.locator('[data-variant="enhanceTier1"].hl')).toHaveCount(3)
   })
 
   test('碎片页点一下就到英灵页（升星入口）', async ({ page }) => {

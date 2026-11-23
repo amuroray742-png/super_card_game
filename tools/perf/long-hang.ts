@@ -200,7 +200,10 @@ async function main(): Promise<void> {
     const save = createNewSave(fakeNow, 20240607)
     buildMaxTeam(save)
     addStockRelics(save, PRE_RELICS)
-    save.idle.currentStage = 5
+    // ⚠ **挂机改版 v11**：主线通道**跟随最新通关关卡**（`stageId = null`）。
+    //   主线推进改走**手动挑战**，挂机不再自己往前推 ⇒ 这里必须先把主线**打通关**，
+    //   否则主线通道解析不出目标（`clearedStage = 0` ⇒ 无目标 ⇒ 离线补算产出恒为 0），
+    //   压测就测不到「一次吃完预算」的真实路径了。
     save.campaign.clearedStage = 4
     // 整包落库（与存量大档同一条路径：服务端读取时会自动拆表）
     writeSave(bundle.db, userId, JSON.stringify(save), save.savedAt, fakeNow)
@@ -227,7 +230,7 @@ async function main(): Promise<void> {
 
     console.log('① 离线补算（一次吃完预算）')
     line('补算耗时', `${settleMs} ms`)
-    line('结算场次', loaded?.offline?.battles ?? 0)
+    line('结算次数', loaded?.offline?.rolls ?? 0)
     line('落库行数', changesAfterOffline)
     line('仓库遗物', `${relicCount} 件`)
     line('存档主体', kb(bodyBytes))
@@ -241,12 +244,14 @@ async function main(): Promise<void> {
       const c0 = performance.now()
       const res = await service.execute(userId, {
         actionId: `chunk-${i}`,
-        action: { type: 'idle.tick', battles: 500 },
+        // ⚠ 挂机改版 v11：次数**不再由客户端传**（旧版是 `battles`），
+        //   服务端按各通道的 `effectiveMs` 决定掷几次。
+        action: { type: 'idle.tick' },
       })
       const ms = elapsedSince(c0)
       chunkTotal += ms
-      const battles = (res.result as { battles?: number } | undefined)?.battles ?? 0
-      line(`第 ${i + 1} 批`, `${ms} ms · ${battles} 场`)
+      const rolls = (res.result as { rolls?: number } | undefined)?.rolls ?? 0
+      line(`第 ${i + 1} 批`, `${ms} ms · ${rolls} 次`)
     }
     line('分批合计', `${chunkTotal} ms`)
     console.log('')

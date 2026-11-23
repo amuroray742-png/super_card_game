@@ -112,29 +112,35 @@ describe('core：RNG 快照忠实复原', () => {
 describe('存档：随机数状态字段', () => {
   it('存档版本已升级（新增 rng 字段）', () => {
     // ⚠ 资源/背包版本 v10（抽卡券 / 印记 / 经验池退役 → 道具系统 + 副本）
-    expect(SAVE_VERSION).toBe(10)
+    expect(SAVE_VERSION).toBe(11)
   })
 
   it('新建存档带随机种子', () => {
-    expect(createNewSave(1, 42).rng).toEqual({ seed: 42, counter: 0 })
+    const rng = createNewSave(1, 42).rng
+    expect(rng.seed).toBe(42)
+    expect(rng.counter).toBe(0)
+    // ⚠ 挂机改版 v11：三条挂机通道**各自**一条序列（设计稿 §3.3），
+    //   且互不相同 —— 开一条通道不会改变另外两条的掉落。
+    expect(Object.keys(rng.channels).sort()).toEqual(['enhance', 'main', 'skill'])
+    expect(new Set(Object.values(rng.channels).map((c) => c.seed)).size).toBe(3)
   })
 
   it('旧档（无 rng 字段）规范化后种子为 0，等待服务端补种子', () => {
     const legacy = { ...createNewSave(1) } as Record<string, unknown>
     delete legacy.rng
-    expect(normalizeSave(legacy).rng).toEqual({ seed: 0, counter: 0 })
+    expect(normalizeSave(legacy).rng).toMatchObject({ seed: 0, counter: 0 })
   })
 
   it('已有 rng 的存档规范化后原样保留', () => {
     const save = createNewSave(1, 99)
     save.rng.counter = 5
-    expect(normalizeSave(save).rng).toEqual({ seed: 99, counter: 5 })
+    expect(normalizeSave(save).rng).toMatchObject({ seed: 99, counter: 5 })
   })
 
   it('旧版随机状态失效，导出串省略随机字段', () => {
     const save = createNewSave(1, 99)
     save.rng.counter = 5
-    expect(deserialize(serialize({ ...save, version: 5 })).rng).toEqual({ seed: 0, counter: 0 })
+    expect(deserialize(serialize({ ...save, version: 5 })).rng).toMatchObject({ seed: 0, counter: 0 })
     expect(JSON.parse(atob(exportSave(save)))).not.toHaveProperty('rng')
   })
 
@@ -184,7 +190,7 @@ describe('抽卡随机序列（铁律 #24 · 服务端持有）', () => {
   it('新档随机状态只在服务端持久化，浏览器镜像与缓存无权威随机状态', () => {
     const store = useGameStore()
     expect(storedRng().seed).not.toBe(0)
-    expect(store.save.rng).toEqual({ seed: 0, counter: 0 })
+    expect(store.save.rng).toMatchObject({ seed: 0, counter: 0 })
     const [cached] = mem.values()
     expect(JSON.parse(cached)).not.toHaveProperty('rng')
   })

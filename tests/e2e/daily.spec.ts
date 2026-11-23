@@ -74,7 +74,9 @@ test.describe('每日任务与周目标', () => {
     await expect(page.getByTestId('task-w_relic')).toBeVisible()
 
     // 目标数与奖励写在页面上（玩家看得见「还差多少、给什么」）
-    await expect(page.getByTestId('task-d_battle')).toContainText('推征 30 场')
+    // ⚠ **挂机改版 v11**：「推征」口径改为**主线挂机结算次数**，
+    //   文案随之改成「主线挂机结算」（副本场次与手动挑战都不计入）。
+    await expect(page.getByTestId('task-d_battle')).toContainText('主线挂机结算 30 次')
     await expect(page.getByTestId('task-d_battle')).toContainText('0 / 30')
   })
 

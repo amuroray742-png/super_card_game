@@ -39,21 +39,20 @@ import { HERO_INDEX } from '../../src/core/config/heroes/index.ts'
 import { ITEM_BY_ELEMENT, type ItemId } from '../../src/core/config/items.ts'
 import { feedBooks, itemsToExp, itemName, materialTotals } from './item-flow.ts'
 import {
-  applyIdleTarget,
-  chooseIdleTarget,
-  resolveDungeonDifficulty,
+  applyChannels,
+  challengeDungeonStage,
+  decideChannels,
 } from './dungeon-loop.ts'
 import {
-  BATTLE,
   DAILY,
   EXP_BOOK,
   GACHA,
   IDLE,
   LEVEL,
   RELIC,
+  RELIC_ACQUIRE,
   SKILL,
   START_RESOURCES,
-  type DungeonDifficultyId,
 } from '../../src/core/config/economy.ts'
 import type { HeroDef, Rarity, SaveData } from '../../src/core/model/types.ts'
 
@@ -69,6 +68,12 @@ const { values } = parseArgs({
     out: { type: 'string', default: 'artifacts/baselines/newplayer.json' },
     /** 每段结算的时长（小时） */
     chunk: { type: 'string', default: '1' },
+    /**
+     * 每段（默认 1 小时）**手动挑战**主线关卡数上限。
+     *
+     * ⚠ 挂机改版 v11：主线推进**只能**靠手动挑战 ⇒ 首日推进速度由它决定。
+     */
+    challengesPerChunk: { type: 'string', default: '4' },
   },
 })
 
@@ -77,6 +82,7 @@ const SEED_BASE = Number(values.seed) || 20260105
 /** `--out none` 表示不落盘（只看控制台） */
 const OUT_PATH = values.out && values.out !== 'none' ? resolve(process.cwd(), values.out) : ''
 const CHUNK_HOURS = Math.max(0.25, Number(values.chunk) || 1)
+const CHALLENGES_PER_CHUNK = Math.max(0, Number(values.challengesPerChunk) || 0)
 
 // ─────────────────────────── 常量 ───────────────────────────
 
@@ -397,8 +403,8 @@ interface ProfileResult {
    *   这个数一旦是「几分钟」，玩家就会觉得游戏没有过程；是「几小时」，节奏才对。
    */
   farmToNextLevelHours: number
-  /** 卡住时每场战斗的经验产出（回退关卡的掉落速率） */
-  expPerBattle: number
+  /** 卡住时每次**掷奖**的经验产出（回退关卡的掉落速率） */
+  expPerRoll: number
 }
 
 interface AccountResult {
@@ -453,22 +459,32 @@ function advanceIdle(
   // ② 再来一跳（一个心跳间隔后）：租约已生效 → onlineMs > 0 → 离线累计归零
   ctx.now += IDLE.HEARTBEAT_INTERVAL_MS
   applyAction(save, { type: 'idle.heartbeat' }, ctx)
-  // ③ 领奖：回放服务端已累计的场次（客户端只是上限）
-  const battles = Math.floor(ms / 1000 / BATTLE.SECONDS_PER_BATTLE)
-  const tick = applyAction(save, { type: 'idle.tick', battles: Math.max(1, battles) }, ctx)
+  // ③ 领奖：三通道按各自预算结算（次数由服务端账本决定，客户端只是上限）
+  //
+  // ⚠ 挂机改版 v11：次数**不再由客户端传**（旧版是 `battles`），
+  //   服务端按各通道的 `effectiveMs` 决定掷几次 ⇒ 客户端创造不出时间。
+  const tick = applyAction(save, { type: 'idle.tick' }, ctx)
   const run = tick.ok ? tick.result : null
-  const rewards = run?.rewards
+  // ⚠ **三通道并行** ⇒ 产出要**按通道合并**再统计（每条通道各发各的）
+  let silver = 0
+  const items: Record<string, number> = {}
+  for (const detail of run?.channels ?? []) {
+    silver += detail.rewards.silver ?? 0
+    for (const [id, count] of Object.entries(detail.rewards.items ?? {})) {
+      items[id] = (items[id] ?? 0) + (count ?? 0)
+    }
+  }
   return {
-    exp: itemsToExp(rewards?.items),
-    silver: rewards?.silver ?? 0,
+    exp: itemsToExp(items),
+    silver,
     /**
      * 本段的**材料产出**（五行技能材料 / 三档强化石）。
      *
      * ⚠ 必须用**产出**而不是余额差：材料到账就会被养成动作吃掉，
      *   余额差会把这部分产出抹掉（经验维度早就踩过这个坑）。
-     *   材料只在**挂机去向切到副本**的那些小时里才有流入。
+     * ⚠ 材料只在**技能 / 强化通道有目标**的那些小时里才有流入。
      */
-    materials: materialTotals(rewards?.items),
+    materials: materialTotals(items),
     run,
   }
 }
@@ -590,38 +606,70 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
   /** 全天累计投入的经验（喂书折算） */
   let totalExpFed = 0
   /** 副本难度（自适应状态；口径与 recalibrate.ts 共用，铁律 #4） */
-  let dungeonDifficulty: DungeonDifficultyId = 'easy'
+  /** 当天卡住的主线关卡（挂机改版 v11：主线推进只走手动挑战） */
+  let blockedAtStage: number | null = null
   for (let c = 0; c < chunks; c++) {
-    // ── 选本段（1 小时）的挂机去向 ──
+    // ── 玩家上线：手动挑战（挂机改版 v11） ──
     //
-    // ⚠ **必须在「这段挂机时间开始之前」选**：去向是存档状态，
-    //   它决定了这段离线期归谁（切换时服务端先按**旧去向**结清，设计稿 §3）。
+    // ⚠ **主线推进只走手动挑战**（`campaign.challenge`）：挂机不再跑战斗，
+    //   关卡进度**不会**自己往前走 ⇒ 首日的推进速度由「每小时打几关」决定。
+    //
+    // ⚠ **副本也要手动挑战**才解锁挂机（`dungeon.challenge`）——
+    //   挂机目标必须**已通关**（设计稿 §3.1）。
+    for (let i = 0; i < CHALLENGES_PER_CHUNK; i++) {
+      const next = save.campaign.clearedStage + 1
+      if (next > STAGES.length) break
+      const res = applyAction(save, { type: 'campaign.challenge', stageId: next }, ctx)
+      if (!res.ok || !res.result.win) {
+        blockedAtStage = next
+        break
+      }
+      blockedAtStage = null
+    }
+
+    // ── 选本段（1 小时）的三通道目标 ──
+    //
+    // ⚠ **必须在「这段挂机时间开始之前」选**：目标是存档状态，
+    //   它决定了这段离线期归谁（切换时服务端先按**旧目标**结清，设计稿 §3）。
     //
     // ⚠ 段内**不能**重复套用离线曲线：本脚本每段都走「心跳 ×2」（每小时上线一次），
     //   租约每段生效一次 → 离线累计每段归零 → 每段都拿到 f(该段时长) 的满额，
     //   这正是「每小时上线一次」的口径（与 recalibrate 的「每天一次」不同，
     //   两者相差 9 倍，见 economy.ts 的 IDLE 注释）。
-    const plan = chooseIdleTarget(
+    //
+    // ⚠ **三通道并行**（挂机改版 v11）：不用分配时间，各自拿满同一段墙钟时间。
+    const decision = decideChannels(
       save,
       ctx,
       teamIds,
-      dungeonDifficulty,
-      Math.floor((CHUNK_HOURS * 3600) / BATTLE.SECONDS_PER_BATTLE),
+      Math.floor((CHUNK_HOURS * 3600) / IDLE.SECONDS_PER_ROLL),
     )
-    applyIdleTarget(save, ctx, plan)
-    const produced = advanceIdle(save, ctx, CHUNK_HOURS)
-    lastProduced = produced
-    // 副本难度自适应：战败降一档，没战败按当前战力往上走
-    dungeonDifficulty = resolveDungeonDifficulty(
+    // 副本目标必须已通关才能挂 ⇒ 先把选中的副本关卡打通
+    for (const stageId of decision.challenges) {
+      challengeDungeonStage(save, ctx, stageId)
+    }
+    // 挑战之后目标可能变了（刚打通的关卡可以直接挂）⇒ 重选一次再应用
+    const plan = decideChannels(
       save,
       ctx,
-      produced.run?.dungeon?.blockedAtBattle != null && plan.kind !== 'campaign'
-        ? (plan.difficulty ?? null)
-        : null,
-    )
+      teamIds,
+      Math.floor((CHUNK_HOURS * 3600) / IDLE.SECONDS_PER_ROLL),
+    ).plans
+    applyChannels(save, ctx, plan)
+    const produced = advanceIdle(save, ctx, CHUNK_HOURS)
+    lastProduced = produced
     // 首轮之后先把遗物穿上（推荐装备与服务端执行同一函数 → 预览 = 执行）
     if (c === 0) {
       for (const heroId of teamIds) applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
+    }
+    // 祈愿遗物（遗物的独立获取入口）：银两换遗物，强化链路才有起点
+    if (save.player.silver >= RELIC_ACQUIRE.SILVER_COST) {
+      const wish = applyAction(save, { type: 'relic.acquire' }, ctx)
+      if (wish.ok) {
+        for (const heroId of teamIds) {
+          applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
+        }
+      }
     }
     const spend = spendGrowth(save, ctx, teamIds)
     totalExpFed += spend.expFed
@@ -700,13 +748,12 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
   for (const id of teamIds) levels[id] = save.heroes[id]?.level ?? 0
 
   const clearedStage = save.campaign.clearedStage
-  const blockedAtStage = save.idle.currentStage > clearedStage ? save.idle.currentStage : null
   const gaps = computeGaps(save, teamIds, power, bossStage.powerRequired)
 
   // 回退刷取时间：经验池的每小时收入要分给 6 名英灵，
   //   「距离下一级还差的经验 ÷ 每名英灵每小时分到的经验」= 还要刷多久。
-  const battlesPerHour = Math.floor(3600 / BATTLE.SECONDS_PER_BATTLE)
-  const expPerBattle = Math.round(perHour.exp / battlesPerHour)
+  const rollsPerHour = Math.floor(3600 / IDLE.SECONDS_PER_ROLL)
+  const expPerRoll = Math.round(perHour.exp / rollsPerHour)
   const expPerHeroPerHour = perHour.exp / Math.max(1, teamIds.length)
   const farmToNextLevelHours =
     expPerHeroPerHour > 0 ? gaps.expToNextLevel / expPerHeroPerHour : Number.POSITIVE_INFINITY
@@ -741,7 +788,7 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
     gaps: computeGaps(save, teamIds, power, bossStage.powerRequired),
     perHour,
     farmToNextLevelHours,
-    expPerBattle,
+    expPerRoll,
   }
 }
 

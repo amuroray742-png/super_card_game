@@ -16,7 +16,7 @@
  *
  * ⚠ **实施修正（roadmap P1-2 难度曲线重标定）**：
  *   旧口径只有第 2 个问题，而且是**存量**比——在挂机游戏里必然失真：
- *   经验的产出主体是**挂机刷取**（每天上千场），主线 310 次首通只是零头
+ *   经验的产出主体是**挂机刷取**（每天上千次掷奖），主线 310 次首通只是零头
  *   （实测 4384万 vs 满养成 26.5亿 = 0.02×）。存量口径把零头当成全部产出，
  *   结论必然是「缺口」，而玩家实际并不缺经验。
  *   §5.8 原文就是「产出速度 vs 消耗速度」，本表改为**速度**口径出表，
@@ -40,9 +40,10 @@ import {
   REALMS,
   SKILL,
   RELIC,
+  RELIC_ACQUIRE,
   STAR,
   STAGE,
-  BATTLE,
+  IDLE,
   DAILY,
   LADDER,
   LADDER_RETURN_REWARDS,
@@ -119,7 +120,7 @@ function emptyExpected(): Expected {
   }
 }
 
-/** 单张掉落表的期望产出（含遗物稀有度分布） */
+/** 单张掉落表的期望产出 */
 function expectedOfTable(tableKey: string): Expected {
   const t = DROP_TABLES[tableKey]
   const out = emptyExpected()
@@ -130,11 +131,33 @@ function expectedOfTable(tableKey: string): Expected {
     out.items[drop.id] = (out.items[drop.id] ?? 0) + (drop.chance / 100) * count
   }
   out.exp = itemsToExp(out.items as Partial<Record<ItemId, number>>)
-  const totalWeight = t.relicDrop.reduce((a, d) => a + d.weight, 0)
-  for (const d of t.relicDrop) {
-    out.relics[d.rarity] += d.weight / totalWeight
-  }
+  // ⚠ **挂机改版 v11：掉落表里已没有遗物**（`relicDrop` 字段退役）。
+  //   遗物改走**独立获取入口** `relic.acquire`（银两祈愿），
+  //   它的供给单独核算（见 `relicSupplyFromSilver`）——
+  //   遗物既不在主线掉落表里，就不能在这里按掉落概率统计。
   return out
+}
+
+/**
+ * **遗物本体的供给**（挂机改版 v11：遗物改走独立入口 `relic.acquire`）。
+ *
+ * ⚠ 遗物**不再从掉落表出**——掉落表只剩银两 + 经验书。
+ *   遗物现在是「银两 → 祈愿」⇒ 供给 = 银两收入 ÷ 单件祈愿成本。
+ *
+ * ⚠ 这条口径必须与游戏一致（铁律 #4）：成本取 `RELIC_ACQUIRE.SILVER_COST`，
+ *   稀有度分布取 `RELIC_ACQUIRE.RARITY_WEIGHTS`，**不在工具里另写一份**。
+ */
+function relicSupplyFromSilver(silver: number): {
+  count: number
+  byRarity: Record<string, number>
+} {
+  const count = Math.floor(silver / RELIC_ACQUIRE.SILVER_COST)
+  const totalWeight = Object.values(RELIC_ACQUIRE.RARITY_WEIGHTS).reduce((a, b) => a + b, 0)
+  const byRarity: Record<string, number> = {}
+  for (const [rarity, weight] of Object.entries(RELIC_ACQUIRE.RARITY_WEIGHTS)) {
+    byRarity[rarity] = count * (weight / totalWeight)
+  }
+  return { count, byRarity }
 }
 
 function addInto(target: Expected, src: Expected, times: number): void {
@@ -254,9 +277,18 @@ console.log('='.repeat(84))
 
 console.log('\n【逐章投放期望】（主线 310 关）\n')
 console.log(
-  '  章节        银两        经验    五行技能材料   三档强化石   遗物掉落(N/R/SR/SSR)',
+  '  章节        银两        经验    五行技能材料   三档强化石   遗物祈愿可得(N/R/SR/SSR)',
 )
 console.log('  ' + '-'.repeat(82))
+/**
+ * 遗物本体供给：**主线银两能换多少件遗物**（独立入口口径）。
+ *
+ * ⚠ 逐章都按「该章银两收入 ÷ 单件祈愿成本」折算 ⇒ 逐章相加 = 全章合计。
+ */
+function relicColumn(silver: number): string {
+  const wish = relicSupplyFromSilver(silver)
+  return `${(wish.byRarity.N ?? 0).toFixed(1)}/${(wish.byRarity.R ?? 0).toFixed(1)}/${(wish.byRarity.SR ?? 0).toFixed(1)}/${(wish.byRarity.SSR ?? 0).toFixed(1)}`
+}
 for (let i = 0; i < perChapter.length; i++) {
   const a = perChapter[i]
   console.log(
@@ -264,7 +296,7 @@ for (let i = 0; i < perChapter.length; i++) {
       `${fmt(a.silver).padStart(10)} ${fmt(a.exp).padStart(10)} ` +
       `${fmt(sumOfCategory(a.items, 'skillMat')).padStart(12)} ` +
       `${fmt(sumOfCategory(a.items, 'relicStone')).padStart(10)}   ` +
-      `${a.relics.N.toFixed(1)}/${a.relics.R.toFixed(1)}/${a.relics.SR.toFixed(1)}/${a.relics.SSR.toFixed(1)}`,
+      relicColumn(a.silver),
   )
 }
 console.log('  ' + '-'.repeat(82))
@@ -273,11 +305,13 @@ console.log(
     `${fmt(mainline.silver).padStart(10)} ${fmt(mainline.exp).padStart(10)} ` +
     `${fmt(sumOfCategory(mainline.items, 'skillMat')).padStart(12)} ` +
     `${fmt(sumOfCategory(mainline.items, 'relicStone')).padStart(10)}   ` +
-    `${mainline.relics.N.toFixed(1)}/${mainline.relics.R.toFixed(1)}/${mainline.relics.SR.toFixed(1)}/${mainline.relics.SSR.toFixed(1)}`,
+    relicColumn(mainline.silver),
 )
 console.log(
   '\n  注：主线**只掉经验书与银两**——五行技能材料与三档强化石是**副本专属产出**'
-    + '（设计稿 §3），所以上面两列恒为 0；材料的投放见下表。',
+    + '（设计稿 §3），所以上面两列恒为 0；材料的投放见下表。\n'
+    + '  遗物**不再从掉落表出**（挂机改版 v11）：改走独立入口「遗物祈愿」'
+    + `（${RELIC_ACQUIRE.SILVER_COST} 银两 / 件），故上表最后一列按银两收入折算。`,
 )
 
 // ─────────────────────────── 3.5 副本材料投放 ───────────────────────────
@@ -344,7 +378,7 @@ for (const id of RELIC_STONE_IDS) {
 console.log('\n【存量视角 · 参考口径】主线 310 关首通投放 ÷ 满养成消耗\n')
 console.log(
   '  ⚠ 这一段是**存量**比（打完主线累计能养出多少满养成），不是健康度闸门——\n' +
-    '    挂机游戏里经验的产出主体是每天上千场的挂机刷取，主线首通只是零头，\n' +
+    '    挂机游戏里经验的产出主体是每天上千次挂机掷奖，主线首通只是零头，\n' +
     '    所以这一段的「经验 0.02×」不代表玩家缺经验。闸门看下面的【速度口径】。\n' +
     '  ⚠ 银两那一行看着极小，是因为「遗物满强化」取的是**护栏上限 Lv200**：\n' +
     '    淬炼段价格按 1.1^级 指数上升，满级累计投入是天文数字，而玩家 40 天主线\n' +
@@ -365,15 +399,22 @@ for (const [name, supply, need] of rows) {
   )
 }
 
-const relicSupply = Object.values(mainline.relics).reduce((a, b) => a + b, 0)
+/**
+ * 遗物本体供给（独立入口口径：银两 → 祈愿）。
+ *
+ * ⚠ 挂机改版 v11：遗物**不再从掉落表出**，所以这里的分子是
+ *   「主线银两收入能换几件遗物」，不是「掉落表期望遗物数」。
+ */
+const relicWish = relicSupplyFromSilver(mainline.silver)
+const relicSupply = relicWish.count
 console.log(
   `  ${'遗物本体'.padEnd(12)} ${relicSupply.toFixed(0).padStart(10)} ${String(relicsInTeam).padStart(12)} ` +
     `${ratio(relicSupply, relicsInTeam).padStart(10)}   ${relicSupply >= relicsInTeam ? '✓' : '· 低于 1（见速度口径）'}`,
 )
 
 console.log(
-  `\n  注：遗物本体掉落含 N/R/SR/SSR 全稀有度，实际可用性需按 SSR 占比折算` +
-    `（主线 SSR 遗物约 ${mainline.relics.SSR.toFixed(0)} 件）。`,
+  `\n  注：遗物本体来自独立入口「遗物祈愿」（${RELIC_ACQUIRE.SILVER_COST} 银两 / 件），`
+    + `实际可用性需按稀有度折算（可得的 SSR 遗物约 ${(relicWish.byRarity.SSR ?? 0).toFixed(0)} 件）。`,
 )
 
 // ── 非主线产出的三个维度：供给源不在主线，单独给「单次供给 vs 单次消耗」 ──
@@ -471,11 +512,11 @@ for (const task of WEEKLY_TASKS) {
   weeklyTaskSupply.exp += taskRewardExp(task.rewards)
 }
 
-/** 每小时挂机产出（第 1 章期望 × 每小时场次）——任务预算的分母 */
-const battlesPerHour = Math.round(3600 / BATTLE.SECONDS_PER_BATTLE)
+/** 每小时挂机产出（第 1 章期望 × 每小时掷奖次数）——任务预算的分母 */
+const rollsPerHour = Math.round(3600 / IDLE.SECONDS_PER_ROLL)
 const stage1 = DROP_TABLES.stage_1
-/** 第 1 章每场的期望经验（经验书折算） */
-const stage1ExpPerBattle = (() => {
+/** 第 1 章每次掷奖的期望经验（经验书折算） */
+const stage1ExpPerRoll = (() => {
   let exp = 0
   for (const drop of stage1.items) {
     const bookExp = EXP_BOOK_ITEM_EXP[drop.id]
@@ -484,9 +525,9 @@ const stage1ExpPerBattle = (() => {
   }
   return exp
 })()
-const hourlyIncomeExp = stage1ExpPerBattle * battlesPerHour
+const hourlyIncomeExp = stage1ExpPerRoll * rollsPerHour
 /**
- * 每日挂机经验产出 = core 的离线效率曲线 f(24h) × 场次/小时 × 每场期望经验。
+ * 每日挂机经验产出 = core 的离线效率曲线 f(24h) × 次数/小时 × 每次期望经验。
  *
  * ⚠ **口径与 `tools/validate-config.ts` 同一把尺**：任务是「每天」的流量，
  *   分母用「一天」的挂机产出（照搬旧的「一小时」会把尺度差一个数量级）。
@@ -520,8 +561,8 @@ console.log(
     `${fmt(0).padStart(12)}${fmt(0).padStart(12)}`,
 )
 console.log(
-  `\n  每小时挂机产出（第 1 章 × ${battlesPerHour} 场）：经验 ${fmt(hourlyIncomeExp)}`
-    + `（每场 ${stage1ExpPerBattle.toFixed(0)}）`,
+  `\n  每小时挂机产出（第 1 章 × ${rollsPerHour} 次）：经验 ${fmt(hourlyIncomeExp)}`
+    + `（每次 ${stage1ExpPerRoll.toFixed(0)}）`,
 )
 console.log(
   `  每日挂机经验产出（core 的离线效率曲线 f(24h)）：${fmt(dailyIdleExp)}`,
@@ -555,7 +596,7 @@ console.log(
 // ─────────────────────────── 5. 速度口径（§5.8 · 闸门口径）───────────────────────────
 //
 // ⚠ 为什么要改口径：旧表只有「主线 310 关首通投放 ÷ 满养成消耗」的**存量**比。
-//   挂机游戏里经验的产出主体是**挂机刷取**（每天上千场），主线首通只是零头，
+//   挂机游戏里经验的产出主体是**挂机刷取**（每天上千次掷奖），主线首通只是零头，
 //   存量口径把零头当全部产出 → 结论必然是「缺口」，而玩家实际并不缺经验。
 //   §5.8 原文就是「产出速度 vs 消耗速度」，本节按速度口径出表。
 //
@@ -851,7 +892,7 @@ for (const spec of LADDER_RETURN_REWARDS) {
   )
 }
 console.log(
-  `\n  每日挂机经验产出（第 1 章 × ${battlesPerHour} 场 × 离线效率曲线）：`
+  `\n  每日挂机经验产出（第 1 章 × ${rollsPerHour} 次 × 离线效率曲线）：`
     + ` ${fmt(dailyIdleExp)}`,
 )
 console.log(

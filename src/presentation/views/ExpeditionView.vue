@@ -1,104 +1,48 @@
 <script setup lang="ts">
 /**
- * 推征（首页）：关卡推进 + 挂机 + 战斗回放。
+ * 推征（首页）：**主线手动挑战 + 三通道挂机 + 副本入口**（挂机改版 v11）。
  *
- * ⚠ **挂机去向**（资源/背包版本 v10）：主线 / 技能副本 / 强化副本
- *   共用**同一份时间账本**，切换时服务端先结清旧去向再换新去向（设计稿 §3）。
+ * ## 结构（自上而下）
+ *
+ * 1. **主线面板**：当前章节 / 关卡名 / 战力对比 / 「挑战此关」+「详情」。
+ * 2. **三通道挂机面板**：三张卡（主线 / 技能副本 / 强化副本），
+ *    各显示目标、可结算次数与每次产出；**只有一个「全部领取」入口**。
+ * 3. **副本入口卡**：「技能副本」「强化副本」→ `/dungeon?kind=…`。
+ * 4. **本章关卡网格**：点击 → 开关卡详情**弹窗**（URL 不变）。
+ * 5. **编队概览**。
+ *
+ * ⚠ **表现层不自推导战斗事实 / 掉落口径 / 通道状态**：一律取 core 与服务端回包。
  */
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
-import { STAGES, STAGE_INDEX } from '../../core/config/stages.ts'
-import { getEnemy } from '../../core/config/enemies.ts'
-import { DROP_TABLES, RELIC, DUNGEON_DIFFICULTIES, type DungeonDifficultyId, type RelicStoneTierId } from '../../core/config/economy.ts'
-import { runBattle } from '../../core/systems/battle.ts'
-import { buildPveContext } from '../../core/systems/derive.ts'
+import { STAGES } from '../../core/config/stages.ts'
+import { DROP_TABLES } from '../../core/config/economy.ts'
+import {
+  DUNGEON_INDEX,
+  DUNGEON_STAGE_INDEX,
+  dungeonStagesOf,
+  type DungeonKind,
+} from '../../core/config/dungeons.ts'
+import { idleChannelRolls } from '../../core/systems/idle.ts'
 import { formatNumber, formatPower } from '../utils/format'
 import { rewardLines } from '../utils/reward-text'
-import BattleCanvas from '../components/BattleCanvas.vue'
-import BattleResultPanel from '../components/BattleResultPanel.vue'
-import type { BattleResult, Element } from '../../core/model/types.ts'
+import StageDetailModal from '../components/StageDetailModal.vue'
+import ChallengeReplay from '../components/ChallengeReplay.vue'
+import type { IdleChannelKind } from '../../core/model/types.ts'
 
 const store = useGameStore()
 const router = useRouter()
 
-const showCanvas = ref(false)
-const showResult = ref(false)
-const battle = ref<BattleResult | null>(null)
+/** 关卡详情弹窗（就地打开，URL 不变） */
+const detailStageId = ref<number | null>(null)
 
-const stage = computed(() => store.currentStage)
+const stage = computed(() => store.nextChallengeStage)
 const chapter = computed(() => Math.ceil(stage.value.id / 31))
 const stageName = computed(() => stage.value.name)
-const farm = computed(() => store.save.idle.farm)
-const farmStage = computed(() => STAGE_INDEX.get(farm.value?.stage ?? 0))
 
 /** 当前关卡的掉落表（战后结算展示） */
 const drops = computed(() => DROP_TABLES[stage.value.dropTableId])
-
-// ─────────────────────────── 挂机去向 ───────────────────────────
-
-/** 当前挂机去向（服务端权威镜像） */
-const idleTarget = computed(() => store.save.idle.target)
-
-/** 去向选择器当前编辑的种类（默认跟存档一致） */
-const targetKind = ref<'campaign' | 'skill' | 'enhance'>(idleTarget.value.kind)
-const targetElement = ref<Element>(
-  idleTarget.value.kind === 'skill' ? idleTarget.value.element : '金',
-)
-const targetTier = ref<RelicStoneTierId>(
-  idleTarget.value.kind === 'enhance' ? idleTarget.value.tier : 'relicStoneTier1',
-)
-const targetDifficulty = ref<DungeonDifficultyId>(
-  idleTarget.value.kind === 'campaign' ? 'easy' : idleTarget.value.difficulty,
-)
-
-/** 当前去向下文的显示名 */
-const targetName = computed(() => {
-  const t = idleTarget.value
-  if (t.kind === 'campaign') return '主线'
-  if (t.kind === 'skill') return `技能副本 · ${t.element}`
-  const tier = RELIC.STONE_TIERS.find((x) => x.id === t.tier)
-  return `强化副本 · ${tier?.name ?? t.tier}`
-})
-
-/** 切到别的种类时，把难度拉回合法值 */
-function pickKind(kind: 'campaign' | 'skill' | 'enhance') {
-  targetKind.value = kind
-  if (kind === 'campaign') return
-  if (!DUNGEON_DIFFICULTIES.some((d) => d.id === targetDifficulty.value)) {
-    targetDifficulty.value = 'easy'
-  }
-}
-
-/** 切换挂机去向（服务端先结清旧去向） */
-async function applyTarget() {
-  const kind = targetKind.value
-  const res = await store.setIdleTarget(
-    kind === 'campaign'
-      ? { kind: 'campaign', stageId: stage.value.id }
-      : kind === 'skill'
-        ? { kind: 'skill', element: targetElement.value, difficulty: targetDifficulty.value }
-        : { kind: 'enhance', tier: targetTier.value, difficulty: targetDifficulty.value },
-  )
-  if (res) store.notify('挂机去向已更新', 'ok')
-}
-
-/** 副本战败时给出的「降一档难度」建议 */
-const dungeonBlocked = ref<{ suggest: DungeonDifficultyId } | null>(null)
-
-/** 按建议降一档难度 */
-async function lowerDifficulty() {
-  const suggest = dungeonBlocked.value?.suggest
-  if (!suggest) return
-  targetDifficulty.value = suggest
-  const kind = idleTarget.value.kind
-  if (kind === 'skill') {
-    await store.setIdleTarget({ kind: 'skill', element: idleTarget.value.element, difficulty: suggest })
-  } else if (kind === 'enhance') {
-    await store.setIdleTarget({ kind: 'enhance', tier: idleTarget.value.tier, difficulty: suggest })
-  }
-  dungeonBlocked.value = null
-}
 
 const powerGap = computed(() => {
   const need = stage.value.powerRequired
@@ -111,65 +55,144 @@ const powerGap = computed(() => {
 /** 当前章节的关卡列表 */
 const chapterStages = computed(() => STAGES.filter((s) => s.chapter === chapter.value))
 
-/** 手动打一场并播放回放 */
-function fight() {
+// ─────────────────────────── 三通道挂机 ───────────────────────────
+
+interface ChannelCard {
+  kind: IdleChannelKind
+  /** 通道名 */
+  name: string
+  /** 目标显示名（`null` = 未设置） */
+  targetName: string | null
+  /** 可结算次数 */
+  rolls: number
+  /** 每次产出说明 */
+  perRoll: string
+  /** 未启用 / 目标失效时的提示 */
+  hint: string | null
+  /** 是否已启用 */
+  enabled: boolean
+}
+
+/** 主线通道的目标名（跟随最新通关关卡） */
+function mainTargetName(): string | null {
+  const t = store.save.idle.channels.main.target
+  if (!t || t.kind !== 'main') return null
+  if (t.stageId === null) {
+    if (store.clearedStage <= 0) return null
+    const s = STAGES.find((x) => x.id === store.clearedStage)
+    return s ? `${s.name}（跟随最新）` : null
+  }
+  const s = STAGES.find((x) => x.id === t.stageId)
+  return s ? s.name : null
+}
+
+/** 副本通道的目标名 */
+function dungeonTargetName(kind: IdleChannelKind): string | null {
+  const t = store.save.idle.channels[kind].target
+  if (!t) return null
+  const id = t.kind === 'skill' || t.kind === 'enhance' ? t.dungeonStageId : null
+  if (!id) return null
+  return DUNGEON_STAGE_INDEX.get(id)?.name ?? null
+}
+
+/** 三张通道卡（口径与 core 同一份换算） */
+const channels = computed<ChannelCard[]>(() => {
+  const main = store.save.idle.channels.main
+  const skill = store.save.idle.channels.skill
+  const enhance = store.save.idle.channels.enhance
+  const skillName = dungeonTargetName('skill')
+  const enhanceName = dungeonTargetName('enhance')
+  return [
+    {
+      kind: 'main',
+      name: '主线',
+      targetName: mainTargetName(),
+      rolls: idleChannelRolls(main),
+      perRoll: '经验书 / 银两',
+      hint: store.clearedStage <= 0 ? '首次手动通关后开始计量' : null,
+      enabled: main.target !== null,
+    },
+    {
+      kind: 'skill',
+      name: '技能副本',
+      targetName: skillName,
+      rolls: idleChannelRolls(skill),
+      perRoll: '对应五行的技能材料',
+      hint: skillName ? null : '通关一个技能副本关卡后即可开启',
+      enabled: skill.target !== null,
+    },
+    {
+      kind: 'enhance',
+      name: '强化副本',
+      targetName: enhanceName,
+      rolls: idleChannelRolls(enhance),
+      perRoll: '对应档位的强化石',
+      hint: enhanceName ? null : '通关一个强化副本关卡后即可开启',
+      enabled: enhance.target !== null,
+    },
+  ]
+})
+
+/** 全部可结算次数（三通道相加） */
+const totalRolls = computed(() => channels.value.reduce((sum, c) => sum + c.rolls, 0))
+
+/** **一键领取**（三通道同时结算） */
+async function claimAll() {
+  const res = await store.tickIdle()
+  if (!res) return
+  if (res.rolls === 0) {
+    store.notify('当前可用的挂机时间尚不足一次结算', 'info')
+    return
+  }
+  // ⚠ 结算明细的名称一律取登记表（铁律 #8：禁止就地写中文名）
+  const parts: string[] = []
+  for (const ch of res.channels) {
+    const label = ch.channel === 'main' ? '主线' : ch.channel === 'skill' ? '技能副本' : '强化副本'
+    const lines = rewardLines(ch.rewards).map((l) => `${l.label} ${formatNumber(l.value)}`)
+    parts.push(`${label} ${ch.rolls} 次：${lines.join('、') || '无产出'}`)
+  }
+  store.notify(parts.join(' · ') || '挂机结算完成', 'ok')
+}
+
+/** 跳到某个副本种类的 tab */
+function gotoDungeon(kind: DungeonKind) {
+  void router.push({ path: '/dungeon', query: { kind } })
+}
+
+// ─────────────────────────── 手动挑战 ───────────────────────────
+
+/**
+ * **手动挑战下一关**（主线推进的唯一路径）。
+ *
+ * ⚠ 战斗在服务端执行（core 同一份），回放一次性回传（不进幂等日志）。
+ */
+async function challenge() {
   if (store.teamEmpty) {
     store.notify('请先在阵位中编队', 'warn')
     return
   }
-  const enemyIds = stage.value.enemyIds
-  const enemies = enemyIds.map((id) => getEnemy(id)).filter(Boolean)
-  if (enemies.length === 0) return
-  const result = runBattle({
-    allies: store.team,
-    enemies,
-    enemyScale: stage.value.enemyScale,
-    ctx: buildPveContext(store.save, store.nextBattleSeed()),
-  })
-  battle.value = result
-  showCanvas.value = true
-  showResult.value = false
-  // 画布收到新战斗会自动开演（BattleCanvas 的 loadBattle 负责起播）
+  const res = await store.challengeStage()
+  if (!res) return
+  if (res.win) {
+    store.notify(res.firstClear ? `首次通关 ${stage.value.name}` : `${stage.value.name} 胜利`, 'ok')
+  } else {
+    store.notify(`${stage.value.name} 挑战失败`, 'warn')
+  }
 }
 
-/** 演出播完（或被跳过）：展示战后结算 */
-function onFinished() {
-  showResult.value = true
-}
-
-/** 回放倍速：写回存档设置（与设置页同一口径） */
-function onSpeedChange(v: number) {
-  void store.updateSettings({ speed: v })
-}
-
-/** 挂机推进 N 场 */
-async function idle(battles: number) {
+/** **再次挑战**已通关的关卡（复战只发基础掉落，不推进进度） */
+async function challengeStageCurrent() {
   if (store.teamEmpty) {
     store.notify('请先在阵位中编队', 'warn')
     return
   }
-  const res = await store.tickIdle(battles)
-  if (res) {
-    if (res.battles === 0) {
-      store.notify('当前可用的挂机时间尚不足一场', 'info')
-      return
-    }
-    // ⚠ 结算明细的名称一律取登记表（铁律 #8：禁止就地写中文名）
-    const parts = rewardLines(res.rewards).map((l) => `${l.label} ${formatNumber(l.value)}`)
-    if (res.blockedAtStage !== null) {
-      const lost = STAGE_INDEX.get(res.blockedAtStage)?.name
-      parts.unshift(`${lost ?? '当前关卡'}战败`)
-    }
-    // 副本战败：给出「降一档难度」的建议（设计稿 §3）
-    const d = res.dungeon
-    if (d && d.blockedAtBattle !== null) {
-      dungeonBlocked.value = d.suggestDifficulty
-        ? { suggest: d.suggestDifficulty as DungeonDifficultyId }
-        : null
-      parts.unshift(`副本第 ${d.blockedAtBattle} 场战败`)
-    }
-    store.notify(parts.length ? parts.join(' · ') : '推征完成', res.blockedAtStage !== null ? 'warn' : 'ok')
+  if (store.clearedStage <= 0) {
+    store.notify('还没有通关任何关卡，先挑战第 1 关', 'info')
+    return
   }
+  const res = await store.challengeStage(store.clearedStage)
+  if (!res) return
+  store.notify(res.win ? '再次挑战胜利' : '再次挑战失败', res.win ? 'ok' : 'warn')
 }
 </script>
 
@@ -177,14 +200,19 @@ async function idle(battles: number) {
   <div class="page">
     <div class="page-title">推征</div>
 
-    <!-- 当前关卡 -->
+    <!-- 手动挑战的战斗回放（服务端执行 → 回放一次性回传 → 这里演出来） -->
+    <ChallengeReplay />
+
+    <!-- 主线面板 -->
     <section class="panel">
       <div class="row-between">
         <div>
           <div class="tiny muted">第 {{ chapter }} 章 · 第 {{ stage.index }} 关</div>
           <div style="font-size: 17px; font-weight: 700; margin-top: 2px">{{ stageName }}</div>
         </div>
-        <button class="btn btn-sm btn-ghost" @click="router.push(`/stage/${stage.id}`)">详情 ›</button>
+        <button class="btn btn-sm btn-ghost" data-testid="stage-detail-open" @click="detailStageId = stage.id">
+          详情 ›
+        </button>
       </div>
 
       <div class="power-box">
@@ -203,138 +231,84 @@ async function idle(battles: number) {
           {{
             powerGap.empty
               ? '尚未编队，无法推征'
-              : farm
-                ? '当前挑战受阻'
-                : powerGap.enough
+              : powerGap.enough
                 ? '战力充足，可推进'
                 : `战力不足，尚需 ×${(1 / powerGap.ratio).toFixed(2)}`
           }}
         </div>
-        <div v-if="farm" class="tiny muted" style="margin-top: 6px">
-          <template v-if="farmStage && farm.winsUntilRetry > 0">
-            正在刷取「{{ farmStage.name }}」，再胜 {{ farm.winsUntilRetry }} 场后重试。
-          </template>
-          <template v-else-if="farmStage">下次推征将重试当前挑战。</template>
-          <template v-else>尚无可刷关卡，可调整阵容后重试。</template>
-        </div>
       </div>
 
       <div class="row" style="margin-top: 12px; gap: 6px">
-        <button class="btn btn-sm" style="flex: 1" @click="idle(1)">推征 1 场</button>
-        <button class="btn btn-sm" style="flex: 1" @click="idle(10)">推征 10 场</button>
-        <button class="btn btn-sm btn-primary" style="flex: 1" @click="fight">观战</button>
+        <button class="btn btn-sm btn-primary" style="flex: 1" data-testid="campaign-challenge" @click="challenge">
+          挑战此关
+        </button>
+        <button class="btn btn-sm" style="flex: 1" @click="challengeStageCurrent">再次挑战上一关</button>
       </div>
     </section>
 
-    <!-- 挂机去向 -->
+    <!-- 三通道挂机面板 -->
     <section class="panel">
-      <div class="row-between">
-        <div class="tiny muted">挂机去向</div>
-        <b class="tiny" data-testid="idle-target-name">{{ targetName }}</b>
-      </div>
-      <div class="chips">
-        <button
-          class="chip"
-          :class="{ on: targetKind === 'campaign' }"
-          data-testid="idle-target-campaign"
-          @click="pickKind('campaign')"
-        >
-          主线
-        </button>
-        <button
-          class="chip"
-          :class="{ on: targetKind === 'skill' }"
-          data-testid="idle-target-skill"
-          @click="pickKind('skill')"
-        >
-          技能副本
-        </button>
-        <button
-          class="chip"
-          :class="{ on: targetKind === 'enhance' }"
-          data-testid="idle-target-enhance"
-          @click="pickKind('enhance')"
-        >
-          强化副本
-        </button>
+      <div class="panel-title">
+        <span>挂机通道</span>
+        <span class="tiny muted">三条通道各自独立计量</span>
       </div>
 
-      <!-- 技能副本：五行 -->
-      <div v-if="targetKind === 'skill'" class="chips">
-        <button
-          v-for="el in (['金', '木', '水', '火', '土'] as Element[])"
-          :key="el"
-          class="chip"
-          :class="{ on: targetElement === el }"
-          :data-testid="`idle-target-element-${el}`"
-          @click="targetElement = el"
-        >
-          {{ el }}
-        </button>
+      <div v-for="ch in channels" :key="ch.kind" class="chan-card" :data-testid="`idle-channel-${ch.kind}`">
+        <div class="row-between">
+          <b class="tiny">{{ ch.name }}</b>
+          <span class="tag" :class="ch.enabled ? 'tag-sr' : ''">{{ ch.enabled ? '已开启' : '未开启' }}</span>
+        </div>
+        <div class="tiny" style="margin-top: 4px">
+          <template v-if="ch.targetName">{{ ch.targetName }}</template>
+          <template v-else><span class="muted">未设置目标</span></template>
+        </div>
+        <div class="tiny muted" style="margin-top: 2px">
+          可结算 {{ ch.rolls }} 次 · 每次产出 {{ ch.perRoll }}
+        </div>
+        <div v-if="ch.hint" class="tiny warn-text" style="margin-top: 2px">{{ ch.hint }}</div>
+        <div class="row" style="gap: 6px; margin-top: 6px">
+          <button
+            v-if="ch.kind === 'main'"
+            class="btn btn-sm btn-ghost"
+            style="flex: 1"
+            data-testid="idle-channel-main-pick"
+            @click="detailStageId = store.clearedStage > 0 ? store.clearedStage : 1"
+          >
+            更换目标
+          </button>
+          <button
+            v-else
+            class="btn btn-sm btn-ghost"
+            style="flex: 1"
+            :data-testid="`idle-channel-${ch.kind}-pick`"
+            @click="gotoDungeon(ch.kind === 'skill' ? 'skill' : 'enhance')"
+          >
+            去设置
+          </button>
+        </div>
       </div>
 
-      <!-- 强化副本：石档 -->
-      <div v-if="targetKind === 'enhance'" class="chips">
-        <button
-          v-for="tier in RELIC.STONE_TIERS"
-          :key="tier.id"
-          class="chip"
-          :class="{ on: targetTier === tier.id }"
-          :data-testid="`idle-target-tier-${tier.id}`"
-          @click="targetTier = tier.id"
-        >
-          {{ tier.name }}
-        </button>
-      </div>
-
-      <!-- 副本难度 -->
-      <div v-if="targetKind !== 'campaign'" class="chips">
-        <button
-          v-for="d in DUNGEON_DIFFICULTIES"
-          :key="d.id"
-          class="chip"
-          :class="{ on: targetDifficulty === d.id }"
-          :data-testid="`idle-target-difficulty-${d.id}`"
-          @click="targetDifficulty = d.id"
-        >
-          {{ d.name }}
-        </button>
-      </div>
-
-      <div class="row" style="gap: 6px; margin-top: 8px">
-        <button class="btn btn-sm btn-primary" style="flex: 1" data-testid="idle-target-apply" @click="applyTarget">
-          切换去向
-        </button>
-        <button class="btn btn-sm btn-ghost" style="flex: 1" @click="router.push('/dungeon')">
-          材料副本 ›
-        </button>
-      </div>
+      <button class="btn btn-primary btn-block" style="margin-top: 10px" data-testid="idle-claim-all" @click="claimAll">
+        全部领取（{{ totalRolls }} 次）
+      </button>
       <p class="tiny muted" style="margin: 6px 0 0">
-        三个去向共用同一份挂机时间；切换时先按旧去向结清收益，再开始新去向。
+        挂机<b>不跑战斗</b>：按掉落表逐次掷奖直接入库，只挂已通关的内容，永不卡关。
       </p>
-      <div v-if="dungeonBlocked" class="warn-text" style="margin-top: 6px">
-        副本战败：战力不足，建议降到更低难度。
-        <button class="btn btn-sm" style="margin-left: 6px" data-testid="idle-lower-difficulty" @click="lowerDifficulty">
-          降一档难度
-        </button>
-      </div>
     </section>
 
-    <!-- 战斗回放 -->
-    <section v-if="showCanvas" class="panel">
-      <div class="panel-title">
-        <span>战斗回放</span>
-        <button class="btn btn-sm btn-ghost" @click="showCanvas = false">收起</button>
+    <!-- 副本入口卡 -->
+    <section class="panel">
+      <div class="panel-title"><span>副本</span></div>
+      <div class="row" style="gap: 6px">
+        <button class="btn btn-sm entry-card" style="flex: 1" data-testid="dungeon-entry-skill" @click="gotoDungeon('skill')">
+          <b>技能副本</b>
+          <span class="tiny muted">五行技能材料</span>
+        </button>
+        <button class="btn btn-sm entry-card" style="flex: 1" data-testid="dungeon-entry-enhance" @click="gotoDungeon('enhance')">
+          <b>强化副本</b>
+          <span class="tiny muted">三档强化石</span>
+        </button>
       </div>
-      <BattleCanvas
-        :battle="battle"
-        :speed="store.battleSpeed"
-        :chapter="chapter"
-        :skip-anim="store.save.settings.skipAnim"
-        @finished="onFinished"
-        @speed-change="onSpeedChange"
-      />
-      <BattleResultPanel v-if="showResult && battle" class="result-wrap" :battle="battle" :drops="drops" />
     </section>
 
     <!-- 本章关卡 -->
@@ -353,7 +327,8 @@ async function idle(battles: number) {
             now: s.id === stage.id,
             boss: s.isBoss,
           }"
-          @click="router.push(`/stage/${s.id}`)"
+          :data-testid="`stage-cell-${s.id}`"
+          @click="detailStageId = s.id"
         >
           <span class="s-idx">{{ s.index }}</span>
           <span v-if="s.isBoss" class="s-boss">BOSS</span>
@@ -390,6 +365,9 @@ async function idle(battles: number) {
         </span>
       </div>
     </section>
+
+    <!-- 关卡详情弹窗 -->
+    <StageDetailModal v-if="detailStageId !== null" :stage-id="detailStageId" @close="detailStageId = null" />
   </div>
 </template>
 
@@ -402,31 +380,21 @@ async function idle(battles: number) {
   border: 1px solid var(--c-line);
 }
 
-.result-wrap {
-  margin-top: 10px;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0 0;
-}
-
-.chip {
-  padding: 4px 11px;
-  border-radius: 999px;
-  border: 1px solid var(--c-line);
+.chan-card {
+  margin-top: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
   background: var(--c-bg-2);
-  font-size: 12px;
-  color: var(--c-text-dim);
-  min-height: 28px;
+  border: 1px solid var(--c-line);
 }
 
-.chip.on {
-  border-color: var(--c-gold);
-  color: var(--c-gold-2);
-  background: #2a2419;
+.entry-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px;
+  text-align: left;
 }
 
 .ok-text {

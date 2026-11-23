@@ -20,17 +20,20 @@ import { HEROES } from '../src/core/config/heroes/index.ts'
 import { POOLS, resolvePoolHeroIds } from '../src/core/config/pools.ts'
 import { STAGES, stageMonotonicityIssues } from '../src/core/config/stages.ts'
 import { RELIC_DEFS, RELIC_SETS } from '../src/core/systems/relic.ts'
-import { ENEMY_INDEX } from '../src/core/config/enemies.ts'
+import { ENEMY_INDEX, getEnemy } from '../src/core/config/enemies.ts'
 import { BONDS } from '../src/core/config/bonds.ts'
 import {
   ARENA,
   BASE_RATES,
   BATTLE,
   DAILY,
+  DUNGEON,
   DUNGEON_DIFFICULTIES,
+  DUNGEON_DIFFICULTY_ORDER,
   DUNGEON_DROPS,
   EXP_BOOK,
   GACHA,
+  IDLE,
   LEVEL,
   RELIC,
   REALMS,
@@ -55,7 +58,13 @@ import {
   itemText,
   type ItemId,
 } from '../src/core/config/items.ts'
-import { DUNGEON_VARIANTS } from '../src/core/config/dungeons.ts'
+import {
+  DUNGEON_VARIANTS,
+  DUNGEON_STAGES,
+  DUNGEON_VARIANT_ORDER,
+  dungeonStageId,
+  dungeonStagesOfVariant,
+} from '../src/core/config/dungeons.ts'
 import { computeOfflineEfficiency } from '../src/core/systems/idle.ts'
 import type { Rarity } from '../src/core/model/types.ts'
 
@@ -568,11 +577,11 @@ function taskMaterialCount(rewards: TaskReward): number {
  */
 const TASK_EXP_BUDGET_RATIO = 1 / 3
 
-const battlesPerHour = Math.round(3600 / BATTLE.SECONDS_PER_BATTLE)
-/** 第 1 章每场的期望经验（新号与日常玩家的实际产出水平） */
-const stage1ExpPerBattle = expectedExpOf(DROP_TABLES.stage_1)
-/** 每日挂机经验产出 = core 的离线效率曲线 f(24h) × 场次/小时 × 每场期望经验 */
-const dailyIdleExp = computeOfflineEfficiency(24 * 3600) * battlesPerHour * stage1ExpPerBattle
+const rollsPerHour = Math.round(3600 / IDLE.SECONDS_PER_ROLL)
+/** 第 1 章每次掷奖的期望经验（新号与日常玩家的实际产出水平） */
+const stage1ExpPerRoll = expectedExpOf(DROP_TABLES.stage_1)
+/** 每日挂机经验产出 = core 的离线效率曲线 f(24h) × 次数/小时 × 每次期望经验 */
+const dailyIdleExp = computeOfflineEfficiency(24 * 3600) * rollsPerHour * stage1ExpPerRoll
 
 /** 任务日投放 = 每日任务全领 + 周目标摊到每天 */
 const taskDailyExp =
@@ -805,7 +814,99 @@ for (const [key, table] of Object.entries(DROP_TABLES)) {
   }
 }
 
-// ⑧ 签到奖励里的道具只能是经验书（副本材料不得进签到）
+// ⑧ 副本独立关卡（挂机改版 v11）：24 关齐全、敌人存在、段间单调、产量登记
+//
+// ⚠ **为什么要有这段**：副本从「取材主线波次」变成 **24 个独立关卡**之后，
+//   配置面多了一整张表（`DUNGEON_STAGES`）与三张锚点表。
+//   这张表一旦和锚点表对不上（少一关、敌人 id 写错、难度段不递增），
+//   玩家看到的就会是「关卡列表少一档」「挑战报关卡不存在」「普通比简易还简单」。
+//   这些都**不会**在 `npm run balance` 里暴露（它只比战力数字）。
+{
+  const expectedCount = DUNGEON_VARIANT_ORDER.length * DUNGEON_DIFFICULTY_ORDER.length
+  if (DUNGEON_STAGES.length !== expectedCount) {
+    err(
+      'C/NUM',
+      `副本关卡数 ${DUNGEON_STAGES.length} ≠ 变体数 ${DUNGEON_VARIANT_ORDER.length} × 难度数 ${DUNGEON_DIFFICULTY_ORDER.length} = ${expectedCount}`,
+    )
+  }
+
+  // ① 关卡 id 唯一且符合 `dgn_<变体>_<难度>`
+  const stageIds = new Set<string>()
+  for (const stage of DUNGEON_STAGES) {
+    if (stageIds.has(stage.id)) {
+      err('B/REF', `副本关卡 id 重复：${stage.id}`)
+    }
+    stageIds.add(stage.id)
+    if (stage.id !== dungeonStageId(stage.variantId, stage.difficulty)) {
+      err('B/REF', `副本关卡 id ${stage.id} 与登记函数不一致（应为 ${dungeonStageId(stage.variantId, stage.difficulty)}）`)
+    }
+    // ② 敌人必须真实存在（敌人 id 写错 ⇒ 挑战报「配置异常」）
+    if (stage.enemyIds.length === 0) {
+      err('C/NUM', `副本关卡 ${stage.id} 没有配置敌人`)
+    }
+    for (const enemyId of stage.enemyIds) {
+      if (!getEnemy(enemyId)) {
+        err('B/REF', `副本关卡 ${stage.id} 的敌人 ${enemyId} 不存在`)
+      }
+    }
+    // ③ 产量必须已登记（`DUNGEON_DROPS` × 难度倍率）
+    if (!dungeonItemIds.has(stage.drop.itemId)) {
+      err('B/REF', `副本关卡 ${stage.id} 的产出道具 ${stage.drop.itemId} 未登记`)
+    }
+    if (stage.drop.min > stage.drop.max) {
+      err('C/NUM', `副本关卡 ${stage.id} 的产量区间反了：${stage.drop.min} > ${stage.drop.max}`)
+    }
+    if (stage.drop.min < 1) {
+      err('C/NUM', `副本关卡 ${stage.id} 的产量下界为 ${stage.drop.min}，应 ≥ 1`)
+    }
+    // ④ 缩放与门槛必须为正（锚点表错位会算出 0 或负数）
+    if (!(stage.enemyScale > 0)) {
+      err('C/NUM', `副本关卡 ${stage.id} 的敌方缩放 ${stage.enemyScale} 必须为正`)
+    }
+    if (!(stage.powerRequired > 0)) {
+      err('C/NUM', `副本关卡 ${stage.id} 的战力门槛 ${stage.powerRequired} 必须为正`)
+    }
+  }
+
+  // ⑤ 锚点表长度必须与关卡表一致（逐位对齐）
+  if (DUNGEON.SCALE_ANCHORS.length !== DUNGEON_STAGES.length) {
+    err('C/NUM', `DUNGEON.SCALE_ANCHORS 长度 ${DUNGEON.SCALE_ANCHORS.length} ≠ 副本关卡数 ${DUNGEON_STAGES.length}`)
+  }
+  if (DUNGEON.POWER_ANCHORS.length !== DUNGEON_STAGES.length) {
+    err('C/NUM', `DUNGEON.POWER_ANCHORS 长度 ${DUNGEON.POWER_ANCHORS.length} ≠ 副本关卡数 ${DUNGEON_STAGES.length}`)
+  }
+  if (DUNGEON.DESIGN_LEVELS.length !== DUNGEON_STAGES.length) {
+    err('C/NUM', `DUNGEON.DESIGN_LEVELS 长度 ${DUNGEON.DESIGN_LEVELS.length} ≠ 副本关卡数 ${DUNGEON_STAGES.length}`)
+  }
+
+  // ⑥ **段间单调**：同一变体 easy < normal < hard（缩放与门槛都严格递增）
+  for (const variantId of DUNGEON_VARIANT_ORDER) {
+    const stages = dungeonStagesOfVariant(variantId)
+    for (let i = 1; i < stages.length; i++) {
+      const prev = stages[i - 1]
+      const cur = stages[i]
+      if (cur.enemyScale <= prev.enemyScale) {
+        err('C/NUM', `副本 ${variantId} 的难度段缩放不递增：${prev.difficulty}=${prev.enemyScale} → ${cur.difficulty}=${cur.enemyScale}`)
+      }
+      if (cur.powerRequired <= prev.powerRequired) {
+        err('C/NUM', `副本 ${variantId} 的难度段门槛不递增：${prev.difficulty}=${prev.powerRequired} → ${cur.difficulty}=${cur.powerRequired}`)
+      }
+    }
+  }
+
+  // ⑦ 同一变体的三个难度段必须**共用同一批敌人**（难度差异只来自缩放 / 门槛 / 产量）
+  for (const variantId of DUNGEON_VARIANT_ORDER) {
+    const stages = dungeonStagesOfVariant(variantId)
+    const first = stages[0]?.enemyIds.join(',') ?? ''
+    for (const stage of stages.slice(1)) {
+      if (stage.enemyIds.join(',') !== first) {
+        err('C/NUM', `副本 ${variantId} 的难度段 ${stage.difficulty} 换了敌人（难度只应由缩放 / 门槛 / 产量体现）`)
+      }
+    }
+  }
+}
+
+// ⑨ 签到奖励里的道具只能是经验书（副本材料不得进签到）
 for (const [index, reward] of DAILY.SIGN_IN_REWARDS.entries()) {
   let material = 0
   for (const [id, count] of Object.entries(reward.items ?? {})) {

@@ -27,7 +27,7 @@ import {
   serializePublicSave,
   serializeSaveBody,
 } from '../../../src/core/save/serialize.ts'
-import { createNewSave } from '../../../src/core/save/schema.ts'
+import { createNewSave, createChannelRng } from '../../../src/core/save/schema.ts'
 import { Rng } from '../../../src/core/rng.ts'
 import { ACCOUNT, LEGACY_MIGRATED_FLAG, FIRST_CLEAR_COMPENSATED_FLAG } from '../../../src/core/config/account.ts'
 import { IDLE } from '../../../src/core/config/economy.ts'
@@ -35,13 +35,14 @@ import { firstClearCrystalsForRange } from '../../../src/core/systems/first-clea
 import { GAME_ERROR_CODES, GAME_ERROR_MESSAGES } from '../../../src/core/config/game-errors.ts'
 import {
   applyAction,
-  settleIdleLedger,
+  settleIdleAndApply,
   syncRngState,
   type ActionResultMap,
   type GameAction,
   type GameActionType,
+  type IdleActionResult,
 } from '../../../src/core/systems/actions.ts'
-import type { OfflineSettlementResult } from '../../../src/core/systems/idle.ts'
+import type { BattleResult } from '../../../src/core/model/types.ts'
 import { rollLadderPeriods } from '../../../src/core/systems/ladder.ts'
 import { computeRelicAdvice } from '../../../src/core/systems/actions.ts'
 import type { RelicAdvice } from '../../../src/core/systems/relic-advice.ts'
@@ -89,10 +90,34 @@ function relicSnapshot(relics: RelicInstance[]): Map<string, { level: number; lo
  *
  * 收益照算、照落库（玩家断网期间不损失收益），但只有「离线时长达到阈值」
  * 才把明细回传去弹窗——否则在线期间每点一下都会弹一次「离线结算」。
+ *
+ * ⚠ **挂机改版 v11**：阈值按**本次有产出的通道所报告的最大实际离线时长**判定
+ *   （在线计量不计入该时长）。三通道各自独立 ⇒ 取最大值。
  */
-function offlineForClient(offline: OfflineSettlementResult | null): OfflineSettlementResult | null {
-  if (!offline) return null
-  return offline.elapsedSeconds >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC ? offline : null
+function offlineForClient(offline: IdleActionResult | null): IdleActionResult | null {
+  if (!offline || offline.channels.length === 0) return null
+  const maxOffline = offline.channels.reduce((max, c) => Math.max(max, c.elapsedSeconds), 0)
+  return maxOffline >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC ? offline : null
+}
+
+/**
+ * 从动作结果里**摘出战斗回放**（设计稿 §3.7）。
+ *
+ * ⚠ `BattleResult.log` 上限 1500 条，单条约 120 KB ⇒ 存进 24 小时幂等日志
+ *   = 每天几十 MB。回放改为**一次性回传**（响应的 `replay` 字段），
+ *   幂等日志只存轻量结果（胜负 / 通关状态 / 奖励）。
+ *
+ * 副作用：24 小时内重放同一 actionId 时拿不到回放数据 → 客户端按「已结算」
+ *   处理，不再重播演出（结果与奖励仍一致）。
+ */
+function splitReplay<T extends { battle?: BattleResult }>(
+  result: T,
+): { light: Omit<T, 'battle'>; replay?: BattleResult } {
+  if (!result || typeof result !== 'object' || !('battle' in result)) {
+    return { light: result }
+  }
+  const { battle, ...light } = result
+  return { light, replay: battle ?? undefined }
 }
 
 /** 存档主体里已装备的遗物 id（心跳只需要这几件） */
@@ -117,7 +142,7 @@ interface StoredOutcome {
 /** 入口检查的结果 */
 interface PreparedSave {
   /** 本次入口触发的离线结算明细（客户端据此弹结算窗） */
-  offline: OfflineSettlementResult | null
+  offline: IdleActionResult | null
   /** 存档是否被改动（补种子 / 离线结算 → 需要落库） */
   dirty: boolean
   /**
@@ -153,7 +178,7 @@ export class GameService {
    *
    * 没有存档时返回 null（客户端据此判断「要不要先建档 / 导入存量档」）。
    */
-  async load(userId: number): Promise<{ save: SaveSnapshot; offline: OfflineSettlementResult | null } | null> {
+  async load(userId: number): Promise<{ save: SaveSnapshot; offline: IdleActionResult | null } | null> {
     return this.lock.run(userId, () => {
       const now = Date.now()
       const loaded = this.readSaveForUser(userId)
@@ -382,9 +407,13 @@ export class GameService {
     // ⑦ 落库：存档主体、遗物行与幂等日志**同一事务**
     //    （避免「扣了费却没记日志」→ 重试再扣一次；也避免「主体写了、遗物没写」）
     save.savedAt = now
+    // ⚠ **战斗回放不进幂等日志**（设计稿 §3.7）：摘出来单独回传。
+    const split = outcome.ok
+      ? splitReplay(outcome.result as { battle?: BattleResult })
+      : { light: undefined as unknown, replay: undefined }
     const stored: StoredOutcome = {
       ok: true,
-      result: outcome.result,
+      result: split.light as ActionResultMap[GameActionType],
       message: outcome.message,
       messageKind: outcome.messageKind,
     }
@@ -417,9 +446,11 @@ export class GameService {
     return {
       ok: true,
       actionId: request.actionId,
-      result: outcome.result,
+      result: split.light as ActionResultMap[GameActionType],
       message: outcome.message,
       messageKind: outcome.messageKind,
+      // ⚠ 战斗回放**一次性回传**，不写进幂等日志
+      replay: split.replay,
       // ⚠ 轻量心跳：心跳不发放任何奖励，客户端镜像无需刷新 →
       //   不回传存档主体（省掉每 5 秒一次的整包回传）。
       save: isHeartbeat ? undefined : publicSnapshot(save),
@@ -437,13 +468,16 @@ export class GameService {
    */
   private prepare(save: SaveData, now: number, settle = true, userId?: number): PreparedSave {
     let dirty = false
-    let offline: OfflineSettlementResult | null = null
+    let offline: IdleActionResult | null = null
     let firstClearCompensated = false
 
     // 旧档没有随机种子 → 服务端补一条（客户端不再持有随机序列，铁律 #24）
     if (!save.rng.seed) {
       save.rng.seed = serverSeed()
       save.rng.counter = 0
+      // ⚠ 挂机改版 v11：三条通道的随机序列由**根种子**派生，
+      //   根种子换了 → 三条通道的序列一起换（否则旧档玩家会共用同一条挂机序列）。
+      save.rng.channels = createChannelRng(save.rng.seed)
       dirty = true
     }
 
@@ -479,7 +513,9 @@ export class GameService {
     if (!settle) return { offline, dirty, firstClearCompensated }
     const before = JSON.stringify([save.lastTickAt, save.idle])
     const settleRng = Rng.fromSnapshot(save.rng.seed, save.rng.counter)
-    offline = settleIdleLedger(save, { now, rng: settleRng, randomSeed: serverSeed })
+    // ⚠ **挂机改版 v11**：入口预结算走**三条通道**（各自独立账本），
+    //   奖励经 `applyRewardBundle` 入库（铁律 #26）。
+    offline = settleIdleAndApply(save, { now, rng: settleRng, randomSeed: serverSeed })
     syncRngState(save, settleRng)
     dirty ||= JSON.stringify([save.lastTickAt, save.idle]) !== before
     return { offline, dirty, firstClearCompensated }

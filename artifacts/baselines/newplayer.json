@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-20T04:53:57.024Z",
+  "generatedAt": "2026-11-23T06:46:44.381Z",
   "seedBase": 20260105,
   "seedCount": 3,
   "dayHours": 24,
@@ -54,253 +54,253 @@
               "rarity": "N"
             }
           ],
-          "power": 194991.2605635746,
+          "power": 120968.21782235478,
           "levels": {
-            "xiangyu": 96,
-            "fanli": 96,
-            "shenkuo": 96,
-            "yuchigong": 96,
-            "wentianxiang": 96,
-            "xuxiake": 96
+            "xiangyu": 94,
+            "fanli": 94,
+            "shenkuo": 93,
+            "yuchigong": 93,
+            "wentianxiang": 93,
+            "xuxiake": 93
           },
-          "clearedStage": 123,
-          "blockedAtStage": 124,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
           "bossAvgRounds": 2,
-          "firstRealmBreakHour": 10,
+          "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 14,
-              "level": 11,
-              "power": 12139.12482094446,
-              "silver": 67770,
+              "clearedStage": 4,
+              "level": 13,
+              "power": 7815.061387437541,
+              "silver": 64689,
               "exp": 0,
-              "relics": 546
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
-              "level": 22,
-              "power": 16872.699869415028,
-              "silver": 87164,
+              "clearedStage": 8,
+              "level": 23,
+              "power": 11058.311558736166,
+              "silver": 79741,
               "exp": 0,
-              "relics": 1146
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 80256,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 13712.593301435998,
+              "silver": 3258,
               "exp": 0,
-              "relics": 1155
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 73856,
+              "clearedStage": 16,
+              "level": 33,
+              "power": 16140.507386073883,
+              "silver": 192,
               "exp": 0,
-              "relics": 1155
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 60256,
+              "clearedStage": 20,
+              "level": 38,
+              "power": 18886.64698137049,
+              "silver": 119,
               "exp": 0,
-              "relics": 1155
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 256,
+              "clearedStage": 24,
+              "level": 42,
+              "power": 21954.13715836322,
+              "silver": 335,
               "exp": 0,
-              "relics": 1155
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 39,
-              "level": 36,
-              "power": 27075.199388868685,
-              "silver": 49117,
+              "clearedStage": 28,
+              "level": 46,
+              "power": 24834.30609699549,
+              "silver": 186,
               "exp": 0,
-              "relics": 1755
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 57,
-              "level": 48,
-              "power": 36875.594536320525,
-              "silver": 103237,
+              "clearedStage": 32,
+              "level": 55,
+              "power": 32293.081206807932,
+              "silver": 288,
               "exp": 0,
-              "relics": 2355
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 67,
-              "level": 48,
-              "power": 37466.19436675399,
-              "silver": 15428,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 41763.46221060696,
+              "silver": 156,
               "exp": 0,
-              "relics": 2370
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 68,
-              "level": 62,
-              "power": 63625.83589799187,
-              "silver": 38623,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 45788.41103644623,
+              "silver": 268,
               "exp": 0,
-              "relics": 2970
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 84,
-              "level": 66,
-              "power": 69763.52843090877,
-              "silver": 324102,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 49269.036449418345,
+              "silver": 167,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 87,
-              "level": 66,
-              "power": 76930.76755912113,
-              "silver": 45,
+              "clearedStage": 48,
+              "level": 65,
+              "power": 51468.87327814244,
+              "silver": 13,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 90,
-              "level": 69,
-              "power": 86341.21355118527,
-              "silver": 173573,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 54069.62966186453,
+              "silver": 197,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 86341.21355118527,
-              "silver": 133469,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 57002.480642592986,
+              "silver": 106,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
+              "clearedStage": 60,
               "level": 69,
-              "power": 86341.21355118527,
-              "silver": 90269,
+              "power": 59913.57620418357,
+              "silver": 5,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 92,
+              "clearedStage": 64,
               "level": 72,
-              "power": 92272.73853950737,
-              "silver": 351777,
+              "power": 66993.27000736415,
+              "silver": 397,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 101344.67218000133,
-              "silver": 373,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 71673.34393872842,
+              "silver": 16740,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 110592.26410346087,
-              "silver": 175397,
+              "clearedStage": 72,
+              "level": 77,
+              "power": 77405.86602059595,
+              "silver": 81705,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 114796.39070056757,
-              "silver": 18977,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 82764.21447336537,
+              "silver": 147903,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 92,
-              "level": 77,
-              "power": 121827.62499103624,
-              "silver": 285955,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 87559.14592118985,
+              "silver": 256799,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 123,
-              "level": 82,
-              "power": 139726.4854588026,
-              "silver": 769095,
+              "clearedStage": 84,
+              "level": 84,
+              "power": 92498.23091614195,
+              "silver": 364605,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 123,
-              "level": 87,
-              "power": 158864.58878898717,
-              "silver": 1252008,
+              "clearedStage": 88,
+              "level": 86,
+              "power": 98419.51581306857,
+              "silver": 475839,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 123,
-              "level": 92,
-              "power": 177414.05134214397,
-              "silver": 1734916,
+              "clearedStage": 92,
+              "level": 88,
+              "power": 105242.58219810686,
+              "silver": 585523,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 123,
-              "level": 96,
-              "power": 194991.2605635746,
-              "silver": 2248098,
+              "clearedStage": 96,
+              "level": 93,
+              "power": 120968.21782235478,
+              "silver": 943592,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 2248098,
-            "crystals": 5100,
+            "silver": 943592,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 8929,
-            "relicStones": 1186,
+            "skillMats": 42679,
+            "relicStones": 35375,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 7242000,
+          "relics": 24,
+          "expFed": 6533000,
           "gaps": {
-            "expToNextLevel": 45997,
+            "expToNextLevel": 30446,
             "skillMatShort": {
               "skillMatEarth": 0,
               "skillMatWater": 0,
@@ -314,15 +314,15 @@
             "powerShort": 0
           },
           "perHour": {
-            "silver": 513182,
-            "exp": 1016000,
-            "skillMats": 0,
-            "relicStones": 0,
+            "silver": 358069,
+            "exp": 1156000,
+            "skillMats": 2156,
+            "relicStones": 1831,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": 0.27163582677165354,
-          "expPerBattle": 1693
+          "farmToNextLevelHours": 0.1580242214532872,
+          "expPerRoll": 1927
         },
         {
           "label": "P2 SSR+SR 混编",
@@ -359,253 +359,253 @@
               "rarity": "N"
             }
           ],
-          "power": 194991.2605635746,
+          "power": 120968.21782235478,
           "levels": {
-            "xiangyu": 96,
-            "fanli": 96,
-            "shenkuo": 96,
-            "yuchigong": 96,
-            "wentianxiang": 96,
-            "xuxiake": 96
+            "xiangyu": 94,
+            "fanli": 94,
+            "shenkuo": 93,
+            "yuchigong": 93,
+            "wentianxiang": 93,
+            "xuxiake": 93
           },
-          "clearedStage": 123,
-          "blockedAtStage": 124,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
           "bossAvgRounds": 2,
-          "firstRealmBreakHour": 10,
+          "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 14,
-              "level": 11,
-              "power": 12139.12482094446,
-              "silver": 67770,
+              "clearedStage": 4,
+              "level": 13,
+              "power": 7815.061387437541,
+              "silver": 64689,
               "exp": 0,
-              "relics": 546
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
-              "level": 22,
-              "power": 16872.699869415028,
-              "silver": 87164,
+              "clearedStage": 8,
+              "level": 23,
+              "power": 11058.311558736166,
+              "silver": 79741,
               "exp": 0,
-              "relics": 1146
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 80256,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 13712.593301435998,
+              "silver": 3258,
               "exp": 0,
-              "relics": 1155
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 73856,
+              "clearedStage": 16,
+              "level": 33,
+              "power": 16140.507386073883,
+              "silver": 192,
               "exp": 0,
-              "relics": 1155
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 60256,
+              "clearedStage": 20,
+              "level": 38,
+              "power": 18886.64698137049,
+              "silver": 119,
               "exp": 0,
-              "relics": 1155
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 256,
+              "clearedStage": 24,
+              "level": 42,
+              "power": 21954.13715836322,
+              "silver": 335,
               "exp": 0,
-              "relics": 1155
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 39,
-              "level": 36,
-              "power": 27075.199388868685,
-              "silver": 49117,
+              "clearedStage": 28,
+              "level": 46,
+              "power": 24834.30609699549,
+              "silver": 186,
               "exp": 0,
-              "relics": 1755
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 57,
-              "level": 48,
-              "power": 36875.594536320525,
-              "silver": 103237,
+              "clearedStage": 32,
+              "level": 55,
+              "power": 32293.081206807932,
+              "silver": 288,
               "exp": 0,
-              "relics": 2355
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 67,
-              "level": 48,
-              "power": 37466.19436675399,
-              "silver": 15428,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 41763.46221060696,
+              "silver": 156,
               "exp": 0,
-              "relics": 2370
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 68,
-              "level": 62,
-              "power": 63625.83589799187,
-              "silver": 38623,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 45788.41103644623,
+              "silver": 268,
               "exp": 0,
-              "relics": 2970
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 84,
-              "level": 66,
-              "power": 69763.52843090877,
-              "silver": 324102,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 49269.036449418345,
+              "silver": 167,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 87,
-              "level": 66,
-              "power": 76930.76755912113,
-              "silver": 45,
+              "clearedStage": 48,
+              "level": 65,
+              "power": 51468.87327814244,
+              "silver": 13,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 90,
-              "level": 69,
-              "power": 86341.21355118527,
-              "silver": 173573,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 54069.62966186453,
+              "silver": 197,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 86341.21355118527,
-              "silver": 133469,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 57002.480642592986,
+              "silver": 106,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
+              "clearedStage": 60,
               "level": 69,
-              "power": 86341.21355118527,
-              "silver": 90269,
+              "power": 59913.57620418357,
+              "silver": 5,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 92,
+              "clearedStage": 64,
               "level": 72,
-              "power": 92272.73853950737,
-              "silver": 351777,
+              "power": 66993.27000736415,
+              "silver": 397,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 101344.67218000133,
-              "silver": 373,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 71673.34393872842,
+              "silver": 16740,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 110592.26410346087,
-              "silver": 175397,
+              "clearedStage": 72,
+              "level": 77,
+              "power": 77405.86602059595,
+              "silver": 81705,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 114796.39070056757,
-              "silver": 18977,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 82764.21447336537,
+              "silver": 147903,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 92,
-              "level": 77,
-              "power": 121827.62499103624,
-              "silver": 285955,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 87559.14592118985,
+              "silver": 256799,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 123,
-              "level": 82,
-              "power": 139726.4854588026,
-              "silver": 769095,
+              "clearedStage": 84,
+              "level": 84,
+              "power": 92498.23091614195,
+              "silver": 364605,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 123,
-              "level": 87,
-              "power": 158864.58878898717,
-              "silver": 1252008,
+              "clearedStage": 88,
+              "level": 86,
+              "power": 98419.51581306857,
+              "silver": 475839,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 123,
-              "level": 92,
-              "power": 177414.05134214397,
-              "silver": 1734916,
+              "clearedStage": 92,
+              "level": 88,
+              "power": 105242.58219810686,
+              "silver": 585523,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 123,
-              "level": 96,
-              "power": 194991.2605635746,
-              "silver": 2248098,
+              "clearedStage": 96,
+              "level": 93,
+              "power": 120968.21782235478,
+              "silver": 943592,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 2248098,
-            "crystals": 5100,
+            "silver": 943592,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 8929,
-            "relicStones": 1186,
+            "skillMats": 42679,
+            "relicStones": 35375,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 7242000,
+          "relics": 24,
+          "expFed": 6533000,
           "gaps": {
-            "expToNextLevel": 45997,
+            "expToNextLevel": 30446,
             "skillMatShort": {
               "skillMatEarth": 0,
               "skillMatWater": 0,
@@ -619,15 +619,15 @@
             "powerShort": 0
           },
           "perHour": {
-            "silver": 513182,
-            "exp": 1016000,
-            "skillMats": 0,
-            "relicStones": 0,
+            "silver": 358069,
+            "exp": 1156000,
+            "skillMats": 2156,
+            "relicStones": 1831,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": 0.27163582677165354,
-          "expPerBattle": 1693
+          "farmToNextLevelHours": 0.1580242214532872,
+          "expPerRoll": 1927
         },
         {
           "label": "P3 SSR 主导",
@@ -664,253 +664,253 @@
               "rarity": "N"
             }
           ],
-          "power": 194991.2605635746,
+          "power": 120968.21782235478,
           "levels": {
-            "xiangyu": 96,
-            "fanli": 96,
-            "shenkuo": 96,
-            "yuchigong": 96,
-            "wentianxiang": 96,
-            "xuxiake": 96
+            "xiangyu": 94,
+            "fanli": 94,
+            "shenkuo": 93,
+            "yuchigong": 93,
+            "wentianxiang": 93,
+            "xuxiake": 93
           },
-          "clearedStage": 123,
-          "blockedAtStage": 124,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
           "bossAvgRounds": 2,
-          "firstRealmBreakHour": 10,
+          "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 14,
-              "level": 11,
-              "power": 12139.12482094446,
-              "silver": 67770,
+              "clearedStage": 4,
+              "level": 13,
+              "power": 7815.061387437541,
+              "silver": 64689,
               "exp": 0,
-              "relics": 546
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
-              "level": 22,
-              "power": 16872.699869415028,
-              "silver": 87164,
+              "clearedStage": 8,
+              "level": 23,
+              "power": 11058.311558736166,
+              "silver": 79741,
               "exp": 0,
-              "relics": 1146
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 80256,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 13712.593301435998,
+              "silver": 3258,
               "exp": 0,
-              "relics": 1155
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 73856,
+              "clearedStage": 16,
+              "level": 33,
+              "power": 16140.507386073883,
+              "silver": 192,
               "exp": 0,
-              "relics": 1155
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 60256,
+              "clearedStage": 20,
+              "level": 38,
+              "power": 18886.64698137049,
+              "silver": 119,
               "exp": 0,
-              "relics": 1155
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 30,
-              "level": 22,
-              "power": 17079.84806096507,
-              "silver": 256,
+              "clearedStage": 24,
+              "level": 42,
+              "power": 21954.13715836322,
+              "silver": 335,
               "exp": 0,
-              "relics": 1155
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 39,
-              "level": 36,
-              "power": 27075.199388868685,
-              "silver": 49117,
+              "clearedStage": 28,
+              "level": 46,
+              "power": 24834.30609699549,
+              "silver": 186,
               "exp": 0,
-              "relics": 1755
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 57,
-              "level": 48,
-              "power": 36875.594536320525,
-              "silver": 103237,
+              "clearedStage": 32,
+              "level": 55,
+              "power": 32293.081206807932,
+              "silver": 288,
               "exp": 0,
-              "relics": 2355
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 67,
-              "level": 48,
-              "power": 37466.19436675399,
-              "silver": 15428,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 41763.46221060696,
+              "silver": 156,
               "exp": 0,
-              "relics": 2370
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 68,
-              "level": 62,
-              "power": 63625.83589799187,
-              "silver": 38623,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 45788.41103644623,
+              "silver": 268,
               "exp": 0,
-              "relics": 2970
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 84,
-              "level": 66,
-              "power": 69763.52843090877,
-              "silver": 324102,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 49269.036449418345,
+              "silver": 167,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 87,
-              "level": 66,
-              "power": 76930.76755912113,
-              "silver": 45,
+              "clearedStage": 48,
+              "level": 65,
+              "power": 51468.87327814244,
+              "silver": 13,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 90,
-              "level": 69,
-              "power": 86341.21355118527,
-              "silver": 173573,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 54069.62966186453,
+              "silver": 197,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 86341.21355118527,
-              "silver": 133469,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 57002.480642592986,
+              "silver": 106,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
+              "clearedStage": 60,
               "level": 69,
-              "power": 86341.21355118527,
-              "silver": 90269,
+              "power": 59913.57620418357,
+              "silver": 5,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 92,
+              "clearedStage": 64,
               "level": 72,
-              "power": 92272.73853950737,
-              "silver": 351777,
+              "power": 66993.27000736415,
+              "silver": 397,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 101344.67218000133,
-              "silver": 373,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 71673.34393872842,
+              "silver": 16740,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 110592.26410346087,
-              "silver": 175397,
+              "clearedStage": 72,
+              "level": 77,
+              "power": 77405.86602059595,
+              "silver": 81705,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 114796.39070056757,
-              "silver": 18977,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 82764.21447336537,
+              "silver": 147903,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 92,
-              "level": 77,
-              "power": 121827.62499103624,
-              "silver": 285955,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 87559.14592118985,
+              "silver": 256799,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 123,
-              "level": 82,
-              "power": 139726.4854588026,
-              "silver": 769095,
+              "clearedStage": 84,
+              "level": 84,
+              "power": 92498.23091614195,
+              "silver": 364605,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 123,
-              "level": 87,
-              "power": 158864.58878898717,
-              "silver": 1252008,
+              "clearedStage": 88,
+              "level": 86,
+              "power": 98419.51581306857,
+              "silver": 475839,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 123,
-              "level": 92,
-              "power": 177414.05134214397,
-              "silver": 1734916,
+              "clearedStage": 92,
+              "level": 88,
+              "power": 105242.58219810686,
+              "silver": 585523,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 123,
-              "level": 96,
-              "power": 194991.2605635746,
-              "silver": 2248098,
+              "clearedStage": 96,
+              "level": 93,
+              "power": 120968.21782235478,
+              "silver": 943592,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 2248098,
-            "crystals": 5100,
+            "silver": 943592,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 8929,
-            "relicStones": 1186,
+            "skillMats": 42679,
+            "relicStones": 35375,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 7242000,
+          "relics": 24,
+          "expFed": 6533000,
           "gaps": {
-            "expToNextLevel": 45997,
+            "expToNextLevel": 30446,
             "skillMatShort": {
               "skillMatEarth": 0,
               "skillMatWater": 0,
@@ -924,15 +924,15 @@
             "powerShort": 0
           },
           "perHour": {
-            "silver": 513182,
-            "exp": 1016000,
-            "skillMats": 0,
-            "relicStones": 0,
+            "silver": 358069,
+            "exp": 1156000,
+            "skillMats": 2156,
+            "relicStones": 1831,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": 0.27163582677165354,
-          "expPerBattle": 1693
+          "farmToNextLevelHours": 0.1580242214532872,
+          "expPerRoll": 1927
         },
         {
           "label": "P4 1SSR+N（下限）",
@@ -969,253 +969,253 @@
               "rarity": "N"
             }
           ],
-          "power": 208023.64986626382,
+          "power": 113487.85396934625,
           "levels": {
-            "xiangyu": 100,
-            "fanli": 99,
-            "shenkuo": 99,
-            "wentianxiang": 99,
-            "xuxiake": 99,
-            "fuhao": 99
+            "xiangyu": 94,
+            "fanli": 93,
+            "shenkuo": 93,
+            "wentianxiang": 93,
+            "xuxiake": 93,
+            "fuhao": 93
           },
-          "clearedStage": 123,
-          "blockedAtStage": 124,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
-          "bossAvgRounds": 2,
-          "firstRealmBreakHour": 7,
+          "bossAvgRounds": 2.65,
+          "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 11,
-              "level": 11,
-              "power": 11207.64921361039,
-              "silver": 67939,
+              "clearedStage": 4,
+              "level": 13,
+              "power": 7588.91405122357,
+              "silver": 64689,
               "exp": 0,
-              "relics": 546
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 28,
-              "level": 21,
-              "power": 16211.079925796394,
-              "silver": 87373,
+              "clearedStage": 8,
+              "level": 23,
+              "power": 10720.073585067963,
+              "silver": 79741,
               "exp": 0,
-              "relics": 1146
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16211.079925796394,
-              "silver": 80456,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 13297.89943491052,
+              "silver": 3258,
               "exp": 0,
-              "relics": 1155
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16211.079925796394,
-              "silver": 73256,
+              "clearedStage": 16,
+              "level": 33,
+              "power": 15462.35797271271,
+              "silver": 592,
               "exp": 0,
-              "relics": 1155
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 30,
-              "level": 26,
-              "power": 19249.03858463431,
-              "silver": 84582,
+              "clearedStage": 20,
+              "level": 38,
+              "power": 18005.06170175169,
+              "silver": 323,
               "exp": 0,
-              "relics": 1700
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 44,
-              "level": 49,
-              "power": 37535.696190367984,
-              "silver": 93123,
+              "clearedStage": 24,
+              "level": 42,
+              "power": 20308.546454213254,
+              "silver": 340,
               "exp": 0,
-              "relics": 2829
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 68,
-              "level": 62,
-              "power": 62758.25741683811,
-              "silver": 220283,
+              "clearedStage": 28,
+              "level": 46,
+              "power": 22608.825995158815,
+              "silver": 27,
               "exp": 0,
-              "relics": 3000
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 74,
-              "level": 62,
-              "power": 67161.29645356373,
-              "silver": 242,
+              "clearedStage": 32,
+              "level": 55,
+              "power": 29429.10532912559,
+              "silver": 20530,
               "exp": 0,
-              "relics": 3000
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 86,
-              "level": 66,
-              "power": 78210.85574448826,
-              "silver": 68266,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 38094.82035980804,
+              "silver": 474,
               "exp": 0,
-              "relics": 3000
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 91,
-              "level": 66,
-              "power": 78210.85574448826,
-              "silver": 18206,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 41973.96716709307,
+              "silver": 42,
               "exp": 0,
-              "relics": 3000
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 91,
-              "level": 69,
-              "power": 84644.76995923545,
-              "silver": 299150,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 44510.9693219535,
+              "silver": 422,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 91625.6644338541,
-              "silver": 390,
+              "clearedStage": 48,
+              "level": 65,
+              "power": 46544.37725219987,
+              "silver": 245,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 101589.23388883843,
-              "silver": 112857,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 49365.35679988411,
+              "silver": 460,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 101589.23388883843,
-              "silver": 70230,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 52146.261077798066,
+              "silver": 369,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 101589.23388883843,
-              "silver": 24630,
+              "clearedStage": 60,
+              "level": 69,
+              "power": 54719.63523656725,
+              "silver": 268,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 108328.95849907001,
-              "silver": 288218,
+              "clearedStage": 64,
+              "level": 72,
+              "power": 60832.54898238668,
+              "silver": 160,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 112580.04813050372,
-              "silver": 136596,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 66269.53058707883,
+              "silver": 703,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 92,
+              "clearedStage": 72,
               "level": 77,
-              "power": 119591.5992085314,
-              "silver": 402023,
+              "power": 71193.98590226941,
+              "silver": 81668,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 92,
-              "level": 79,
-              "power": 126237.70799402216,
-              "silver": 668016,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 76856.10520446116,
+              "silver": 147904,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 92,
-              "level": 81,
-              "power": 132699.57863317415,
-              "silver": 935266,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 82724.77332630072,
+              "silver": 256807,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 123,
-              "level": 86,
-              "power": 150385.1804398901,
-              "silver": 1446516,
+              "clearedStage": 84,
+              "level": 84,
+              "power": 88567.10733512392,
+              "silver": 364513,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 123,
-              "level": 90,
-              "power": 168005.59328358085,
-              "silver": 1962055,
+              "clearedStage": 88,
+              "level": 86,
+              "power": 93219.59541504447,
+              "silver": 475843,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 123,
-              "level": 95,
-              "power": 188698.26822288585,
-              "silver": 2478422,
+              "clearedStage": 92,
+              "level": 88,
+              "power": 98973.13635572288,
+              "silver": 585396,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 123,
-              "level": 99,
-              "power": 208023.64986626382,
-              "silver": 2982098,
+              "clearedStage": 96,
+              "level": 93,
+              "power": 113487.85396934625,
+              "silver": 942755,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 2982098,
-            "crystals": 5100,
+            "silver": 942755,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 4629,
-            "relicStones": 1178,
+            "skillMats": 42677,
+            "relicStones": 26220,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 8168000,
+          "relics": 24,
+          "expFed": 6519000,
           "gaps": {
-            "expToNextLevel": 39123,
+            "expToNextLevel": 446,
             "skillMatShort": {
               "skillMatEarth": 0,
               "skillMatWater": 0,
@@ -1229,15 +1229,15 @@
             "powerShort": 0
           },
           "perHour": {
-            "silver": 503676,
-            "exp": 1098000,
-            "skillMats": 0,
-            "relicStones": 0,
+            "silver": 357359,
+            "exp": 1156000,
+            "skillMats": 2156,
+            "relicStones": 1849,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": 0.21378688524590164,
-          "expPerBattle": 1830
+          "farmToNextLevelHours": 0.002314878892733564,
+          "expPerRoll": 1927
         }
       ],
       "gachaIncome": {
@@ -1296,253 +1296,253 @@
               "rarity": "N"
             }
           ],
-          "power": 494961.90190630866,
+          "power": 129717.5804692682,
           "levels": {
-            "xiangyu": 122,
-            "bianque": 122,
-            "mayuan": 122,
-            "guoziyi": 122,
-            "wentianxiang": 121,
-            "banzhao": 121
+            "xiangyu": 94,
+            "bianque": 94,
+            "mayuan": 94,
+            "guoziyi": 94,
+            "wentianxiang": 94,
+            "banzhao": 94
           },
-          "clearedStage": 154,
-          "blockedAtStage": 155,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
-          "bossAvgRounds": 1,
-          "firstRealmBreakHour": 7,
+          "bossAvgRounds": 2,
+          "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 15,
-              "level": 10,
-              "power": 12100.913990319224,
-              "silver": 67946,
+              "clearedStage": 4,
+              "level": 12,
+              "power": 8522.516100508417,
+              "silver": 64592,
               "exp": 0,
-              "relics": 560
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
-              "level": 18,
-              "power": 15419.971352432729,
-              "silver": 87241,
+              "clearedStage": 8,
+              "level": 23,
+              "power": 11869.032228807104,
+              "silver": 473,
               "exp": 0,
-              "relics": 1160
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 24,
-              "power": 19170.385438766192,
-              "silver": 104806,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 14608.780146639529,
+              "silver": 3169,
               "exp": 0,
-              "relics": 1705
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 43,
-              "level": 38,
-              "power": 29073.261214601782,
-              "silver": 158190,
+              "clearedStage": 16,
+              "level": 34,
+              "power": 17710.940305977772,
+              "silver": 50,
               "exp": 0,
-              "relics": 2305
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 60,
-              "level": 48,
-              "power": 38588.958721072435,
-              "silver": 211502,
+              "clearedStage": 20,
+              "level": 39,
+              "power": 20851.90303042091,
+              "silver": 8,
               "exp": 0,
-              "relics": 2905
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 69,
-              "level": 49,
-              "power": 39626.59272550945,
-              "silver": 127388,
+              "clearedStage": 24,
+              "level": 43,
+              "power": 23613.64753253024,
+              "silver": 302,
               "exp": 0,
-              "relics": 2937
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 69,
-              "level": 62,
-              "power": 66666.23533828933,
-              "silver": 282996,
+              "clearedStage": 28,
+              "level": 47,
+              "power": 26606.383266202163,
+              "silver": 26,
               "exp": 0,
-              "relics": 3000
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 83,
-              "level": 62,
-              "power": 72641.0743475786,
-              "silver": 311,
+              "clearedStage": 32,
+              "level": 56,
+              "power": 33961.735904318964,
+              "silver": 200,
               "exp": 0,
-              "relics": 3000
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 88,
-              "level": 66,
-              "power": 82868.89865541445,
-              "silver": 124278,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 43110.3804535085,
+              "silver": 351,
               "exp": 0,
-              "relics": 3000
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 92,
-              "level": 66,
-              "power": 82868.89865541445,
-              "silver": 55269,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 47517.38965774869,
+              "silver": 299,
               "exp": 0,
-              "relics": 3000
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 92,
-              "level": 66,
-              "power": 82868.89865541445,
-              "silver": 19269,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 51720.05774099591,
+              "silver": 339,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 88759.69452919997,
-              "silver": 265302,
+              "clearedStage": 48,
+              "level": 65,
+              "power": 55976.99734420736,
+              "silver": 130,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 95264.35333831832,
-              "silver": 499,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 58282.98847896434,
+              "silver": 494,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 71,
-              "power": 106651.92654904968,
-              "silver": 81339,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 61136.43705624124,
+              "silver": 430,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
-              "level": 71,
-              "power": 106957.15432001103,
-              "silver": 39139,
+              "clearedStage": 60,
+              "level": 69,
+              "power": 63945.58661318846,
+              "silver": 240,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 115,
-              "level": 78,
-              "power": 126996.3870797481,
-              "silver": 572107,
+              "clearedStage": 64,
+              "level": 72,
+              "power": 70471.47693386152,
+              "silver": 558,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 123,
-              "level": 84,
-              "power": 145658.98868279782,
-              "silver": 1052570,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 76234.87679037852,
+              "silver": 20429,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 123,
-              "level": 89,
-              "power": 164055.05095695925,
-              "silver": 1538858,
+              "clearedStage": 72,
+              "level": 77,
+              "power": 81598.1469737733,
+              "silver": 83751,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 135,
-              "level": 98,
-              "power": 210125.9679756084,
-              "silver": 2490051,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 87275.6970818589,
+              "silver": 150623,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 143,
-              "level": 108,
-              "power": 269620.2781147218,
-              "silver": 3698894,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 92770.95596728413,
+              "silver": 259362,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 151,
-              "level": 116,
-              "power": 328310.3838499958,
-              "silver": 4924581,
+              "clearedStage": 84,
+              "level": 84,
+              "power": 99544.23862916828,
+              "silver": 367601,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 154,
-              "level": 121,
-              "power": 467737.7290301155,
-              "silver": 5793499,
+              "clearedStage": 88,
+              "level": 86,
+              "power": 107330.90311926493,
+              "silver": 478436,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 154,
-              "level": 121,
-              "power": 486911.8912029721,
-              "silver": 5745636,
+              "clearedStage": 92,
+              "level": 88,
+              "power": 112969.20931510463,
+              "silver": 590102,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 154,
-              "level": 121,
-              "power": 494961.90190630866,
-              "silver": 4672116,
+              "clearedStage": 96,
+              "level": 94,
+              "power": 129717.5804692682,
+              "silver": 944687,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 4672116,
-            "crystals": 5700,
+            "silver": 944687,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 4310,
-            "relicStones": 2120,
+            "skillMats": 44803,
+            "relicStones": 35345,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 17605000,
+          "relics": 24,
+          "expFed": 6721000,
           "gaps": {
-            "expToNextLevel": 61325,
+            "expToNextLevel": 19169,
             "skillMatShort": {
               "skillMatEarth": 0,
               "skillMatWater": 0,
@@ -1550,21 +1550,21 @@
               "skillMatFire": 0
             },
             "relicStoneShort": {
-              "relicStoneTier2": 81
+              "relicStoneTier2": 28
             },
             "silverShort": 0,
             "powerShort": 0
           },
           "perHour": {
-            "silver": -1073520,
-            "exp": 0,
-            "skillMats": 0,
-            "relicStones": 2704,
+            "silver": 354585,
+            "exp": 1264000,
+            "skillMats": 2146,
+            "relicStones": 1827,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": null,
-          "expPerBattle": 0
+          "farmToNextLevelHours": 0.09099208860759495,
+          "expPerRoll": 2107
         },
         {
           "label": "P2 SSR+SR 混编",
@@ -1601,253 +1601,253 @@
               "rarity": "N"
             }
           ],
-          "power": 494961.90190630866,
+          "power": 129717.5804692682,
           "levels": {
-            "xiangyu": 122,
-            "bianque": 122,
-            "mayuan": 122,
-            "guoziyi": 122,
-            "wentianxiang": 121,
-            "banzhao": 121
+            "xiangyu": 94,
+            "bianque": 94,
+            "mayuan": 94,
+            "guoziyi": 94,
+            "wentianxiang": 94,
+            "banzhao": 94
           },
-          "clearedStage": 154,
-          "blockedAtStage": 155,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
-          "bossAvgRounds": 1,
-          "firstRealmBreakHour": 7,
+          "bossAvgRounds": 2,
+          "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 15,
-              "level": 10,
-              "power": 12100.913990319224,
-              "silver": 67946,
+              "clearedStage": 4,
+              "level": 12,
+              "power": 8522.516100508417,
+              "silver": 64592,
               "exp": 0,
-              "relics": 560
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
-              "level": 18,
-              "power": 15419.971352432729,
-              "silver": 87241,
+              "clearedStage": 8,
+              "level": 23,
+              "power": 11869.032228807104,
+              "silver": 473,
               "exp": 0,
-              "relics": 1160
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 24,
-              "power": 19170.385438766192,
-              "silver": 104806,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 14608.780146639529,
+              "silver": 3169,
               "exp": 0,
-              "relics": 1705
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 43,
-              "level": 38,
-              "power": 29073.261214601782,
-              "silver": 158190,
+              "clearedStage": 16,
+              "level": 34,
+              "power": 17710.940305977772,
+              "silver": 50,
               "exp": 0,
-              "relics": 2305
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 60,
-              "level": 48,
-              "power": 38588.958721072435,
-              "silver": 211502,
+              "clearedStage": 20,
+              "level": 39,
+              "power": 20851.90303042091,
+              "silver": 8,
               "exp": 0,
-              "relics": 2905
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 69,
-              "level": 49,
-              "power": 39626.59272550945,
-              "silver": 127388,
+              "clearedStage": 24,
+              "level": 43,
+              "power": 23613.64753253024,
+              "silver": 302,
               "exp": 0,
-              "relics": 2937
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 69,
-              "level": 62,
-              "power": 66666.23533828933,
-              "silver": 282996,
+              "clearedStage": 28,
+              "level": 47,
+              "power": 26606.383266202163,
+              "silver": 26,
               "exp": 0,
-              "relics": 3000
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 83,
-              "level": 62,
-              "power": 72641.0743475786,
-              "silver": 311,
+              "clearedStage": 32,
+              "level": 56,
+              "power": 33961.735904318964,
+              "silver": 200,
               "exp": 0,
-              "relics": 3000
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 88,
-              "level": 66,
-              "power": 82868.89865541445,
-              "silver": 124278,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 43110.3804535085,
+              "silver": 351,
               "exp": 0,
-              "relics": 3000
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 92,
-              "level": 66,
-              "power": 82868.89865541445,
-              "silver": 55269,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 47517.38965774869,
+              "silver": 299,
               "exp": 0,
-              "relics": 3000
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 92,
-              "level": 66,
-              "power": 82868.89865541445,
-              "silver": 19269,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 51720.05774099591,
+              "silver": 339,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 88759.69452919997,
-              "silver": 265302,
+              "clearedStage": 48,
+              "level": 65,
+              "power": 55976.99734420736,
+              "silver": 130,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 95264.35333831832,
-              "silver": 499,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 58282.98847896434,
+              "silver": 494,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 71,
-              "power": 106651.92654904968,
-              "silver": 81339,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 61136.43705624124,
+              "silver": 430,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
-              "level": 71,
-              "power": 106957.15432001103,
-              "silver": 39139,
+              "clearedStage": 60,
+              "level": 69,
+              "power": 63945.58661318846,
+              "silver": 240,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 115,
-              "level": 78,
-              "power": 126996.3870797481,
-              "silver": 572107,
+              "clearedStage": 64,
+              "level": 72,
+              "power": 70471.47693386152,
+              "silver": 558,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 123,
-              "level": 84,
-              "power": 145658.98868279782,
-              "silver": 1052570,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 76234.87679037852,
+              "silver": 20429,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 123,
-              "level": 89,
-              "power": 164055.05095695925,
-              "silver": 1538858,
+              "clearedStage": 72,
+              "level": 77,
+              "power": 81598.1469737733,
+              "silver": 83751,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 135,
-              "level": 98,
-              "power": 210125.9679756084,
-              "silver": 2490051,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 87275.6970818589,
+              "silver": 150623,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 143,
-              "level": 108,
-              "power": 269620.2781147218,
-              "silver": 3698894,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 92770.95596728413,
+              "silver": 259362,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 151,
-              "level": 116,
-              "power": 328310.3838499958,
-              "silver": 4924581,
+              "clearedStage": 84,
+              "level": 84,
+              "power": 99544.23862916828,
+              "silver": 367601,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 154,
-              "level": 121,
-              "power": 467737.7290301155,
-              "silver": 5793499,
+              "clearedStage": 88,
+              "level": 86,
+              "power": 107330.90311926493,
+              "silver": 478436,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 154,
-              "level": 121,
-              "power": 486911.8912029721,
-              "silver": 5745636,
+              "clearedStage": 92,
+              "level": 88,
+              "power": 112969.20931510463,
+              "silver": 590102,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 154,
-              "level": 121,
-              "power": 494961.90190630866,
-              "silver": 4672116,
+              "clearedStage": 96,
+              "level": 94,
+              "power": 129717.5804692682,
+              "silver": 944687,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 4672116,
-            "crystals": 5700,
+            "silver": 944687,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 4310,
-            "relicStones": 2120,
+            "skillMats": 44803,
+            "relicStones": 35345,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 17605000,
+          "relics": 24,
+          "expFed": 6721000,
           "gaps": {
-            "expToNextLevel": 61325,
+            "expToNextLevel": 19169,
             "skillMatShort": {
               "skillMatEarth": 0,
               "skillMatWater": 0,
@@ -1855,21 +1855,21 @@
               "skillMatFire": 0
             },
             "relicStoneShort": {
-              "relicStoneTier2": 81
+              "relicStoneTier2": 28
             },
             "silverShort": 0,
             "powerShort": 0
           },
           "perHour": {
-            "silver": -1073520,
-            "exp": 0,
-            "skillMats": 0,
-            "relicStones": 2704,
+            "silver": 354585,
+            "exp": 1264000,
+            "skillMats": 2146,
+            "relicStones": 1827,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": null,
-          "expPerBattle": 0
+          "farmToNextLevelHours": 0.09099208860759495,
+          "expPerRoll": 2107
         },
         {
           "label": "P3 SSR 主导",
@@ -1906,253 +1906,253 @@
               "rarity": "N"
             }
           ],
-          "power": 494961.90190630866,
+          "power": 129717.5804692682,
           "levels": {
-            "xiangyu": 122,
-            "bianque": 122,
-            "mayuan": 122,
-            "guoziyi": 122,
-            "wentianxiang": 121,
-            "banzhao": 121
+            "xiangyu": 94,
+            "bianque": 94,
+            "mayuan": 94,
+            "guoziyi": 94,
+            "wentianxiang": 94,
+            "banzhao": 94
           },
-          "clearedStage": 154,
-          "blockedAtStage": 155,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
-          "bossAvgRounds": 1,
-          "firstRealmBreakHour": 7,
+          "bossAvgRounds": 2,
+          "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 15,
-              "level": 10,
-              "power": 12100.913990319224,
-              "silver": 67946,
+              "clearedStage": 4,
+              "level": 12,
+              "power": 8522.516100508417,
+              "silver": 64592,
               "exp": 0,
-              "relics": 560
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
-              "level": 18,
-              "power": 15419.971352432729,
-              "silver": 87241,
+              "clearedStage": 8,
+              "level": 23,
+              "power": 11869.032228807104,
+              "silver": 473,
               "exp": 0,
-              "relics": 1160
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 24,
-              "power": 19170.385438766192,
-              "silver": 104806,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 14608.780146639529,
+              "silver": 3169,
               "exp": 0,
-              "relics": 1705
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 43,
-              "level": 38,
-              "power": 29073.261214601782,
-              "silver": 158190,
+              "clearedStage": 16,
+              "level": 34,
+              "power": 17710.940305977772,
+              "silver": 50,
               "exp": 0,
-              "relics": 2305
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 60,
-              "level": 48,
-              "power": 38588.958721072435,
-              "silver": 211502,
+              "clearedStage": 20,
+              "level": 39,
+              "power": 20851.90303042091,
+              "silver": 8,
               "exp": 0,
-              "relics": 2905
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 69,
-              "level": 49,
-              "power": 39626.59272550945,
-              "silver": 127388,
+              "clearedStage": 24,
+              "level": 43,
+              "power": 23613.64753253024,
+              "silver": 302,
               "exp": 0,
-              "relics": 2937
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 69,
-              "level": 62,
-              "power": 66666.23533828933,
-              "silver": 282996,
+              "clearedStage": 28,
+              "level": 47,
+              "power": 26606.383266202163,
+              "silver": 26,
               "exp": 0,
-              "relics": 3000
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 83,
-              "level": 62,
-              "power": 72641.0743475786,
-              "silver": 311,
+              "clearedStage": 32,
+              "level": 56,
+              "power": 33961.735904318964,
+              "silver": 200,
               "exp": 0,
-              "relics": 3000
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 88,
-              "level": 66,
-              "power": 82868.89865541445,
-              "silver": 124278,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 43110.3804535085,
+              "silver": 351,
               "exp": 0,
-              "relics": 3000
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 92,
-              "level": 66,
-              "power": 82868.89865541445,
-              "silver": 55269,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 47517.38965774869,
+              "silver": 299,
               "exp": 0,
-              "relics": 3000
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 92,
-              "level": 66,
-              "power": 82868.89865541445,
-              "silver": 19269,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 51720.05774099591,
+              "silver": 339,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 88759.69452919997,
-              "silver": 265302,
+              "clearedStage": 48,
+              "level": 65,
+              "power": 55976.99734420736,
+              "silver": 130,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 95264.35333831832,
-              "silver": 499,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 58282.98847896434,
+              "silver": 494,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 71,
-              "power": 106651.92654904968,
-              "silver": 81339,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 61136.43705624124,
+              "silver": 430,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
-              "level": 71,
-              "power": 106957.15432001103,
-              "silver": 39139,
+              "clearedStage": 60,
+              "level": 69,
+              "power": 63945.58661318846,
+              "silver": 240,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 115,
-              "level": 78,
-              "power": 126996.3870797481,
-              "silver": 572107,
+              "clearedStage": 64,
+              "level": 72,
+              "power": 70471.47693386152,
+              "silver": 558,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 123,
-              "level": 84,
-              "power": 145658.98868279782,
-              "silver": 1052570,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 76234.87679037852,
+              "silver": 20429,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 123,
-              "level": 89,
-              "power": 164055.05095695925,
-              "silver": 1538858,
+              "clearedStage": 72,
+              "level": 77,
+              "power": 81598.1469737733,
+              "silver": 83751,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 135,
-              "level": 98,
-              "power": 210125.9679756084,
-              "silver": 2490051,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 87275.6970818589,
+              "silver": 150623,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 143,
-              "level": 108,
-              "power": 269620.2781147218,
-              "silver": 3698894,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 92770.95596728413,
+              "silver": 259362,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 151,
-              "level": 116,
-              "power": 328310.3838499958,
-              "silver": 4924581,
+              "clearedStage": 84,
+              "level": 84,
+              "power": 99544.23862916828,
+              "silver": 367601,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 154,
-              "level": 121,
-              "power": 467737.7290301155,
-              "silver": 5793499,
+              "clearedStage": 88,
+              "level": 86,
+              "power": 107330.90311926493,
+              "silver": 478436,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 154,
-              "level": 121,
-              "power": 486911.8912029721,
-              "silver": 5745636,
+              "clearedStage": 92,
+              "level": 88,
+              "power": 112969.20931510463,
+              "silver": 590102,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 154,
-              "level": 121,
-              "power": 494961.90190630866,
-              "silver": 4672116,
+              "clearedStage": 96,
+              "level": 94,
+              "power": 129717.5804692682,
+              "silver": 944687,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 4672116,
-            "crystals": 5700,
+            "silver": 944687,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 4310,
-            "relicStones": 2120,
+            "skillMats": 44803,
+            "relicStones": 35345,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 17605000,
+          "relics": 24,
+          "expFed": 6721000,
           "gaps": {
-            "expToNextLevel": 61325,
+            "expToNextLevel": 19169,
             "skillMatShort": {
               "skillMatEarth": 0,
               "skillMatWater": 0,
@@ -2160,21 +2160,21 @@
               "skillMatFire": 0
             },
             "relicStoneShort": {
-              "relicStoneTier2": 81
+              "relicStoneTier2": 28
             },
             "silverShort": 0,
             "powerShort": 0
           },
           "perHour": {
-            "silver": -1073520,
-            "exp": 0,
-            "skillMats": 0,
-            "relicStones": 2704,
+            "silver": 354585,
+            "exp": 1264000,
+            "skillMats": 2146,
+            "relicStones": 1827,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": null,
-          "expPerBattle": 0
+          "farmToNextLevelHours": 0.09099208860759495,
+          "expPerRoll": 2107
         },
         {
           "label": "P4 1SSR+N（下限）",
@@ -2211,253 +2211,253 @@
               "rarity": "N"
             }
           ],
-          "power": 248873.69109904967,
+          "power": 128194.9537265323,
           "levels": {
-            "xiangyu": 106,
-            "mayuan": 106,
-            "guoziyi": 105,
-            "wentianxiang": 105,
-            "banzhao": 105,
-            "wangzhaojun": 105
+            "xiangyu": 94,
+            "mayuan": 94,
+            "guoziyi": 94,
+            "wentianxiang": 94,
+            "banzhao": 94,
+            "wangzhaojun": 94
           },
-          "clearedStage": 140,
+          "clearedStage": 96,
           "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
-          "bossAvgRounds": 2,
-          "firstRealmBreakHour": 10,
+          "bossAvgRounds": 1.9916666666666667,
+          "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 14,
+              "clearedStage": 4,
               "level": 12,
-              "power": 12424.533876792591,
-              "silver": 67466,
+              "power": 7916.977952244338,
+              "silver": 64592,
               "exp": 0,
-              "relics": 546
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16256.719746863046,
-              "silver": 86787,
+              "clearedStage": 8,
+              "level": 23,
+              "power": 11080.934881048915,
+              "silver": 34073,
               "exp": 0,
-              "relics": 1146
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16256.719746863046,
-              "silver": 79884,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 13812.947858776317,
+              "silver": 769,
               "exp": 0,
-              "relics": 1155
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16256.719746863046,
-              "silver": 72684,
+              "clearedStage": 16,
+              "level": 34,
+              "power": 16564.62319845246,
+              "silver": 443,
               "exp": 0,
-              "relics": 1155
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16256.719746863046,
-              "silver": 67084,
+              "clearedStage": 20,
+              "level": 39,
+              "power": 19558.85140001611,
+              "silver": 201,
               "exp": 0,
-              "relics": 1155
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16256.719746863046,
-              "silver": 59884,
+              "clearedStage": 24,
+              "level": 43,
+              "power": 22080.358049523307,
+              "silver": 2195,
               "exp": 0,
-              "relics": 1155
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 30,
-              "level": 26,
-              "power": 19609.09952599308,
-              "silver": 70225,
+              "clearedStage": 28,
+              "level": 47,
+              "power": 25343.343880012355,
+              "silver": 119,
               "exp": 0,
-              "relics": 1700
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 44,
-              "level": 39,
-              "power": 28949.22975046264,
-              "silver": 123715,
+              "clearedStage": 32,
+              "level": 56,
+              "power": 31792.757724968986,
+              "silver": 20474,
               "exp": 0,
-              "relics": 2300
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 60,
-              "level": 49,
-              "power": 37878.81319670145,
-              "silver": 176996,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 41285.7633841022,
+              "silver": 168,
               "exp": 0,
-              "relics": 2900
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 68,
-              "level": 66,
-              "power": 68786.24529640297,
-              "silver": 542404,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 44828.999019534924,
+              "silver": 115,
               "exp": 0,
-              "relics": 3000
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 68,
-              "level": 66,
-              "power": 78645.79428104108,
-              "silver": 96904,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 48051.442719876475,
+              "silver": 93,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 68,
-              "level": 66,
-              "power": 78752.90228602545,
-              "silver": 53804,
+              "clearedStage": 48,
+              "level": 65,
+              "power": 50412.49645545701,
+              "silver": 488,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 68,
-              "level": 66,
-              "power": 78752.90228602545,
-              "silver": 17804,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 53739.050517237934,
+              "silver": 366,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 91,
-              "level": 69,
-              "power": 85483.82946617337,
-              "silver": 273345,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 57536.558872728856,
+              "silver": 346,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
+              "clearedStage": 60,
               "level": 69,
-              "power": 92266.2740007515,
-              "silver": 386,
+              "power": 60203.17932544047,
+              "silver": 134,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 92,
-              "level": 71,
-              "power": 103039.33537501504,
-              "silver": 76807,
+              "clearedStage": 64,
+              "level": 72,
+              "power": 67599.29908944751,
+              "silver": 381,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 103348.07180085163,
-              "silver": 34053,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 75202.40716095743,
+              "silver": 89,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 109851.75380948205,
-              "silver": 299098,
+              "clearedStage": 72,
+              "level": 77,
+              "power": 82104.23930342033,
+              "silver": 38654,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 102,
-              "level": 74,
-              "power": 114352.34738584595,
-              "silver": 161834,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 89181.62854484338,
+              "silver": 151204,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 122,
-              "level": 81,
-              "power": 136149.8892151746,
-              "silver": 693864,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 94366.65820065155,
+              "silver": 260025,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 123,
-              "level": 86,
-              "power": 154818.31466712558,
-              "silver": 1179842,
+              "clearedStage": 84,
+              "level": 84,
+              "power": 99950.65737941056,
+              "silver": 368107,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 123,
-              "level": 91,
-              "power": 173457.77843664293,
-              "silver": 1667775,
+              "clearedStage": 88,
+              "level": 86,
+              "power": 105698.79834657832,
+              "silver": 479108,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 123,
-              "level": 95,
-              "power": 191911.53891163494,
-              "silver": 2179249,
+              "clearedStage": 92,
+              "level": 88,
+              "power": 111580.58292543732,
+              "silver": 590800,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 140,
-              "level": 105,
-              "power": 248873.69109904967,
-              "silver": 3405426,
+              "clearedStage": 96,
+              "level": 94,
+              "power": 128194.9537265323,
+              "silver": 945322,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 3405426,
-            "crystals": 5560,
+            "silver": 945322,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 4831,
-            "relicStones": 1213,
+            "skillMats": 44800,
+            "relicStones": 26277,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 10202000,
+          "relics": 24,
+          "expFed": 6721000,
           "gaps": {
-            "expToNextLevel": 18421,
+            "expToNextLevel": 19169,
             "skillMatShort": {
               "skillMatEarth": 0,
               "skillMatGold": 0,
@@ -2471,15 +2471,15 @@
             "powerShort": 0
           },
           "perHour": {
-            "silver": 1226177,
-            "exp": 3154000,
-            "skillMats": 0,
-            "relicStones": 0,
+            "silver": 354522,
+            "exp": 1264000,
+            "skillMats": 2146,
+            "relicStones": 1821,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": 0.035043119847812304,
-          "expPerBattle": 5257
+          "farmToNextLevelHours": 0.09099208860759495,
+          "expPerRoll": 2107
         }
       ],
       "gachaIncome": {
@@ -2538,274 +2538,274 @@
               "rarity": "N"
             }
           ],
-          "power": 173929.16692412284,
+          "power": 119969.5572965306,
           "levels": {
-            "hannibal": 91,
-            "zhangheng": 91,
-            "direnjie": 91,
-            "wangzhaojun": 91,
-            "xianfuren": 91,
-            "zhenghe": 90
+            "hannibal": 94,
+            "zhangheng": 94,
+            "direnjie": 94,
+            "wangzhaojun": 94,
+            "xianfuren": 94,
+            "zhenghe": 93
           },
-          "clearedStage": 123,
-          "blockedAtStage": 124,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
-          "bossAvgRounds": 2.95,
+          "bossAvgRounds": 2.0833333333333335,
           "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 14,
-              "level": 10,
-              "power": 11458.46083575358,
-              "silver": 67792,
+              "clearedStage": 4,
+              "level": 11,
+              "power": 7312.003260195606,
+              "silver": 64395,
               "exp": 0,
-              "relics": 546
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
+              "clearedStage": 8,
               "level": 21,
-              "power": 16540.14369700626,
-              "silver": 87360,
+              "power": 10595.929486529301,
+              "silver": 79198,
               "exp": 0,
-              "relics": 1146
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 81236,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 14169.126591930406,
+              "silver": 517,
               "exp": 0,
-              "relics": 1155
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 74836,
+              "clearedStage": 16,
+              "level": 35,
+              "power": 17351.17551126634,
+              "silver": 400,
               "exp": 0,
-              "relics": 1155
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 68436,
+              "clearedStage": 20,
+              "level": 40,
+              "power": 19964.7506228491,
+              "silver": 480,
               "exp": 0,
-              "relics": 1155
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 61236,
+              "clearedStage": 24,
+              "level": 44,
+              "power": 22944.812160607216,
+              "silver": 661,
               "exp": 0,
-              "relics": 1155
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 30,
-              "level": 28,
-              "power": 21181.919925291033,
-              "silver": 72309,
+              "clearedStage": 28,
+              "level": 49,
+              "power": 25772.787037749316,
+              "silver": 627,
               "exp": 0,
-              "relics": 1700
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 47,
-              "level": 52,
-              "power": 41831.915608250296,
-              "silver": 36107,
+              "clearedStage": 32,
+              "level": 57,
+              "power": 32264.087757037385,
+              "silver": 110,
               "exp": 0,
-              "relics": 2900
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 71,
-              "level": 63,
-              "power": 65180.44049686009,
-              "silver": 181613,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 39717.35126546139,
+              "silver": 428,
               "exp": 0,
-              "relics": 3000
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 78,
-              "level": 63,
-              "power": 69029.09198397888,
-              "silver": 65,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 43598.24024013401,
+              "silver": 2944,
               "exp": 0,
-              "relics": 3000
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 87,
-              "level": 66,
-              "power": 80910.79358193852,
-              "silver": 25062,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 46615.172783181064,
+              "silver": 33,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 87511.65323411698,
-              "silver": 314366,
+              "clearedStage": 48,
+              "level": 66,
+              "power": 48490.71790121592,
+              "silver": 22488,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 95241.3410953547,
-              "silver": 69,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 51350.25264855099,
+              "silver": 184,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 105335.38378258409,
-              "silver": 132151,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 54259.31739873788,
+              "silver": 212,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 105335.38378258409,
-              "silver": 89498,
+              "clearedStage": 60,
+              "level": 69,
+              "power": 56485.94434557197,
+              "silver": 227,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 92,
+              "clearedStage": 64,
               "level": 72,
-              "power": 105335.38378258409,
-              "silver": 43898,
+              "power": 63039.475615661126,
+              "silver": 50,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 111884.4103549587,
-              "silver": 311230,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 70018.6255255683,
+              "silver": 408,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 92,
-              "level": 75,
-              "power": 116533.30257728464,
-              "silver": 155711,
+              "clearedStage": 72,
+              "level": 78,
+              "power": 75195.96123145953,
+              "silver": 35173,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 92,
-              "level": 77,
-              "power": 123359.03608346739,
-              "silver": 421724,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 81160.89551407182,
+              "silver": 147000,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 92,
-              "level": 79,
-              "power": 130761.26787914714,
-              "silver": 686203,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 88532.65858425829,
+              "silver": 256683,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 92,
-              "level": 81,
-              "power": 137918.48696793415,
-              "silver": 952281,
+              "clearedStage": 84,
+              "level": 85,
+              "power": 93602.82095037568,
+              "silver": 368454,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 92,
-              "level": 81,
-              "power": 138146.86934222298,
-              "silver": 922761,
+              "clearedStage": 88,
+              "level": 87,
+              "power": 100126.29771651208,
+              "silver": 480929,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 123,
-              "level": 86,
-              "power": 156267.14449152251,
-              "silver": 1383623,
+              "clearedStage": 92,
+              "level": 89,
+              "power": 105817.4507338244,
+              "silver": 590475,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 123,
-              "level": 90,
-              "power": 173929.16692412284,
-              "silver": 1895153,
+              "clearedStage": 96,
+              "level": 93,
+              "power": 119969.5572965306,
+              "silver": 948027,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 1895153,
-            "crystals": 5100,
+            "silver": 948027,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 2878,
-            "relicStones": 1203,
+            "skillMats": 42767,
+            "relicStones": 19019,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 5903000,
+          "relics": 24,
+          "expFed": 6672000,
           "gaps": {
-            "expToNextLevel": 24717,
+            "expToNextLevel": 23446,
             "skillMatShort": {
               "skillMatEarth": 0,
-              "skillMatWater": 96,
+              "skillMatWater": 0,
               "skillMatWood": 0
             },
             "relicStoneShort": {
-              "relicStoneTier2": 32
+              "relicStoneTier2": 28
             },
             "silverShort": 0,
             "powerShort": 0
           },
           "perHour": {
-            "silver": 511530,
-            "exp": 1020000,
-            "skillMats": 0,
-            "relicStones": 0,
+            "silver": 357552,
+            "exp": 1174000,
+            "skillMats": 2121,
+            "relicStones": 1832,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": 0.1453941176470588,
-          "expPerBattle": 1700
+          "farmToNextLevelHours": 0.11982623509369678,
+          "expPerRoll": 1957
         },
         {
           "label": "P2 SSR+SR 混编",
@@ -2842,274 +2842,274 @@
               "rarity": "N"
             }
           ],
-          "power": 173929.16692412284,
+          "power": 119969.5572965306,
           "levels": {
-            "hannibal": 91,
-            "zhangheng": 91,
-            "direnjie": 91,
-            "wangzhaojun": 91,
-            "xianfuren": 91,
-            "zhenghe": 90
+            "hannibal": 94,
+            "zhangheng": 94,
+            "direnjie": 94,
+            "wangzhaojun": 94,
+            "xianfuren": 94,
+            "zhenghe": 93
           },
-          "clearedStage": 123,
-          "blockedAtStage": 124,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
-          "bossAvgRounds": 2.95,
+          "bossAvgRounds": 2.0833333333333335,
           "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 14,
-              "level": 10,
-              "power": 11458.46083575358,
-              "silver": 67792,
+              "clearedStage": 4,
+              "level": 11,
+              "power": 7312.003260195606,
+              "silver": 64395,
               "exp": 0,
-              "relics": 546
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
+              "clearedStage": 8,
               "level": 21,
-              "power": 16540.14369700626,
-              "silver": 87360,
+              "power": 10595.929486529301,
+              "silver": 79198,
               "exp": 0,
-              "relics": 1146
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 81236,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 14169.126591930406,
+              "silver": 517,
               "exp": 0,
-              "relics": 1155
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 74836,
+              "clearedStage": 16,
+              "level": 35,
+              "power": 17351.17551126634,
+              "silver": 400,
               "exp": 0,
-              "relics": 1155
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 68436,
+              "clearedStage": 20,
+              "level": 40,
+              "power": 19964.7506228491,
+              "silver": 480,
               "exp": 0,
-              "relics": 1155
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 61236,
+              "clearedStage": 24,
+              "level": 44,
+              "power": 22944.812160607216,
+              "silver": 661,
               "exp": 0,
-              "relics": 1155
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 30,
-              "level": 28,
-              "power": 21181.919925291033,
-              "silver": 72309,
+              "clearedStage": 28,
+              "level": 49,
+              "power": 25772.787037749316,
+              "silver": 627,
               "exp": 0,
-              "relics": 1700
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 47,
-              "level": 52,
-              "power": 41831.915608250296,
-              "silver": 36107,
+              "clearedStage": 32,
+              "level": 57,
+              "power": 32264.087757037385,
+              "silver": 110,
               "exp": 0,
-              "relics": 2900
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 71,
-              "level": 63,
-              "power": 65180.44049686009,
-              "silver": 181613,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 39717.35126546139,
+              "silver": 428,
               "exp": 0,
-              "relics": 3000
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 78,
-              "level": 63,
-              "power": 69029.09198397888,
-              "silver": 65,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 43598.24024013401,
+              "silver": 2944,
               "exp": 0,
-              "relics": 3000
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 87,
-              "level": 66,
-              "power": 80910.79358193852,
-              "silver": 25062,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 46615.172783181064,
+              "silver": 33,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 87511.65323411698,
-              "silver": 314366,
+              "clearedStage": 48,
+              "level": 66,
+              "power": 48490.71790121592,
+              "silver": 22488,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 95241.3410953547,
-              "silver": 69,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 51350.25264855099,
+              "silver": 184,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 105335.38378258409,
-              "silver": 132151,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 54259.31739873788,
+              "silver": 212,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 105335.38378258409,
-              "silver": 89498,
+              "clearedStage": 60,
+              "level": 69,
+              "power": 56485.94434557197,
+              "silver": 227,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 92,
+              "clearedStage": 64,
               "level": 72,
-              "power": 105335.38378258409,
-              "silver": 43898,
+              "power": 63039.475615661126,
+              "silver": 50,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 111884.4103549587,
-              "silver": 311230,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 70018.6255255683,
+              "silver": 408,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 92,
-              "level": 75,
-              "power": 116533.30257728464,
-              "silver": 155711,
+              "clearedStage": 72,
+              "level": 78,
+              "power": 75195.96123145953,
+              "silver": 35173,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 92,
-              "level": 77,
-              "power": 123359.03608346739,
-              "silver": 421724,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 81160.89551407182,
+              "silver": 147000,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 92,
-              "level": 79,
-              "power": 130761.26787914714,
-              "silver": 686203,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 88532.65858425829,
+              "silver": 256683,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 92,
-              "level": 81,
-              "power": 137918.48696793415,
-              "silver": 952281,
+              "clearedStage": 84,
+              "level": 85,
+              "power": 93602.82095037568,
+              "silver": 368454,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 92,
-              "level": 81,
-              "power": 138146.86934222298,
-              "silver": 922761,
+              "clearedStage": 88,
+              "level": 87,
+              "power": 100126.29771651208,
+              "silver": 480929,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 123,
-              "level": 86,
-              "power": 156267.14449152251,
-              "silver": 1383623,
+              "clearedStage": 92,
+              "level": 89,
+              "power": 105817.4507338244,
+              "silver": 590475,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 123,
-              "level": 90,
-              "power": 173929.16692412284,
-              "silver": 1895153,
+              "clearedStage": 96,
+              "level": 93,
+              "power": 119969.5572965306,
+              "silver": 948027,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 1895153,
-            "crystals": 5100,
+            "silver": 948027,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 2878,
-            "relicStones": 1203,
+            "skillMats": 42767,
+            "relicStones": 19019,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 5903000,
+          "relics": 24,
+          "expFed": 6672000,
           "gaps": {
-            "expToNextLevel": 24717,
+            "expToNextLevel": 23446,
             "skillMatShort": {
               "skillMatEarth": 0,
-              "skillMatWater": 96,
+              "skillMatWater": 0,
               "skillMatWood": 0
             },
             "relicStoneShort": {
-              "relicStoneTier2": 32
+              "relicStoneTier2": 28
             },
             "silverShort": 0,
             "powerShort": 0
           },
           "perHour": {
-            "silver": 511530,
-            "exp": 1020000,
-            "skillMats": 0,
-            "relicStones": 0,
+            "silver": 357552,
+            "exp": 1174000,
+            "skillMats": 2121,
+            "relicStones": 1832,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": 0.1453941176470588,
-          "expPerBattle": 1700
+          "farmToNextLevelHours": 0.11982623509369678,
+          "expPerRoll": 1957
         },
         {
           "label": "P3 SSR 主导",
@@ -3146,274 +3146,274 @@
               "rarity": "N"
             }
           ],
-          "power": 173929.16692412284,
+          "power": 119969.5572965306,
           "levels": {
-            "hannibal": 91,
-            "zhangheng": 91,
-            "direnjie": 91,
-            "wangzhaojun": 91,
-            "xianfuren": 91,
-            "zhenghe": 90
+            "hannibal": 94,
+            "zhangheng": 94,
+            "direnjie": 94,
+            "wangzhaojun": 94,
+            "xianfuren": 94,
+            "zhenghe": 93
           },
-          "clearedStage": 123,
-          "blockedAtStage": 124,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
-          "bossAvgRounds": 2.95,
+          "bossAvgRounds": 2.0833333333333335,
           "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 14,
-              "level": 10,
-              "power": 11458.46083575358,
-              "silver": 67792,
+              "clearedStage": 4,
+              "level": 11,
+              "power": 7312.003260195606,
+              "silver": 64395,
               "exp": 0,
-              "relics": 546
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
+              "clearedStage": 8,
               "level": 21,
-              "power": 16540.14369700626,
-              "silver": 87360,
+              "power": 10595.929486529301,
+              "silver": 79198,
               "exp": 0,
-              "relics": 1146
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 81236,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 14169.126591930406,
+              "silver": 517,
               "exp": 0,
-              "relics": 1155
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 74836,
+              "clearedStage": 16,
+              "level": 35,
+              "power": 17351.17551126634,
+              "silver": 400,
               "exp": 0,
-              "relics": 1155
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 68436,
+              "clearedStage": 20,
+              "level": 40,
+              "power": 19964.7506228491,
+              "silver": 480,
               "exp": 0,
-              "relics": 1155
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 61236,
+              "clearedStage": 24,
+              "level": 44,
+              "power": 22944.812160607216,
+              "silver": 661,
               "exp": 0,
-              "relics": 1155
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 30,
-              "level": 28,
-              "power": 21181.919925291033,
-              "silver": 72309,
+              "clearedStage": 28,
+              "level": 49,
+              "power": 25772.787037749316,
+              "silver": 627,
               "exp": 0,
-              "relics": 1700
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 47,
-              "level": 52,
-              "power": 41831.915608250296,
-              "silver": 36107,
+              "clearedStage": 32,
+              "level": 57,
+              "power": 32264.087757037385,
+              "silver": 110,
               "exp": 0,
-              "relics": 2900
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 71,
-              "level": 63,
-              "power": 65180.44049686009,
-              "silver": 181613,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 39717.35126546139,
+              "silver": 428,
               "exp": 0,
-              "relics": 3000
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 78,
-              "level": 63,
-              "power": 69029.09198397888,
-              "silver": 65,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 43598.24024013401,
+              "silver": 2944,
               "exp": 0,
-              "relics": 3000
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 87,
-              "level": 66,
-              "power": 80910.79358193852,
-              "silver": 25062,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 46615.172783181064,
+              "silver": 33,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 87511.65323411698,
-              "silver": 314366,
+              "clearedStage": 48,
+              "level": 66,
+              "power": 48490.71790121592,
+              "silver": 22488,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 95241.3410953547,
-              "silver": 69,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 51350.25264855099,
+              "silver": 184,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 105335.38378258409,
-              "silver": 132151,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 54259.31739873788,
+              "silver": 212,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 105335.38378258409,
-              "silver": 89498,
+              "clearedStage": 60,
+              "level": 69,
+              "power": 56485.94434557197,
+              "silver": 227,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 92,
+              "clearedStage": 64,
               "level": 72,
-              "power": 105335.38378258409,
-              "silver": 43898,
+              "power": 63039.475615661126,
+              "silver": 50,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 111884.4103549587,
-              "silver": 311230,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 70018.6255255683,
+              "silver": 408,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 92,
-              "level": 75,
-              "power": 116533.30257728464,
-              "silver": 155711,
+              "clearedStage": 72,
+              "level": 78,
+              "power": 75195.96123145953,
+              "silver": 35173,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 92,
-              "level": 77,
-              "power": 123359.03608346739,
-              "silver": 421724,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 81160.89551407182,
+              "silver": 147000,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 92,
-              "level": 79,
-              "power": 130761.26787914714,
-              "silver": 686203,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 88532.65858425829,
+              "silver": 256683,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 92,
-              "level": 81,
-              "power": 137918.48696793415,
-              "silver": 952281,
+              "clearedStage": 84,
+              "level": 85,
+              "power": 93602.82095037568,
+              "silver": 368454,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 92,
-              "level": 81,
-              "power": 138146.86934222298,
-              "silver": 922761,
+              "clearedStage": 88,
+              "level": 87,
+              "power": 100126.29771651208,
+              "silver": 480929,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 123,
-              "level": 86,
-              "power": 156267.14449152251,
-              "silver": 1383623,
+              "clearedStage": 92,
+              "level": 89,
+              "power": 105817.4507338244,
+              "silver": 590475,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 123,
-              "level": 90,
-              "power": 173929.16692412284,
-              "silver": 1895153,
+              "clearedStage": 96,
+              "level": 93,
+              "power": 119969.5572965306,
+              "silver": 948027,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 1895153,
-            "crystals": 5100,
+            "silver": 948027,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 2878,
-            "relicStones": 1203,
+            "skillMats": 42767,
+            "relicStones": 19019,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 5903000,
+          "relics": 24,
+          "expFed": 6672000,
           "gaps": {
-            "expToNextLevel": 24717,
+            "expToNextLevel": 23446,
             "skillMatShort": {
               "skillMatEarth": 0,
-              "skillMatWater": 96,
+              "skillMatWater": 0,
               "skillMatWood": 0
             },
             "relicStoneShort": {
-              "relicStoneTier2": 32
+              "relicStoneTier2": 28
             },
             "silverShort": 0,
             "powerShort": 0
           },
           "perHour": {
-            "silver": 511530,
-            "exp": 1020000,
-            "skillMats": 0,
-            "relicStones": 0,
+            "silver": 357552,
+            "exp": 1174000,
+            "skillMats": 2121,
+            "relicStones": 1832,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": 0.1453941176470588,
-          "expPerBattle": 1700
+          "farmToNextLevelHours": 0.11982623509369678,
+          "expPerRoll": 1957
         },
         {
           "label": "P4 1SSR+N（下限）",
@@ -3450,274 +3450,274 @@
               "rarity": "N"
             }
           ],
-          "power": 173929.16692412284,
+          "power": 119969.5572965306,
           "levels": {
-            "hannibal": 91,
-            "zhangheng": 91,
-            "direnjie": 91,
-            "wangzhaojun": 91,
-            "xianfuren": 91,
-            "zhenghe": 90
+            "hannibal": 94,
+            "zhangheng": 94,
+            "direnjie": 94,
+            "wangzhaojun": 94,
+            "xianfuren": 94,
+            "zhenghe": 93
           },
-          "clearedStage": 123,
-          "blockedAtStage": 124,
+          "clearedStage": 96,
+          "blockedAtStage": null,
           "endOfDayFailStage": null,
           "bossStage": 31,
           "bossWinRate": 1,
-          "bossAvgRounds": 2.95,
+          "bossAvgRounds": 2.0833333333333335,
           "firstRealmBreakHour": 9,
           "curve": [
             {
               "hour": 1,
-              "clearedStage": 14,
-              "level": 10,
-              "power": 11458.46083575358,
-              "silver": 67792,
+              "clearedStage": 4,
+              "level": 11,
+              "power": 7312.003260195606,
+              "silver": 64395,
               "exp": 0,
-              "relics": 546
+              "relics": 1
             },
             {
               "hour": 2,
-              "clearedStage": 29,
+              "clearedStage": 8,
               "level": 21,
-              "power": 16540.14369700626,
-              "silver": 87360,
+              "power": 10595.929486529301,
+              "silver": 79198,
               "exp": 0,
-              "relics": 1146
+              "relics": 2
             },
             {
               "hour": 3,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 81236,
+              "clearedStage": 12,
+              "level": 29,
+              "power": 14169.126591930406,
+              "silver": 517,
               "exp": 0,
-              "relics": 1155
+              "relics": 3
             },
             {
               "hour": 4,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 74836,
+              "clearedStage": 16,
+              "level": 35,
+              "power": 17351.17551126634,
+              "silver": 400,
               "exp": 0,
-              "relics": 1155
+              "relics": 4
             },
             {
               "hour": 5,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 68436,
+              "clearedStage": 20,
+              "level": 40,
+              "power": 19964.7506228491,
+              "silver": 480,
               "exp": 0,
-              "relics": 1155
+              "relics": 5
             },
             {
               "hour": 6,
-              "clearedStage": 30,
-              "level": 21,
-              "power": 16540.14369700626,
-              "silver": 61236,
+              "clearedStage": 24,
+              "level": 44,
+              "power": 22944.812160607216,
+              "silver": 661,
               "exp": 0,
-              "relics": 1155
+              "relics": 6
             },
             {
               "hour": 7,
-              "clearedStage": 30,
-              "level": 28,
-              "power": 21181.919925291033,
-              "silver": 72309,
+              "clearedStage": 28,
+              "level": 49,
+              "power": 25772.787037749316,
+              "silver": 627,
               "exp": 0,
-              "relics": 1700
+              "relics": 7
             },
             {
               "hour": 8,
-              "clearedStage": 47,
-              "level": 52,
-              "power": 41831.915608250296,
-              "silver": 36107,
+              "clearedStage": 32,
+              "level": 57,
+              "power": 32264.087757037385,
+              "silver": 110,
               "exp": 0,
-              "relics": 2900
+              "relics": 8
             },
             {
               "hour": 9,
-              "clearedStage": 71,
-              "level": 63,
-              "power": 65180.44049686009,
-              "silver": 181613,
+              "clearedStage": 36,
+              "level": 60,
+              "power": 39717.35126546139,
+              "silver": 428,
               "exp": 0,
-              "relics": 3000
+              "relics": 9
             },
             {
               "hour": 10,
-              "clearedStage": 78,
-              "level": 63,
-              "power": 69029.09198397888,
-              "silver": 65,
+              "clearedStage": 40,
+              "level": 60,
+              "power": 43598.24024013401,
+              "silver": 2944,
               "exp": 0,
-              "relics": 3000
+              "relics": 10
             },
             {
               "hour": 11,
-              "clearedStage": 87,
-              "level": 66,
-              "power": 80910.79358193852,
-              "silver": 25062,
+              "clearedStage": 44,
+              "level": 64,
+              "power": 46615.172783181064,
+              "silver": 33,
               "exp": 0,
-              "relics": 3000
+              "relics": 11
             },
             {
               "hour": 12,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 87511.65323411698,
-              "silver": 314366,
+              "clearedStage": 48,
+              "level": 66,
+              "power": 48490.71790121592,
+              "silver": 22488,
               "exp": 0,
-              "relics": 3000
+              "relics": 12
             },
             {
               "hour": 13,
-              "clearedStage": 92,
-              "level": 69,
-              "power": 95241.3410953547,
-              "silver": 69,
+              "clearedStage": 52,
+              "level": 67,
+              "power": 51350.25264855099,
+              "silver": 184,
               "exp": 0,
-              "relics": 3000
+              "relics": 13
             },
             {
               "hour": 14,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 105335.38378258409,
-              "silver": 132151,
+              "clearedStage": 56,
+              "level": 68,
+              "power": 54259.31739873788,
+              "silver": 212,
               "exp": 0,
-              "relics": 3000
+              "relics": 14
             },
             {
               "hour": 15,
-              "clearedStage": 92,
-              "level": 72,
-              "power": 105335.38378258409,
-              "silver": 89498,
+              "clearedStage": 60,
+              "level": 69,
+              "power": 56485.94434557197,
+              "silver": 227,
               "exp": 0,
-              "relics": 3000
+              "relics": 15
             },
             {
               "hour": 16,
-              "clearedStage": 92,
+              "clearedStage": 64,
               "level": 72,
-              "power": 105335.38378258409,
-              "silver": 43898,
+              "power": 63039.475615661126,
+              "silver": 50,
               "exp": 0,
-              "relics": 3000
+              "relics": 16
             },
             {
               "hour": 17,
-              "clearedStage": 92,
-              "level": 74,
-              "power": 111884.4103549587,
-              "silver": 311230,
+              "clearedStage": 68,
+              "level": 75,
+              "power": 70018.6255255683,
+              "silver": 408,
               "exp": 0,
-              "relics": 3000
+              "relics": 17
             },
             {
               "hour": 18,
-              "clearedStage": 92,
-              "level": 75,
-              "power": 116533.30257728464,
-              "silver": 155711,
+              "clearedStage": 72,
+              "level": 78,
+              "power": 75195.96123145953,
+              "silver": 35173,
               "exp": 0,
-              "relics": 3000
+              "relics": 18
             },
             {
               "hour": 19,
-              "clearedStage": 92,
-              "level": 77,
-              "power": 123359.03608346739,
-              "silver": 421724,
+              "clearedStage": 76,
+              "level": 80,
+              "power": 81160.89551407182,
+              "silver": 147000,
               "exp": 0,
-              "relics": 3000
+              "relics": 19
             },
             {
               "hour": 20,
-              "clearedStage": 92,
-              "level": 79,
-              "power": 130761.26787914714,
-              "silver": 686203,
+              "clearedStage": 80,
+              "level": 82,
+              "power": 88532.65858425829,
+              "silver": 256683,
               "exp": 0,
-              "relics": 3000
+              "relics": 20
             },
             {
               "hour": 21,
-              "clearedStage": 92,
-              "level": 81,
-              "power": 137918.48696793415,
-              "silver": 952281,
+              "clearedStage": 84,
+              "level": 85,
+              "power": 93602.82095037568,
+              "silver": 368454,
               "exp": 0,
-              "relics": 3000
+              "relics": 21
             },
             {
               "hour": 22,
-              "clearedStage": 92,
-              "level": 81,
-              "power": 138146.86934222298,
-              "silver": 922761,
+              "clearedStage": 88,
+              "level": 87,
+              "power": 100126.29771651208,
+              "silver": 480929,
               "exp": 0,
-              "relics": 3000
+              "relics": 22
             },
             {
               "hour": 23,
-              "clearedStage": 123,
-              "level": 86,
-              "power": 156267.14449152251,
-              "silver": 1383623,
+              "clearedStage": 92,
+              "level": 89,
+              "power": 105817.4507338244,
+              "silver": 590475,
               "exp": 0,
-              "relics": 3000
+              "relics": 23
             },
             {
               "hour": 24,
-              "clearedStage": 123,
-              "level": 90,
-              "power": 173929.16692412284,
-              "silver": 1895153,
+              "clearedStage": 96,
+              "level": 93,
+              "power": 119969.5572965306,
+              "silver": 948027,
               "exp": 0,
-              "relics": 3000
+              "relics": 24
             }
           ],
           "resources": {
-            "silver": 1895153,
-            "crystals": 5100,
+            "silver": 948027,
+            "crystals": 4830,
             "exp": 0,
             "expBooks": 0,
-            "skillMats": 2878,
-            "relicStones": 1203,
+            "skillMats": 42767,
+            "relicStones": 19019,
             "shards": 6
           },
-          "relics": 3000,
-          "expFed": 5903000,
+          "relics": 24,
+          "expFed": 6672000,
           "gaps": {
-            "expToNextLevel": 24717,
+            "expToNextLevel": 23446,
             "skillMatShort": {
               "skillMatEarth": 0,
-              "skillMatWater": 96,
+              "skillMatWater": 0,
               "skillMatWood": 0
             },
             "relicStoneShort": {
-              "relicStoneTier2": 32
+              "relicStoneTier2": 28
             },
             "silverShort": 0,
             "powerShort": 0
           },
           "perHour": {
-            "silver": 511530,
-            "exp": 1020000,
-            "skillMats": 0,
-            "relicStones": 0,
+            "silver": 357552,
+            "exp": 1174000,
+            "skillMats": 2121,
+            "relicStones": 1832,
             "shards": 0,
-            "relics": 0
+            "relics": 1
           },
-          "farmToNextLevelHours": 0.1453941176470588,
-          "expPerBattle": 1700
+          "farmToNextLevelHours": 0.11982623509369678,
+          "expPerRoll": 1957
         }
       ],
       "gachaIncome": {

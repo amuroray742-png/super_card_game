@@ -3,37 +3,79 @@
  *
  * 存档带版本号与迁移链，保证后续更新不丢档。
  */
-import type { SaveData } from '../model/types.ts'
-import type { Element } from '../model/types.ts'
+import type { IdleChannelKind, IdleChannelTarget, SaveData } from '../model/types.ts'
+import { IDLE_CHANNEL_KINDS, type ChannelRngState } from '../model/types.ts'
 import type { ItemId } from '../config/items.ts'
-import type { DungeonDifficultyId, RelicStoneTierId } from '../config/economy.ts'
 import {
   START_ITEMS,
   START_RESOURCES,
   LEGACY_CONVERSION,
   EXP_BOOK,
-  DUNGEON_DIFFICULTY_IDS,
-  RELIC_STONE_TIER_IDS,
 } from '../config/economy.ts'
 import { ITEM_IDS } from '../config/items.ts'
-import { ELEMENTS } from '../model/types.ts'
+import { STAGE_INDEX } from '../config/stages.ts'
+import { DUNGEON_INDEX, DUNGEON_STAGE_INDEX } from '../config/dungeons.ts'
 import { arenaWeekIndex } from '../time.ts'
+import { Rng, hashSeed } from '../rng.ts'
 import { makeRelicUid, parseLegacyRelicUid, RELIC_DEFS, RELIC_SETS } from '../systems/relic.ts'
 import { emptyLadderSquads } from '../config/ladder.ts'
 import '../config/relics.ts'
 
-export const SAVE_VERSION = 10
+export const SAVE_VERSION = 11
 
 export type Migration = (save: SaveData) => SaveData
 
 /** 已登记的道具 id 集合（O(1) 判定） */
 const ITEM_ID_SET = new Set<string>(ITEM_IDS)
-/** 五行集合 */
-const ELEMENT_SET = new Set<string>(ELEMENTS)
-/** 副本难度集合 */
-const DUNGEON_DIFFICULTY_SET = new Set<string>(DUNGEON_DIFFICULTY_IDS)
-/** 强化石档位集合 */
-const RELIC_STONE_TIER_SET = new Set<string>(RELIC_STONE_TIER_IDS)
+
+/**
+ * 三条挂机通道**各自**的随机序列（挂机改版 v11 · 设计稿 §3.3）。
+ *
+ * ⚠ 通道种子由**存档根种子**派生：三条序列互不相同，但都随存档落盘。
+ *   根种子轮换（服务端补种子 / 迁移轮换）时三条通道的序列一起换，
+ *   不会「一个玩家一条固定序列」（铁律 #24）。
+ *
+ * ⚠ 这份状态住在**私有随机块** `save.rng` 里 —— 公开快照 / 缓存 / 导出串
+ *   一律省略整个 `rng`，所以通道种子绝不会下发客户端。
+ */
+export function createChannelRng(seed: number): Record<IdleChannelKind, ChannelRngState> {
+  const root = Number.isFinite(seed) ? Math.floor(seed) >>> 0 : 0
+  const out = {} as Record<IdleChannelKind, ChannelRngState>
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    const derived = new Rng((root ^ hashSeed(`sgw:idle:${kind}`)) >>> 0).nextSeed()
+    out[kind] = { seed: derived || 0x9e3779b9, counter: 0 }
+  }
+  return out
+}
+
+/**
+ * 规范化通道随机状态：缺字段 / 非法值 → 按**根种子**重新派生。
+ *
+ * ⚠ 合法值**原样保留**（计数器必须落盘，否则刷新页面就回到序列开头）。
+ */
+export function normalizeChannelRng(
+  raw: unknown,
+  seed: number,
+): Record<IdleChannelKind, ChannelRngState> {
+  const fallback = createChannelRng(seed)
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback
+  const src = raw as Record<string, unknown>
+  const out = {} as Record<IdleChannelKind, ChannelRngState>
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    const entry = src[kind]
+    const s = entry && typeof entry === 'object' ? (entry as Record<string, unknown>).seed : undefined
+    const c = entry && typeof entry === 'object' ? (entry as Record<string, unknown>).counter : undefined
+    const ok =
+      typeof s === 'number' &&
+      Number.isSafeInteger(s) &&
+      s > 0 &&
+      typeof c === 'number' &&
+      Number.isSafeInteger(c) &&
+      c >= 0
+    out[kind] = ok ? { seed: s as number, counter: c as number } : fallback[kind]
+  }
+  return out
+}
 
 /**
  * 读取存档里的数值字段（旧档可能缺字段 / 类型不对）。
@@ -94,12 +136,13 @@ export const MIGRATIONS: Record<number, Migration> = {
   // 种子留 0（= 未设置）：由服务端在载入时补一个随机种子。
   // 若在这里用常量种子兜底，所有旧档玩家会共用同一条抽卡序列（铁律 #24）。
   4: (save) => {
-    save.rng = { seed: 0, counter: 0 }
+    save.rng = { seed: 0, counter: 0, channels: createChannelRng(0) }
     return save
   },
   // v5 → v6：旧版曾把权威随机状态发给客户端，载入后轮换该序列。
   5: (save) => {
-    save.rng = { seed: 0, counter: 0 }
+    // ⚠ 挂机改版 v11：三条通道的序列也一起轮换（服务端补根种子时会再派生一次）
+    save.rng = { seed: 0, counter: 0, channels: createChannelRng(0) }
     return save
   },
   // v6 → v7：遗物 uid 改为**存档内自增**。
@@ -211,6 +254,47 @@ export const MIGRATIONS: Record<number, Migration> = {
 
     return save
   },
+  // v10 → v11：**挂机改版**（三通道并行 + 已通关直挂 + 副本独立关卡）
+  //
+  // 旧结构：三个去向**共用一份时间账本**（`idle.measuredAt` / `effectiveMs` / …），
+  //   外加 `idle.target` / `idle.currentStage` / `idle.farm` / `idle.autoAdvance`。
+  // 新结构：**三条通道各自独立账本**（`idle.channels.{main,skill,enhance}`），
+  //   挂机**不再跑战斗**，只按掉落表掷奖；主线推进改为**纯手动挑战**。
+  //
+  // 迁移策略：
+  // - 主线通道恢复「**跟随最新通关关卡**」（`stageId = null`）；
+  // - 技能 / 强化通道**关闭**（旧档的副本去向在 v11 已无对应语义）；
+  // - 三条通道的有效预算 / 离线累计 / 待报告时长**全部清零**：
+  //   旧档的预算口径是「回放战斗的场次」，与新的「掷奖次数」不是同一件事，
+  //   直接继承会让玩家凭空多拿一次结算；
+  // - 副本通关记录清空（副本改为独立关卡，旧档没有可继承的通关状态）。
+  10: (save) => {
+    // ⚠ v10 的 `idle` 是**旧形状**（单一账本），TS 里已不存在 ⇒ 用局部类型描述它
+    const legacyIdle = save.idle as unknown as {
+      measuredAt?: number
+      activeUntil?: number
+      totalIdleSeconds?: number
+    } | undefined
+    const measuredAt = Number.isFinite(legacyIdle?.measuredAt)
+      ? (legacyIdle!.measuredAt as number)
+      : save.lastTickAt
+    save.idle = {
+      channels: {
+        main: emptyIdleChannel({ kind: 'main', stageId: null }, measuredAt),
+        skill: emptyIdleChannel(null, measuredAt),
+        enhance: emptyIdleChannel(null, measuredAt),
+      },
+      activeUntil: Number.isFinite(legacyIdle?.activeUntil)
+        ? (legacyIdle!.activeUntil as number)
+        : measuredAt,
+      totalIdleSeconds: Math.max(
+        0,
+        Number.isFinite(legacyIdle?.totalIdleSeconds) ? (legacyIdle!.totalIdleSeconds as number) : 0,
+      ),
+    }
+    save.dungeons = { cleared: {} }
+    return save
+  },
 }
 
 /** 空的天梯状态 */
@@ -248,6 +332,19 @@ export function emptyArena(now = 0): SaveData['arena'] {
 }
 
 /**
+ * 空的挂机通道状态（新建 / 迁移的起点）。
+ *
+ * ⚠ 计量水位 = 建档时刻（服务端当前时刻）；有效预算、离线累计、
+ *   待报告时长一律为 0（还没有任何时间被计量过）。
+ */
+export function emptyIdleChannel(
+  target: SaveData['idle']['channels']['main']['target'],
+  measuredAt: number,
+): SaveData['idle']['channels']['main'] {
+  return { target, measuredAt, effectiveMs: 0, offlineElapsedMs: 0, pendingOfflineMs: 0 }
+}
+
+/**
  * 新建存档。
  *
  * @param now  创建时间（毫秒）
@@ -262,7 +359,7 @@ export function createNewSave(now: number, seed = 0): SaveData {
     lastTickAt: now,
     // 新建存档尚未写入存储，时间戳由 store 在首次 persist 时盖上
     savedAt: 0,
-    rng: { seed, counter: 0 },
+    rng: { seed, counter: 0, channels: createChannelRng(seed) },
     player: {
       silver: START_RESOURCES.silver,
       crystals: START_RESOURCES.crystals,
@@ -280,15 +377,17 @@ export function createNewSave(now: number, seed = 0): SaveData {
     gacha: { pitySSR: 0, pity10: 0, history: [], pools: {}, newbieUsed: false },
     campaign: { clearedStage: 0, stageStars: {}, chapterProgress: 1, creditedStages: 0 },
     idle: {
-      currentStage: 1,
-      target: { kind: 'campaign' },
-      autoAdvance: true,
-      totalIdleSeconds: 0,
-      measuredAt: now,
-      effectiveMs: 0,
-      offlineElapsedMs: 0,
+      channels: {
+        // 主线通道默认「跟随最新通关关卡」；首胜前没有可挂的目标 → 不计收益
+        main: emptyIdleChannel({ kind: 'main', stageId: null }, now),
+        // 技能 / 强化通道开局关闭，玩家在首胜后主动设置目标
+        skill: emptyIdleChannel(null, now),
+        enhance: emptyIdleChannel(null, now),
+      },
       activeUntil: now,
+      totalIdleSeconds: 0,
     },
+    dungeons: { cleared: {} },
     codes: [],
     settings: { speed: 1, sfx: true, skipAnim: false },
     stats: { firstStartAt: now, totalPulls: 0, totalPower: 0 },
@@ -372,34 +471,66 @@ function normalizeItems(raw: unknown): SaveData['items'] {
 }
 
 /**
- * 规范化挂机去向。
+ * 规范化**单条挂机通道**。
  *
- * ⚠ 形状不合法（未知种类 / 未知五行 / 未知档位）一律回落到主线——
- *   宁可退回默认去向，也不能让挂机跑到不存在的副本上。
+ * ⚠ **逐通道兜底**（挂机改版 v11）：三条通道**各自独立**，
+ *   一条通道的目标形状非法**只关掉那一条**，不能连累另外两条。
+ *
+ * ⚠ 形状非法的目标一律置 `null`（= 通道关闭，不计量）——
+ *   宁可这条通道不产出，也不能让它挂到不存在的关卡上。
  */
-function normalizeIdleTarget(raw: unknown): SaveData['idle']['target'] {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { kind: 'campaign' }
-  const target = raw as Record<string, unknown>
-  const difficulty = target.difficulty
-  if (target.kind === 'skill') {
-    const element = target.element
-    if (typeof element === 'string' && ELEMENT_SET.has(element as Element)) {
-      if (typeof difficulty === 'string' && DUNGEON_DIFFICULTY_SET.has(difficulty as DungeonDifficultyId)) {
-        return { kind: 'skill', element: element as Element, difficulty: difficulty as DungeonDifficultyId }
-      }
-    }
-    return { kind: 'campaign' }
+function normalizeIdleChannel(
+  raw: unknown,
+  kind: IdleChannelKind,
+  fallbackMeasuredAt: number,
+): SaveData['idle']['channels'][IdleChannelKind] {
+  const base = emptyIdleChannel(null, fallbackMeasuredAt)
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base
+  const ch = raw as Record<string, unknown>
+  const measuredAt = Number.isFinite(ch.measuredAt) ? (ch.measuredAt as number) : fallbackMeasuredAt
+  const state: SaveData['idle']['channels'][IdleChannelKind] = {
+    target: null,
+    measuredAt,
+    effectiveMs: Number.isFinite(ch.effectiveMs) ? Math.max(0, ch.effectiveMs as number) : 0,
+    offlineElapsedMs: Number.isFinite(ch.offlineElapsedMs) ? Math.max(0, ch.offlineElapsedMs as number) : 0,
+    pendingOfflineMs: Number.isFinite(ch.pendingOfflineMs) ? Math.max(0, ch.pendingOfflineMs as number) : 0,
   }
-  if (target.kind === 'enhance') {
-    const tier = target.tier
-    if (typeof tier === 'string' && RELIC_STONE_TIER_SET.has(tier as RelicStoneTierId)) {
-      if (typeof difficulty === 'string' && DUNGEON_DIFFICULTY_SET.has(difficulty as DungeonDifficultyId)) {
-        return { kind: 'enhance', tier: tier as RelicStoneTierId, difficulty: difficulty as DungeonDifficultyId }
-      }
+  const target = ch.target
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return state
+  const t = target as Record<string, unknown>
+  if (t.kind !== kind) return state
+  if (kind === 'main') {
+    // 主线：`stageId = null` = 跟随最新通关关卡；给了数字必须是合法关卡
+    if (t.stageId === null || t.stageId === undefined) {
+      state.target = { kind: 'main', stageId: null }
+    } else if (Number.isSafeInteger(t.stageId) && STAGE_INDEX.has(t.stageId as number)) {
+      state.target = { kind: 'main', stageId: t.stageId as number }
     }
-    return { kind: 'campaign' }
+    return state
   }
-  return { kind: 'campaign' }
+  // 技能 / 强化：目标 = 已通关的副本关卡 id
+  if (typeof t.dungeonStageId === 'string') {
+    const stage = DUNGEON_STAGE_INDEX.get(t.dungeonStageId)
+    const stageKind = stage ? DUNGEON_INDEX.get(stage.variantId)?.kind : undefined
+    if (stage && stageKind === kind) {
+      state.target = { kind, dungeonStageId: t.dungeonStageId } as IdleChannelTarget
+    }
+  }
+  return state
+}
+
+/**
+ * 规范化**副本通关记录**：只保留合法关卡 id 且值恒为 `true`。
+ */
+function normalizeDungeonCleared(raw: unknown): Record<string, true> {
+  const out: Record<string, true> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (value !== true) continue
+    if (!DUNGEON_STAGE_INDEX.has(id)) continue
+    out[id] = true
+  }
+  return out
 }
 
 /**
@@ -420,6 +551,9 @@ export function normalizeSave(raw: unknown): SaveData {
   const base = createNewSave(Date.now())
   if (!raw || typeof raw !== 'object') return base
   const save = raw as Partial<SaveData>
+  // 挂机计量水位的兜底：旧档没有通道结构 ⇒ 用 `lastTickAt` 顶上
+  const fallbackMeasuredAt =
+    Number.isFinite(save.lastTickAt) ? (save.lastTickAt as number) : base.lastTickAt
 
   const merged: SaveData = {
     ...base,
@@ -436,6 +570,11 @@ export function normalizeSave(raw: unknown): SaveData {
     rng: {
       seed: typeof save.rng?.seed === 'number' ? save.rng.seed : 0,
       counter: typeof save.rng?.counter === 'number' ? save.rng.counter : 0,
+      // ⚠ 挂机改版 v11：三条通道的随机序列（缺字段时按根种子派生）
+      channels: normalizeChannelRng(
+        save.rng?.channels,
+        typeof save.rng?.seed === 'number' ? save.rng.seed : 0,
+      ),
     },
     player: { ...base.player, ...(save.player ?? {}) },
     // 堆叠道具：只保留**已登记**的道具 id，值取非负整数
@@ -450,12 +589,16 @@ export function normalizeSave(raw: unknown): SaveData {
     gacha: { ...base.gacha, ...(save.gacha ?? {}) },
     campaign: { ...base.campaign, ...(save.campaign ?? {}) },
     idle: {
-      ...base.idle, ...(save.idle ?? {}),
-      target: normalizeIdleTarget(save.idle?.target),
-      measuredAt: Number.isFinite(save.idle?.measuredAt) ? save.idle!.measuredAt : (save.lastTickAt ?? base.lastTickAt),
-      effectiveMs: Number.isFinite(save.idle?.effectiveMs) ? Math.max(0, save.idle!.effectiveMs!) : 0,
-      offlineElapsedMs: Number.isFinite(save.idle?.offlineElapsedMs) ? Math.max(0, save.idle!.offlineElapsedMs!) : 0,
-      activeUntil: Number.isFinite(save.idle?.activeUntil) ? save.idle!.activeUntil : (save.lastTickAt ?? base.lastTickAt),
+      channels: {
+        main: normalizeIdleChannel(save.idle?.channels?.main, 'main', fallbackMeasuredAt),
+        skill: normalizeIdleChannel(save.idle?.channels?.skill, 'skill', fallbackMeasuredAt),
+        enhance: normalizeIdleChannel(save.idle?.channels?.enhance, 'enhance', fallbackMeasuredAt),
+      },
+      activeUntil: Number.isFinite(save.idle?.activeUntil) ? save.idle!.activeUntil : fallbackMeasuredAt,
+      totalIdleSeconds: Math.max(0, num(save.idle?.totalIdleSeconds)),
+    },
+    dungeons: {
+      cleared: normalizeDungeonCleared(save.dungeons?.cleared),
     },
     settings: { ...base.settings, ...(save.settings ?? {}) },
     stats: { ...base.stats, ...(save.stats ?? {}) },

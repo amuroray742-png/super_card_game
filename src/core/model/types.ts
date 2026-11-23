@@ -4,7 +4,6 @@
  */
 
 import type { ItemId } from '../config/items.ts'
-import type { DungeonDifficultyId, RelicStoneTierId } from '../config/economy.ts'
 
 // ─────────────────────────── 基础标签 ───────────────────────────
 
@@ -587,17 +586,62 @@ export interface PoolState {
 }
 
 /**
- * **挂机去向**（资源/背包版本 v10）。
+ * **挂机通道种类**（挂机改版 v11）。
  *
- * ⚠ 三个去向共用**同一份时间账本**（`save.idle.measuredAt` / `effectiveMs` …），
- *   切换时先按**旧去向**结清，再换新去向（设计稿 §3）。
- *
- * ⚠ 副本**不写** `campaign`（进度与主线记录分别记账）。
+ * ⚠ 三条通道**各自独立**计量同一段墙钟时间、各自记账，产出互不干扰——
+ *   玩家可以同时挂三条（主线 / 技能副本 / 强化副本）。
  */
-export type IdleTarget =
-  | { kind: 'campaign' }
-  | { kind: 'skill'; element: Element; difficulty: DungeonDifficultyId }
-  | { kind: 'enhance'; tier: RelicStoneTierId; difficulty: DungeonDifficultyId }
+export type IdleChannelKind = 'main' | 'skill' | 'enhance'
+
+/**
+ * 三条通道的**固定顺序**（遍历顺序 = 界面展示顺序 = 锚点表顺序）。
+ *
+ * ⚠ 唯一出处：系统逻辑一律遍历这张表，禁止在别处另写一份通道列表。
+ */
+export const IDLE_CHANNEL_KINDS: readonly IdleChannelKind[] = ['main', 'skill', 'enhance'] as const
+
+/**
+ * 单条通道的随机序列状态（挂机改版 v11）。
+ *
+ * ⚠ 形状与 `Rng.snapshot()` 一致（**初始种子 + 已消耗个数**）——
+ *   返回内部状态无法复原（铁律 #24）。
+ */
+export interface ChannelRngState {
+  seed: number
+  counter: number
+}
+
+/**
+ * **单条通道的目标**（挂机改版 v11）。
+ *
+ * - 主线：`stageId = null` = **跟随最新通关的关卡**（`campaign.clearedStage`）。
+ * - 技能 / 强化：目标 = **已通关**的副本关卡 id（`dgn_<变体>_<难度>`）。
+ *
+ * ⚠ 目标必须**已通关**：挂机只挂已通关内容，永不卡关（设计 §3.1）。
+ */
+export type IdleChannelTarget =
+  | { kind: 'main'; stageId: number | null }
+  | { kind: 'skill'; dungeonStageId: string }
+  | { kind: 'enhance'; dungeonStageId: string }
+
+/**
+ * **单条通道的独立时间账本**（挂机改版 v11）。
+ *
+ * ⚠ 每条通道**各有一份** `measuredAt` / `effectiveMs` / `offlineElapsedMs`——
+ *   三条通道同时开着时，各自在同一段墙钟时间上独立计量、分别产出。
+ */
+export interface IdleChannelState {
+  /** 目标（`null` = 通道关闭，不计量） */
+  target: IdleChannelTarget | null
+  /** 已计量到的时刻（服务端权威水位） */
+  measuredAt: number
+  /** 待结算有效预算（毫秒），含不足一次的余数 */
+  effectiveMs: number
+  /** 连续离线累计时长（衰减曲线用） */
+  offlineElapsedMs: number
+  /** 待下次成功结算报告的实际离线时长（毫秒） */
+  pendingOfflineMs: number
+}
 
 export interface SaveData {
   version: number
@@ -616,8 +660,21 @@ export interface SaveData {
    * **必须随存档持久化**：抽卡序列若不落盘，刷新页面就会从头复现——
    * 玩家可以「刷新重抽」，且所有玩家的抽卡序列完全相同，
    * 概率公示宣称的 SSR 0.60% 在实际游戏里会退化成固定脚本（铁律 #24）。
+   *
+   * ⚠ **挂机改版 v11**：`channels` 是**三条挂机通道各自的随机序列**
+   *   （主线 / 技能副本 / 强化副本）。三条序列互不相同、互不干扰：
+   *   开一条通道不会改变另外两条的掉落，「分批领取 == 一次领取」在
+   *   **每条通道各自**成立（设计稿 §3.3 / §3.6）。
+   *
+   * ⚠ 整个 `rng` 块属于**私有随机状态**：公开快照 / 缓存 / 导出串一律省略
+   *   （`serializePublicSave` / `serializePublicSaveFull`），绝不下发客户端。
    */
-  rng: { seed: number; counter: number }
+  rng: {
+    seed: number
+    counter: number
+    /** 三条挂机通道各自的随机序列（私有，随存档落盘） */
+    channels: Record<IdleChannelKind, ChannelRngState>
+  }
   player: {
     silver: number
     crystals: number
@@ -694,25 +751,35 @@ export interface SaveData {
     creditedStages: number
   }
   idle: {
-    /** 玩家选定或自动推进的挑战目标。 */
-    currentStage: number
-    /** 挑战受阻时的刷取关卡及下次重试前所需的胜场。 */
-    farm?: { stage: number | null; winsUntilRetry: number }
     /**
-     * **挂机去向**（主线 / 技能副本 / 强化副本）。
+     * **三条挂机通道，各自独立账本**（挂机改版 v11）。
      *
-     * ⚠ **实施修正（资源/背包版本 v10）**：三个去向**共用一份挂机时间账本**
-     *   （`measuredAt` / `effectiveMs` / …），切换时先结清旧目标再换新目标
-     *   （设计稿 §3「三个去向共用一份挂机时间」）。
+     * ⚠ 主线 / 技能副本 / 强化副本**各自计量**同一段墙钟时间、各自记账，
+     *   产出互不干扰——玩家可以同时挂三条（设计 §3.1）。
+     *
+     * ⚠ 三条通道**共用同一份在线租约** `activeUntil`：
+     *   租约是「玩家此刻在线」的证明，与挂哪条通道无关。
      */
-    target: IdleTarget
-    autoAdvance: boolean
+    channels: {
+      main: IdleChannelState
+      skill: IdleChannelState
+      enhance: IdleChannelState
+    }
+    /** 在线租约（服务端向未来续约，三通道共用同一份时间轴） */
+    activeUntil: number
+    /** 已消费的有效时长总和（秒），三通道分别累计后相加 */
     totalIdleSeconds: number
-    /** 服务端已计量水位/有效预算；旧档缺失时惰性迁移。 */
-    measuredAt?: number
-    effectiveMs?: number
-    offlineElapsedMs?: number
-    activeUntil?: number
+  }
+  /**
+   * **副本进度**（与主线**分开记账**）。
+   *
+   * ⚠ 副本是**独立关卡**（挂机改版 v11）：`(变体 × 难度) = 1 关`，共 24 关，
+   *   打赢一次即通关。副本**不写** `campaign`（`clearedStage` / `stageStars` /
+   *   `creditedStages` 全不动）。
+   */
+  dungeons: {
+    /** 已通关副本关卡：key = **副本关卡 id**（`dgn_<变体>_<难度>`），值恒为 true */
+    cleared: Record<string, true>
   }
   codes: string[]
   settings: { speed: number; sfx: boolean; skipAnim: boolean }

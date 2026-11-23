@@ -1,5 +1,5 @@
 import type { SaveData } from '../model/types.ts'
-import { migrate, normalizeSave, SAVE_VERSION } from './schema.ts'
+import { migrate, normalizeSave, SAVE_VERSION, createChannelRng } from './schema.ts'
 import { SAVE_IMPORT } from '../config/save-import.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { RELIC_INDEX } from '../config/relics.ts'
@@ -7,11 +7,64 @@ import { POOLS } from '../config/pools.ts'
 import { STAGES } from '../config/stages.ts'
 import { BATTLE, LEVEL, STAR, SKILL, RELIC, REBIRTH, GACHA } from '../config/economy.ts'
 import { ITEM_IDS } from '../config/items.ts'
+import { DUNGEON_STAGE_INDEX } from '../config/dungeons.ts'
+import { IDLE_CHANNEL_KINDS } from '../systems/idle.ts'
 import { parseEquipKey } from '../systems/loadout.ts'
 import { emptyLadderSquads } from '../config/ladder.ts'
 import { dayIndex, arenaWeekIndex } from '../time.ts'
 
 const ITEM_ID_SET = new Set<string>(ITEM_IDS)
+
+/**
+ * 导入路径的**原始**通道目标校验（必须在 `normalizeSave` **之前**调用）。
+ *
+ * ⚠ **为什么不能只靠归一化之后的校验**（挂机改版 v11 修正）：
+ *   `normalizeSave` 对非法通道目标一律置 `null`（逐通道兜底：一条通道目标坏了
+ *   只关掉那一条，不连累另外两条）。于是非法 id 在归一化后**已经不存在**，
+ *   归一化之后再校验就是**死代码**——校验永远通过，坏数据照样被放进来。
+ *
+ *   导入是「客户端上传的数据」，语义上要**严格**：宁可整份拒绝，
+ *   也不能让一份引用了不存在关卡的档进入服务端（铁律 #4 单一数据源：
+ *   关卡 id 的唯一出处是配置表，非法 id 属于「凭空捏造」）。
+ */
+function validateRawChannelTargets(raw: Record<string, any>): void {
+  const channels = raw.idle?.channels
+  if (!record(channels)) return
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    const ch = channels[kind]
+    if (!record(ch)) continue
+    const target = ch.target
+    if (target === null || target === undefined) continue
+    requireValid(record(target))
+    // 目标种类必须与所在通道一致（`normalizeIdleChannel` 也是这么判的）
+    requireValid(target.kind === kind)
+    if (kind === 'main') {
+      requireValid(
+        target.stageId === null ||
+          (integer(target.stageId, 1, STAGES.length) && STAGES.some((s) => s.id === target.stageId)),
+      )
+    } else {
+      requireValid(typeof target.dungeonStageId === 'string')
+      requireValid(DUNGEON_STAGE_INDEX.has(target.dungeonStageId))
+    }
+  }
+}
+
+/**
+ * 导入路径的**原始**副本通关记录校验（同样必须在 `normalizeSave` 之前调用）。
+ *
+ * ⚠ `normalizeDungeonCleared` 会把非法 id **过滤掉** → 归一化之后同样校验不到。
+ *   导入档的副本通关记录**本来就会被清空**（不可信的通关凭证），
+ *   但引用不存在的副本 id 属于「凭空捏造」，直接整份拒绝。
+ */
+function validateRawDungeonCleared(raw: Record<string, any>): void {
+  const cleared = raw.dungeons?.cleared
+  if (cleared === null || cleared === undefined) return
+  requireValid(record(cleared))
+  for (const [id, value] of Object.entries(cleared)) {
+    requireValid(DUNGEON_STAGE_INDEX.has(id) && value === true)
+  }
+}
 
 function requireValid(ok: unknown): asserts ok {
   if (!ok) throw new Error('Invalid legacy save')
@@ -42,10 +95,17 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
     }
   }
   walk(raw)
-  requireValid(record(raw) && integer(raw.version, 1, SAVE_VERSION) && record(raw.player))
+  // ⚠ **挂机改版 v11**：导入**只接受 v11**（设计稿 §3.3 / §3.10）。
+  //   旧版本走服务端存档的迁移链，不走导入路径——导入是「客户端上传的数据」，
+  //   版本不一致时宁可拒绝，也不要把半迁移的档放进来。
+  requireValid(record(raw) && raw.version === SAVE_VERSION && record(raw.player))
   for (const k of ['heroes', 'equipped', 'team', 'gacha', 'campaign', 'idle', 'settings', 'stats']) requireValid(record(raw[k]))
   for (const k of ['relics', 'codes']) requireValid(Array.isArray(raw[k]))
   requireValid(Array.isArray(raw.team.slots) && raw.team.slots.length === 6 && Array.isArray(raw.team.presets))
+  // ⚠ **必须在归一化之前**查原始值：归一化会把非法目标 / 非法副本 id 洗成合法形状，
+  //   之后再校验就是死代码（详见 `validateRawChannelTargets` 的注释）。
+  validateRawChannelTargets(raw)
+  validateRawDungeonCleared(raw)
   const save = normalizeSave(raw)
   // ⚠ **实施修正（资源/背包版本 v10）**：导入路径**必须**走迁移。
   //   `normalizeSave` 保留原始版本号（它曾把版本改写成当前版本 →
@@ -98,13 +158,38 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
     requireValid(parsed && record(entry) && parsed.heroId === entry.heroId && Object.hasOwn(save.heroes, entry.heroId) && relicIds.has(entry.relicId) && !equipped.has(entry.relicId))
     equipped.add(entry.relicId)
   }
-  requireValid(integer(save.campaign.clearedStage, 0, STAGES.length) && STAGES.some(s => s.id === save.idle.currentStage))
+  requireValid(integer(save.campaign.clearedStage, 0, STAGES.length))
   requireValid(integer(save.campaign.creditedStages, 0, STAGES.length))
   requireValid(integer(save.gacha.pitySSR, 0, GACHA.PITY_SSR_MAX) && integer(save.gacha.pity10, 0, 10))
   requireValid(record(save.gacha.pools) && Array.isArray(save.gacha.history) && typeof save.gacha.newbieUsed === 'boolean')
   requireValid(record(save.arena) && Array.isArray(save.arena.runes))
   for (const k of ['tierPoints', 'pvpPoints', 'medals', 'arenaLevel'] as const) requireValid(integer(save.arena[k]))
-  requireValid(typeof save.idle.autoAdvance === 'boolean' && integer(save.idle.totalIdleSeconds))
+  // ⚠ **挂机改版 v11**：三条通道的账本结构逐项校验
+  //   （这层是**纵深防御**：真正的闸门在上面的原始值校验——归一化后的目标
+  //   必然合法，这里再查一遍是为了防 `normalizeSave` 语义变化时静默失守）
+  requireValid(integer(save.idle.totalIdleSeconds) && Number.isFinite(save.idle.activeUntil))
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    const ch = save.idle.channels[kind]
+    requireValid(record(ch))
+    requireValid(Number.isFinite(ch.measuredAt) && integer(ch.effectiveMs) && integer(ch.offlineElapsedMs) && integer(ch.pendingOfflineMs))
+    requireValid(ch.target === null || record(ch.target))
+    if (ch.target === null) continue
+    const target = ch.target
+    if (target.kind === 'main') {
+      requireValid(
+        target.stageId === null ||
+          (integer(target.stageId, 1, STAGES.length) && STAGES.some((s) => s.id === target.stageId)),
+      )
+    } else {
+      requireValid(typeof target.dungeonStageId === 'string')
+      requireValid(DUNGEON_STAGE_INDEX.has(target.dungeonStageId))
+    }
+  }
+  // 副本通关记录：只保留合法关卡 id
+  requireValid(record(save.dungeons?.cleared))
+  for (const [id, value] of Object.entries(save.dungeons.cleared)) {
+    requireValid(DUNGEON_STAGE_INDEX.has(id) && value === true)
+  }
   requireValid(record(save.campaign.stageStars) && integer(save.campaign.chapterProgress, 1))
   for (const [id, stars] of Object.entries(save.campaign.stageStars)) requireValid(STAGES.some(s => String(s.id) === id) && integer(stars, 0, 3))
   requireValid(save.codes.every(code => typeof code === 'string'))
@@ -112,8 +197,23 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   for (const draw of save.gacha.history) requireValid(record(draw) && HERO_INDEX.has(draw.heroId))
   requireValid((BATTLE.SPEED_OPTIONS as readonly number[]).includes(save.settings.speed) && typeof save.settings.sfx === 'boolean' && typeof save.settings.skipAnim === 'boolean')
   // 控制字段不信任导入值：不补历史离线收益、不继承可预测序列或周期领取资格。
-  save.rng = { seed: seed(), counter: 0 }
-  delete save.idle.farm
+  // ⚠ 挂机改版 v11：三条通道的随机序列也**重新派生**（导入的档不能决定随机序列）。
+  const importedSeed = seed()
+  save.rng = { seed: importedSeed, counter: 0, channels: createChannelRng(importedSeed) }
+  // ⚠ **挂机改版 v11**：导入只接受 v11，且导入后的挂机账本**按新建的方式重置**——
+  //   三条通道的计量水位 = 导入时刻，有效预算 / 离线累计 / 待报告时长全部清零。
+  //   副本通关记录与副本挂机目标一并清空（导入进度不是可信的通关凭证）。
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    const ch = save.idle.channels[kind]
+    ch.measuredAt = now
+    ch.effectiveMs = 0
+    ch.offlineElapsedMs = 0
+    ch.pendingOfflineMs = 0
+    if (kind === 'main') ch.target = { kind: 'main', stageId: null }
+    else ch.target = null
+  }
+  save.idle.activeUntil = now
+  save.dungeons.cleared = {}
   save.createdAt = save.savedAt = save.lastTickAt = save.stats.firstStartAt = now
   save.daily = {
     signInStreak: 0,

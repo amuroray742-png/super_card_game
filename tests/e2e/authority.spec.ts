@@ -4,21 +4,34 @@ import {
   E2E_PASSWORD,
   accessTokenOf,
   cachedSaveOf,
-  expOfRewards,
   loginAccount,
   postAction,
   registerAccount,
   seedSession,
-  settleIdleThroughUi,
   skipGachaReveal,
   uniqueUsername,
 } from './helpers'
 import { ACCOUNT_STORAGE_KEYS } from '../../src/core/config/account.ts'
 import { createNewSave } from '../../src/core/save/schema.ts'
 import { exportSave } from '../../src/core/save/serialize.ts'
+import type { SaveData } from '../../src/core/model/types.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
 import { getStage } from '../../src/core/config/stages.ts'
-import { GACHA, START_RESOURCES } from '../../src/core/config/economy.ts'
+import { GACHA, IDLE, START_RESOURCES } from '../../src/core/config/economy.ts'
+
+/**
+ * 服务端权威端到端用例（AGENTS.md 铁律 #28 / #29 + 挂机改版 v11）。
+ *
+ * 守的是四条新语义：
+ *   1. **服务端权威**：本地缓存改了也不算数，进度以服务端为准；
+ *   2. **幂等**：同一个 actionId 重放只扣一次费（断网重试的安全网）；
+ *   3. **多设备一致**：两台设备看到同一份进度；
+ *   4. **离线只读**：服务端不可达时只能看，不能改。
+ *
+ * ⚠ **挂机改版 v11** 的口径：挂机是**三条独立通道**（主线 / 技能副本 / 强化副本），
+ *   结算结果是**按通道分段**的 `channels[]`（不再是单个 `rewards`），
+ *   离线结算回执同样按通道分段。
+ */
 
 /**
  * 新号起始结晶（口径取 core，**不写死数字**——铁律 #4）。
@@ -26,16 +39,8 @@ import { GACHA, START_RESOURCES } from '../../src/core/config/economy.ts'
 const START_CRYSTALS = START_RESOURCES.crystals
 /** 十连的结晶消耗（= 10 抽 × 单抽价） */
 const TEN_PULL_CRYSTALS = GACHA.COST_SINGLE * GACHA.TEN_PULL_COUNT
-
-/**
- * 服务端权威端到端用例（AGENTS.md 铁律 #28 / #29）。
- *
- * 守的是四条新语义：
- *   1. **服务端权威**：本地缓存改了也不算数，进度以服务端为准；
- *   2. **幂等**：同一个 actionId 重放只扣一次费（断网重试的安全网）；
- *   3. **多设备一致**：两台设备看到同一份进度；
- *   4. **离线只读**：服务端不可达时只能看，不能改。
- */
+/** 一支能打赢第 1 章的队伍（Lv60） */
+const STRONG_TEAM = ['hanxin', 'luban', 'zhugeliang', 'libai', 'xiangyu', 'chengjisihan'] as const
 
 /** 拉服务端存档（权威版本） */
 async function pullSave(accessToken: string): Promise<Record<string, never> | null> {
@@ -70,6 +75,30 @@ async function pullTen(page: Page): Promise<void> {
   await collect.click()
 }
 
+/**
+ * 造一个前置存档，**但不要打开页面**。
+ *
+ * ⚠ 离线结算用例需要「玩家离线一段时间」：
+ *   页面开着 → 心跳一直续租 → 在线计量 → 永远不会有离线回执。
+ *   所以这里只走服务端动作层（导入档），**不载入页面**。
+ */
+async function importWithoutPage(
+  prefix: string,
+  mutate: (save: SaveData) => void,
+): Promise<{ accountId: number; token: string; username: string }> {
+  const username = uniqueUsername(prefix)
+  const session = await registerAccount(username)
+  const token = await accessTokenOf(session)
+  const save = createNewSave(Date.now())
+  mutate(save)
+  const imported = await postAction(token, `${prefix}-fixture`, {
+    type: 'save.import',
+    payload: exportSave(save),
+  })
+  expect(imported.ok, '前置存档导入失败').toBe(true)
+  return { accountId: session.user.id, token, username }
+}
+
 test.describe('服务端权威', () => {
   test('本地缓存改了也不算数：进度以服务端为准', async ({ page }) => {
     const session = await registerAccount(uniqueUsername('auth'))
@@ -93,6 +122,49 @@ test.describe('服务端权威', () => {
     await page.waitForLoadState('networkidle')
     const after = await cachedSaveOf(page, session.user.id)
     expect(after?.player?.crystals).toBe(START_CRYSTALS)
+  })
+
+  test('客户端改本地缓存的挂机通道不生效：下一个服务端回包覆盖它', async ({ page }) => {
+    const session = await registerAccount(uniqueUsername('authidle'))
+    const token = await accessTokenOf(session)
+    // 前置：已通关到第 5 关 ⇒ 主线通道有目标（跟随模式）
+    const save = createNewSave(Date.now())
+    STRONG_TEAM.forEach((id, slot) => {
+      save.heroes[id] = { ...createHeroState(id, Date.now()), level: 60 }
+      save.team.slots[slot] = id
+    })
+    save.campaign.clearedStage = 5
+    const imported = await postAction(token, 'authidle-fixture', {
+      type: 'save.import',
+      payload: exportSave(save),
+    })
+    expect(imported.ok).toBe(true)
+
+    await seedSession(page, await loginAccount(session.user.username))
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+
+    // 篡改本地缓存里的**三条通道目标**
+    await page.evaluate((key) => {
+      const cached = JSON.parse(localStorage.getItem(key)!)
+      cached.idle.channels.main.target = { kind: 'main', stageId: 3 }
+      cached.idle.channels.skill.target = { kind: 'skill', dungeonStageId: 'dgn_skillFire_easy' }
+      cached.idle.channels.enhance.target = { kind: 'enhance', dungeonStageId: 'dgn_enhanceTier1_easy' }
+      localStorage.setItem(key, JSON.stringify(cached))
+    }, slotKey(session.user.id))
+    expect((await cachedSaveOf(page, session.user.id))?.idle?.channels?.main?.target)
+      .toEqual({ kind: 'main', stageId: 3 })
+
+    // 触发一次**客户端动作**（服务端回包 = 权威版本，覆盖本地镜像）
+    await page.getByTestId('campaign-challenge').click()
+
+    // 篡改值被覆盖回服务端的形状：主线仍是「跟随」，副本通道仍是关闭
+    await expect
+      .poll(async () => (await cachedSaveOf(page, session.user.id))?.idle?.channels?.main?.target, { timeout: 10_000 })
+      .toEqual({ kind: 'main', stageId: null })
+    const cached = await cachedSaveOf(page, session.user.id)
+    expect(cached?.idle?.channels?.skill?.target).toBeNull()
+    expect(cached?.idle?.channels?.enhance?.target).toBeNull()
   })
 
   test('同一个 actionId 重放只扣一次费（断网重试的安全网）', async () => {
@@ -127,6 +199,45 @@ test.describe('服务端权威', () => {
     // 十连只扣一次结晶（10 抽 × 300 = 3,000）
     expect(after.player.crystals).toBe(START_CRYSTALS - TEN_PULL_CRYSTALS)
     expect(after.stats.totalPulls).toBe(10)
+  })
+
+  test('挑战类动作重放同一 actionId：只发一次奖、不重复推进', async () => {
+    const { token } = await importWithoutPage('idemch', (save) => {
+      STRONG_TEAM.forEach((id, slot) => {
+        save.heroes[id] = { ...createHeroState(id, Date.now()), level: 60 }
+        save.team.slots[slot] = id
+      })
+    })
+
+    const first = await postAction(token, 'ch-idem', { type: 'campaign.challenge' })
+    expect(first.ok).toBe(true)
+    const firstResult = first.result as unknown as {
+      win: boolean
+      firstClear: boolean
+      rewards: { crystals?: number }
+    }
+    expect(firstResult.win).toBe(true)
+    expect(firstResult.firstClear).toBe(true)
+    // 首通结晶发了一次
+    expect(firstResult.rewards.crystals).toBeGreaterThan(0)
+    // 战斗回放**只在第一次**返回（不进幂等日志）
+    expect(first.replay).toBeTruthy()
+
+    // 重放同一 actionId
+    const second = await postAction(token, 'ch-idem', { type: 'campaign.challenge' })
+    expect(second.ok).toBe(true)
+    expect(second.replayed).toBe(true)
+    expect(second.result).toEqual(first.result)
+    // 幂等日志里**没有**战斗回放 ⇒ 重放拿不到演出数据（结果与奖励仍一致）
+    expect(second.replay).toBeUndefined()
+
+    // 进度只推进了一次、结晶只发了一次
+    const after = await pullSave(token) as unknown as {
+      player: { crystals: number }
+      campaign: { clearedStage: number }
+    }
+    expect(after.campaign.clearedStage).toBe(1)
+    expect(after.player.crystals).toBe(START_CRYSTALS + firstResult.rewards.crystals!)
   })
 })
 
@@ -239,47 +350,43 @@ test.describe('离线只读', () => {
   })
 })
 
-test('挑战 BOSS 战败后页面显示刷取关卡，后续推征继续发放战利品', async ({ page }) => {
-  // ⚠ 本用例要**真实等挂机时间**（每场 6 秒）才能多刷几场把经验书刷出来
-  //   （经验书是概率掉落，见下面注释）→ 默认 30 秒超时不够，放宽到 90 秒。
-  test.slow()
-  const account = await registerAccount(uniqueUsername('farm'))
-  const token = await accessTokenOf(account)
-  const now = Date.now()
-  const save = createNewSave(now)
-  const ids = ['jeannedarc', 'nangdengel', 'huatuo', 'bianque']
-  for (const [slot, id] of ids.entries()) {
-    save.heroes[id] = { ...createHeroState(id, now), level: 44 }
-    save.team.slots[slot] = id
-  }
-  save.campaign.clearedStage = 61
-  save.idle.currentStage = 62
-  const imported = await postAction(token, 'farm-fixture', { type: 'save.import', payload: exportSave(save) })
-  expect(imported.ok).toBe(true)
-  await seedSession(page, await loginAccount(account.user.username))
-  await page.goto('/#/expedition')
-  await expect(page.getByText(getStage(62).name, { exact: true })).toBeVisible()
-  const offline = page.locator('.dialog').filter({ hasText: '离线推征结算' })
-  if (await offline.isVisible()) await offline.getByRole('button', { name: '收下' }).click()
+test.describe('离线结算回执（服务端出具 · 三通道分段）', () => {
+  // ⚠ 这条用例要**真实离线一段时间**（阈值 `IDLE.OFFLINE_SETTLE_THRESHOLD_SEC` = 60 秒）
+  //   → 预算必须放宽到 3 分钟。
+  test.setTimeout(240_000)
 
-  await settleIdleThroughUi(page, account.user.id, 1)
-  await expect(page.getByText('当前挑战受阻')).toBeVisible()
-  await expect(page.getByText(`正在刷取「${getStage(61).name}」`, { exact: false })).toBeVisible()
+  test('离线期间不打开页面，回来后按通道分段弹出结算回执', async ({ page }) => {
+    // ⚠ **不要打开页面**：页面开着 → 心跳一直续租 → 全算在线 → 永远没有离线回执
+    const { username } = await importWithoutPage('offsettle', (save) => {
+      STRONG_TEAM.forEach((id, slot) => {
+        save.heroes[id] = { ...createHeroState(id, Date.now()), level: 60 }
+        save.team.slots[slot] = id
+      })
+      // 已通关到第 5 关 ⇒ 主线通道有目标（跟随最新通关关卡）
+      save.campaign.clearedStage = 5
+    })
 
-  // ⚠ 资源/背包版本 v10：经验改由**经验书**产出（奖励包里没有 exp 字段），
-  //   而经验书是**概率掉落**（每类道具各自独立掷一次骰子，见 `economy.ts` 的 `expBookDrop`）
-  //   → 「一场一定有书」是错的假设（早期章节只有 ~73% 出书率）。
-  //   这里有界重试：累计拿到书为止，而不是断言单场。
-  //   ⚠ 每轮都要**真实等 6 秒**（挂机不创造时间）→ 上限 6 轮 ≈ 36 秒，
-  //   所以本用例用 `test.slow()` 把超时放宽到 90 秒。
-  let farmed = await settleIdleThroughUi(page, account.user.id, 1)
-  let exp = expOfRewards(farmed.rewards)
-  for (let i = 0; i < 5 && exp <= 0; i++) {
-    farmed = await settleIdleThroughUi(page, account.user.id, 1)
-    exp += expOfRewards(farmed.rewards)
-  }
-  expect(exp, '挂机应当产出经验书').toBeGreaterThan(0)
-  expect(farmed.rewards.relics?.length ?? 0).toBeGreaterThanOrEqual(1)
-  expect(farmed.reachedStage).toBe(61)
-  await expect(page.getByText(getStage(62).name, { exact: true })).toBeVisible()
+    // 真实等待超过离线阈值
+    await page.waitForTimeout(IDLE.OFFLINE_SETTLE_THRESHOLD_SEC * 1000 + 15_000)
+
+    // 回来上线 → 服务端补算离线收益并回传回执
+    await seedSession(page, await loginAccount(username))
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+
+    const dialog = page.getByTestId('offline-settlement')
+    await expect(dialog).toBeVisible({ timeout: 20_000 })
+    // 标题与总次数都来自**服务端回执**
+    await expect(dialog).toContainText('离线挂机结算')
+    await expect(dialog).toContainText('三条通道各自结算')
+    // 三通道分段：主线这一段带着**目标名**与次数
+    const main = dialog.locator('.offline-chan').filter({ hasText: '主线' })
+    await expect(main).toBeVisible()
+    await expect(main).toContainText(getStage(5).name)
+    await expect(main).toContainText('次')
+
+    // 收下后弹窗消失
+    await dialog.getByRole('button', { name: '收下', exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+  })
 })

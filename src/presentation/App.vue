@@ -99,8 +99,17 @@ function goGacha() {
 // ⚠ 结算明细的名称一律取登记表（铁律 #8：禁止就地写中文名）。
 //   旧实现在这里硬编码「银两 / 经验 / 术式结晶 / 强化石 / 英灵印记」，
 //   与背包 / 登记表对不上——现已改为通用聚合（`rewardLines`）。
-const offlineRewards = computed(() => rewardLines(store.offlineReport?.rewards))
-const offlineBlockedStage = computed(() => STAGE_INDEX.get(store.offlineReport?.blockedAtStage ?? 0))
+//
+// ⚠ **挂机改版 v11**：离线结算是**三通道分段**——每条通道各自报告
+//   目标、结算次数与掉落明细（`ChannelSettlement`）。
+const offlineChannels = computed(() =>
+  (store.offlineReport?.channels ?? []).map((ch) => ({
+    ...ch,
+    /** 通道名（主线 / 技能副本 / 强化副本） */
+    label: ch.channel === 'main' ? '主线' : ch.channel === 'skill' ? '技能副本' : '强化副本',
+    lines: rewardLines(ch.rewards),
+  })),
+)
 
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 function stopHeartbeat() {
@@ -273,16 +282,20 @@ function goBackBare() {
 
     <!-- 离线结算（未登录时不显示：弹窗属于游戏内结算，登录页不该出现） -->
     <div v-if="!bare && store.offlineReport" class="mask" @click.self="store.offlineReport = null">
-      <div class="dialog">
-        <div class="panel-title">离线推征结算</div>
+      <div class="dialog" data-testid="offline-settlement">
+        <div class="panel-title">离线挂机结算</div>
         <p class="muted tiny" style="margin: 0 0 10px">
-          离线时长 {{ Math.round(store.offlineReport.elapsedSeconds / 60) }} 分钟，
-          共进行 {{ store.offlineReport.battles }} 场推征
+          三条通道各自结算，共 {{ store.offlineReport.rolls }} 次。
         </p>
-        <p v-if="offlineBlockedStage" class="muted tiny">本次结算在「{{ offlineBlockedStage.name }}」战败。</p>
-        <div v-for="r in offlineRewards" :key="r.label" class="row-between" style="padding: 4px 0">
-          <span class="muted">{{ r.label }}</span>
-          <b>+{{ formatNumber(r.value) }}</b>
+        <div v-for="ch in offlineChannels" :key="ch.channel" class="offline-chan">
+          <div class="row-between tiny">
+            <b>{{ ch.label }}</b>
+            <span class="muted">{{ ch.rolls }} 次 · {{ ch.targetName }}</span>
+          </div>
+          <div v-for="r in ch.lines" :key="r.key" class="row-between tiny" style="padding: 3px 0 0 8px">
+            <span class="muted">{{ r.label }}</span>
+            <b>+{{ formatNumber(r.value) }}</b>
+          </div>
         </div>
         <button class="btn btn-primary btn-block" style="margin-top: 12px" @click="store.offlineReport = null">
           收下

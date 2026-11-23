@@ -57,6 +57,9 @@
  * npx tsx tools/capture/screenshot.ts --ladder --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/ladder.png
  *
+ * npx tsx tools/capture/screenshot.ts --dungeon-challenge --api http://127.0.0.1:8791 \
+ *   --url http://127.0.0.1:4188 --out artifacts/art-preview/dungeon.png
+ *
  * # 浏览器兼容性测量（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏）
  * npx tsx tools/capture/screenshot.ts --compat --route /login \
  *   --url http://127.0.0.1:4188 --compat-out artifacts/baselines/browser-compat.json
@@ -67,6 +70,8 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { assertSafeOrigin, ISOLATED_PREVIEW_URL } from './origin-guard.ts'
 import { buildRelicFixture, buildBackpackFixture, importRelicFixture } from './relic-fixture.ts'
+import { buildDungeonFixture, importDungeonFixture } from './dungeon-fixture.ts'
+import { dungeonStageId, dungeonStagesOf } from '../../src/core/config/dungeons.ts'
 
 /** 隔离预览服务默认端口（与 dev server 刻意不同） */
 const DEFAULT_URL = ISOLATED_PREVIEW_URL
@@ -91,6 +96,8 @@ interface Options {
   daily: boolean
   /** 演武场场景：登录 → 十连 → 演武场页（三队编成 / 敌方梯队 / 挑战） */
   ladder: boolean
+  /** 副本挑战场景：登录 → 十连 → 副本页（24 关列表 / 挑战 / 设为挂机通道） */
+  dungeonChallenge: boolean
   /** 浏览器兼容性测量模式（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏） */
   compat: boolean
   /** 兼容性报告的输出路径（JSON） */
@@ -125,6 +132,7 @@ function parseArgs(argv: string[]): Options {
     backpack: argv.includes('--backpack'),
     daily: argv.includes('--daily'),
     ladder: argv.includes('--ladder'),
+    dungeonChallenge: argv.includes('--dungeon-challenge'),
     compat: argv.includes('--compat'),
     compatOut: get('--compat-out') ?? 'artifacts/baselines/browser-compat.json',
     api: get('--api') ?? '',
@@ -377,14 +385,24 @@ async function runBattleScenario(
     await dialog.waitFor({ state: 'detached' })
   }
 
-  // 3) 进战斗：默认走推征页「观战」，指定 --stage 则走关卡详情页「战斗预览」
-  //    （关卡详情页能拍到 BOSS 关，验证 BOSS 描边与分段血条）
+  // 3) 进战斗：
+  //    - 指定 --stage → 走**关卡详情弹窗**的「战斗预览」（客户端本地预览，不发奖）
+  //    - 不指定 → 走推征页的「挑战此关」（**服务端真实战斗** → 回放一次性回传 → 页面级回放面板）
+  //
+  // ⚠ **挂机改版 v11：关卡详情改成弹窗**（`StageDetailModal.vue`），
+  //   推征页的关卡网格点一下就开弹窗（`stage-cell-<id>`），
+  //   深链 `/#/stage/:id` 仍在（`StageDetailView.vue` 是薄壳）但不再是主入口。
+  //   ⇒ 截图走**弹窗**这条真实路径，才截得到玩家实际看到的界面。
   if (opts.stage) {
-    await page.goto(`${base}/#/stage/${opts.stage}`, { waitUntil: 'networkidle' })
+    await page.goto(`${base}/#/expedition`, { waitUntil: 'networkidle' })
+    await page.locator(`[data-testid="stage-cell-${opts.stage}"]`).first().click()
+    await page.locator('[data-testid="stage-detail-modal"]').waitFor({ state: 'visible' })
     await page.getByRole('button', { name: '战斗预览', exact: true }).click()
   } else {
     await page.goto(`${base}/#/expedition`, { waitUntil: 'networkidle' })
-    await page.getByRole('button', { name: '观战', exact: true }).click()
+    await page.getByTestId('campaign-challenge').click()
+    // ⚠ 战斗在**服务端**执行，回放走响应的一次性 `replay` 字段 ⇒ 面板会晚一点出现
+    await page.getByTestId('challenge-replay').waitFor({ state: 'visible', timeout: 30_000 })
   }
   await page.locator('canvas.battle-canvas').waitFor({ state: 'visible' })
   // 让演出推进几秒，好让画面上有伤害数字与血条变化
@@ -396,8 +414,10 @@ async function runBattleScenario(
   await page.screenshot({ path: outPath })
 
   // 4) 结算面板：跳过演出后出战后结算
-  await page.getByRole('button', { name: '跳过', exact: true }).click()
+  await page.locator('[data-testid="battle-skip"]').first().click()
   await page.locator('.result-panel').waitFor({ state: 'visible' })
+  // ⚠ 结算面板在画布 + 战报**下方**，不滚过去就只截到战报（结算那张图看不到结算）
+  await page.locator('.result-panel').scrollIntoViewIfNeeded()
   await page.waitForTimeout(300)
 
   return opts.out.replace(/\.png$/, '') + '-result.png'
@@ -445,10 +465,10 @@ async function assertResourceBarFullyVisible(page: Page): Promise<void> {
  * 2. **一键推荐装备**：英灵页的「一键推荐装备」按钮与战力增量；
  * 3. **套装效果可见**：2/4/6 件阶梯加成与「还差几件」的提示。
  *
- * ⚠ 为什么用「导入前置」而不是「推征挂机」：
- *   遗物**只**从推征（挂机）与离线结算产出，而挂机一场要真实等 6 秒——
- *   「推征 10 场」的 10 只是**领取上限**，客户端不创造时间。
- *   原脚本点 3 次就等遗物出现，累计时间连一场都不够 → 仓库永远空 → `.relic-cell` 等不到。
+ * ⚠ 为什么用「导入前置」而不是「祈愿抽遗物」：
+ *   挂机改版 v11 后遗物**已移出掉落表**，唯一来源是独立入口「遗物祈愿」
+ *   （`relic.acquire`，5000 银两 / 次）。凑齐 60 件要祈愿 60 次（30 万银两），
+ *   而且抽到的是**随机稀有度**，凑不出「12 套各 5 件」。
  *   导入前置一次到位，**60 张图标能在同一张仓库截图里全部验收**。
  *   详见 `tools/capture/relic-fixture.ts`。
  */
@@ -576,11 +596,15 @@ async function runBackpackScenario(
   await page.waitForTimeout(600)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-dungeon.png'), fullPage: opts.fullPage })
 
-  // ⑦ 强化副本页（三档石 + 每胜产量 + 设为挂机去向）
+  // ⑦ 强化副本页（三档石 + 每胜产量 + 设为挂机通道）
+  //    ⚠ 挂机改版 v11：副本页是「24 个独立关卡」平铺，**变体不再是独立分组**，
+  //    断言落在关卡行上（关卡 id 唯一出处是 core 的 `dungeonStageId`）。
   await page.goto(`${base}/#/dungeon?kind=enhance&tier=relicStoneTier1&difficulty=easy`, {
     waitUntil: 'networkidle',
   })
-  await page.getByTestId('dungeon-variant-enhanceTier1').waitFor({ state: 'visible', timeout: 10_000 })
+  await page
+    .getByTestId(`dungeon-stage-${dungeonStageId('enhanceTier1', 'easy')}`)
+    .waitFor({ state: 'visible', timeout: 10_000 })
   await page.waitForTimeout(600)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-dungeon-enhance.png'), fullPage: opts.fullPage })
 
@@ -946,6 +970,99 @@ async function runLadderScenario(
   return ''
 }
 
+/**
+ * 副本挑战场景（挂机改版 v11 新增）。
+ *
+ * ⚠ 为什么要有这个场景：副本从「取材主线波次」变成 **24 个独立关卡**之后，
+ *   副本页多了一整张关卡列表（按难度段分组）、每关有「挑战」与「设为挂机通道」
+ *   两个动作、还有「未通关 / 未解锁」两种状态——
+ *   这些**只在副本页上验**得出，单测与 E2E 都看不到布局与文案。
+ *
+ * ⚠ **不许直连玩家 origin**：本脚本跑在隔离 context + 隔离后端里（见 `setupAccount`）。
+ */
+async function runDungeonChallengeScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  // ① 先导入前置存档（满编队伍 + 金属性英灵）
+  //    ⚠ 手动挑战要**队伍非空**，新号十连只有散落英灵、编队是空的 ⇒ 挑战会被直接拒。
+  //    ⚠ 导入只对「服务端还没有存档」的账号开放 → 必须早于页面首屏建档。
+  const session = await registerSession(opts.api)
+  await importDungeonFixture(opts.api, session.accessToken, buildDungeonFixture())
+  await injectSession(context, opts, session)
+  const base = opts.url.replace(/\/$/, '')
+
+  // ② 进副本页（默认技能副本；深链 `?kind=` 是保留的入口）
+  await page.goto(`${base}/#/dungeon?kind=skill`, { waitUntil: 'networkidle' })
+  await page.locator('[data-testid="dungeon-kind-skill"]').waitFor({ state: 'visible' })
+  await page.waitForTimeout(opts.waitMs)
+
+  // ③ 列表完整性：副本页按 tab 分成**技能 15 关**（5 变体 × 3 难度）
+  //    与**强化 9 关**（3 变体 × 3 难度），合计 24 关。
+  //    ⚠ 断言的数量走 core 的 `dungeonStagesOf`（关卡表的唯一出处），
+  //    不在脚本里另写一份「15 / 9」。
+  const skillCount = dungeonStagesOf('skill').length
+  const enhanceCount = dungeonStagesOf('enhance').length
+  const rows = page.locator('[data-testid^="dungeon-stage-"]')
+  const rowCount = await rows.count()
+  if (rowCount !== skillCount) {
+    throw new Error(`技能副本页应有 ${skillCount} 行，实际 ${rowCount} 行`)
+  }
+
+  // ④ 首关未通关 ⇒ 「挑战」可点、「设为挂机通道」被拒（目标必须已通关）
+  const firstStageId = dungeonStageId('skillGold', 'easy')
+  const firstRow = page.locator(`[data-testid="dungeon-stage-${firstStageId}"]`)
+  await firstRow.waitFor({ state: 'visible' })
+  const setChannel = firstRow.locator(`[data-testid="dungeon-set-channel-${firstStageId}"]`)
+  const setDisabled = await setChannel.isDisabled()
+  if (!setDisabled) {
+    throw new Error(`${firstStageId} 尚未通关，「设为挂机通道」应当不可用`)
+  }
+  await firstRow.scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: outPath })
+
+  // ⑤ 挑战该关：战斗在服务端执行 → 回放一次性回传 → 页面级回放面板播出来
+  await firstRow.locator(`[data-testid="dungeon-challenge-${firstStageId}"]`).click()
+  await page.getByTestId('challenge-replay').waitFor({ state: 'visible', timeout: 30_000 })
+  // 跳过演出：战斗可能打满 30 回合，逐帧等结算会超时（截图要的是**结算**那一帧）
+  await page.getByTestId('battle-skip').click({ timeout: 10_000 })
+  await page.locator('.result-panel').waitFor({ state: 'visible', timeout: 30_000 })
+  await page.getByTestId('challenge-replay').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(400)
+  const resultPath = outPath.replace(/\.png$/, '') + '-result.png'
+  await page.screenshot({ path: resultPath })
+  console.log(`副本挑战结算截图已保存：${resultPath}`)
+
+  // ⑥ 打赢一次即通关 ⇒ 「已通关」+「设为挂机通道」变为可用（这是副本的核心契约）
+  await expectEnabled(firstRow.locator(`[data-testid="dungeon-set-channel-${firstStageId}"]`), '设为挂机通道')
+
+  // ⑦ 强化副本 tab：另有 enhanceCount 关（合计 24 关）
+  await page.locator('[data-testid="dungeon-kind-enhance"]').click()
+  await page.waitForTimeout(opts.waitMs)
+  const enhanceRows = await page.locator('[data-testid^="dungeon-stage-"]').count()
+  if (enhanceRows !== enhanceCount) {
+    throw new Error(`强化副本页应有 ${enhanceCount} 行，实际 ${enhanceRows} 行`)
+  }
+  await page.screenshot({ path: outPath.replace(/\.png$/, '') + '-enhance.png' })
+
+  // ⚠ 返回空串：本场景自己拍完三张（列表 / 结算 / 强化 tab），
+  //   再让 main() 按 resultPath 补拍会**覆盖掉结算那张**（它拍的是切 tab 之后的画面）。
+  return ''
+}
+
+/** 断言某个按钮**可用**（不可用就直接报错，不静默通过） */
+async function expectEnabled(locator: import('@playwright/test').Locator, label: string): Promise<void> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    if (!(await locator.isDisabled())) return
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  throw new Error(`「${label}」应当变为可用，但仍是禁用态`)
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   assertSafeOrigin(opts.url)
@@ -954,8 +1071,8 @@ async function main(): Promise<void> {
     await runCompatScenario(opts)
     return
   }
-  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic || opts.backpack || opts.daily || opts.ladder) && !opts.api) {
-    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物 / 背包 / 每日任务 / 演武场场景需要 --api <隔离后端地址>（用于注册临时账号）')
+  if ((opts.battle || opts.hero || opts.gachaTicket || opts.gachaReveal || opts.relic || opts.backpack || opts.daily || opts.ladder || opts.dungeonChallenge) && !opts.api) {
+    throw new Error('观战 / 英灵详情 / 抽卡券 / 抽卡演出 / 遗物 / 背包 / 每日任务 / 演武场 / 副本挑战场景需要 --api <隔离后端地址>（用于注册临时账号）')
   }
 
   const target = `${opts.url.replace(/\/$/, '')}/#${opts.route}`
@@ -987,6 +1104,8 @@ async function main(): Promise<void> {
       await runDailyScenario(context, page, opts, outPath)
     } else if (opts.ladder) {
       await runLadderScenario(context, page, opts, outPath)
+    } else if (opts.dungeonChallenge) {
+      resultPath = await runDungeonChallengeScenario(context, page, opts, outPath)
     } else if (opts.gachaTicket) {
       await runGachaTicketScenario(context, page, opts, outPath)
     } else if (opts.gachaReveal) {
@@ -1010,7 +1129,7 @@ async function main(): Promise<void> {
       await page.waitForTimeout(400)
     }
 
-    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic && !opts.backpack && !opts.daily && !opts.ladder) {
+    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic && !opts.backpack && !opts.daily && !opts.ladder && !opts.dungeonChallenge) {
       await page.screenshot({ path: outPath, fullPage: opts.fullPage })
     }
     if (resultPath) {

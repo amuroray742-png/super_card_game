@@ -30,8 +30,11 @@ import type {
   ArenaMatch,
   ArenaLoadout,
   BattleContext,
+  BattleResult,
   Element,
-  IdleTarget,
+  IdleChannelKind,
+  IdleChannelState,
+  IdleChannelTarget,
   LadderRoundResult,
   Rarity,
   RelicInstance,
@@ -47,10 +50,9 @@ import {
   BATTLE,
   IDLE,
   RELIC,
+  RELIC_ACQUIRE,
   LEGACY_CONVERSION,
   EXP_BOOK,
-  DUNGEON_DIFFICULTY_IDS,
-  type DungeonDifficultyId,
   type RelicStoneTierId,
 } from '../config/economy.ts'
 import {
@@ -61,10 +63,17 @@ import {
   itemName,
   type ItemId,
 } from '../config/items.ts'
-import { findDungeonVariant } from '../config/dungeons.ts'
-import { dungeonUnlocked, runDungeon } from './dungeons.ts'
+import {
+  DUNGEON_INDEX,
+  dungeonStageById,
+  findDungeonVariant,
+} from '../config/dungeons.ts'
+import { dungeonStageUnlocked, dungeonUnlocked, runDungeonLevel } from './dungeons.ts'
 import { grantFirstClearCrystals } from './first-clear.ts'
 import { STAGE_INDEX } from '../config/stages.ts'
+import { getEnemy } from '../config/enemies.ts'
+import { relicIdsByRarity } from '../config/relics.ts'
+import { runBattle } from './battle.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { getPool } from '../config/pools.ts'
 import { arenaWeekIndex, dayIndex } from '../time.ts'
@@ -111,7 +120,15 @@ import {
   resolvePayment,
   summarizePull,
 } from './gacha.ts'
-import { runIdle, offlineEffectiveSeconds, type OfflineSettlementResult } from './idle.ts'
+import {
+  IDLE_CHANNEL_KINDS,
+  measureIdleChannels,
+  mergeRewardBundles,
+  resolveChannelTarget,
+  rollMainDrop,
+  settleIdleChannels,
+  type ChannelSettlement,
+} from './idle.ts'
 import { advanceTasks, rollTasks, taskRewardBundle, taskView } from './tasks.ts'
 import {
   emptyOverflow,
@@ -150,22 +167,23 @@ import { createNewSave, normalizeSave } from '../save/schema.ts'
  */
 export type GameAction =
   | { type: 'gacha.pull'; poolId: string; count: 1 | 10 }
-  | { type: 'idle.tick'; battles: number }
+  | { type: 'idle.tick' }
   | { type: 'idle.heartbeat' }
   | { type: 'idle.claimOffline' }
   | {
-      type: 'idle.setTarget'
-      /** 去向种类：主线 / 技能副本 / 强化副本 */
-      kind: IdleTarget['kind']
-      /** 主线去向的目标关卡（省略 = 沿用当前目标） */
-      stageId?: number
-      /** 技能副本：五行 */
-      element?: Element
-      /** 强化副本：石档 */
-      tier?: RelicStoneTierId
-      /** 副本难度 */
-      difficulty?: DungeonDifficultyId
+      type: 'idle.setChannel'
+      /** 通道种类：主线 / 技能副本 / 强化副本 */
+      channel: IdleChannelKind
+      /** 主线通道：省略或 null = 跟随最新通关关卡 */
+      stageId?: number | null
+      /** 技能 / 强化通道：副本关卡 id（`dgn_<变体>_<难度>`） */
+      dungeonStageId?: string
+      /** 关闭通道（仅 skill / enhance 可关） */
+      disabled?: boolean
     }
+  | { type: 'campaign.challenge'; stageId?: number }
+  | { type: 'dungeon.challenge'; stageId: string }
+  | { type: 'relic.acquire' }
   | { type: 'settings.update'; speed?: number; sfx?: boolean; skipAnim?: boolean }
   | { type: 'hero.feedExp'; heroId: string; amount: number }
   | { type: 'hero.feedBooks'; heroId: string; bookId: ItemId; count: number }
@@ -216,18 +234,71 @@ export interface PullActionResult {
   newbieUsedConsumed: boolean
 }
 
+/**
+ * **挂机领取结果**（三通道并行，挂机改版 v11）。
+ */
 export interface IdleActionResult {
-  battles: number
+  /** 三通道明细（只含本次有产出的通道） */
+  channels: ChannelSettlement[]
+  /** 本次结算总次数 */
+  rolls: number
+}
+
+/**
+ * **挂机通道设置结果**。
+ */
+export interface IdleChannelResult {
+  /** 被设置的通道 */
+  channel: IdleChannelKind
+  /** 通道的新状态（`null` = 通道关闭） */
+  target: IdleChannelTarget | null
+  /** 切换前按**旧目标**结清的明细（无产出时为空数组） */
+  settled: ChannelSettlement[]
+}
+
+/**
+ * **主线手动挑战**的结果（挂机改版 v11：主线推进改为纯手动挑战）。
+ */
+export interface CampaignChallengeResult {
+  stageId: number
+  win: boolean
+  /** 是否为首通（首次通关） */
+  firstClear: boolean
+  /** 本次胜利奖励，战败时为空 */
   rewards: RewardBundle
-  reachedStage: number
-  blockedAtStage: number | null
   /**
-   * 副本结算明细（**挂机去向是副本时**才有）。
+   * 战斗回放（**不进幂等日志**）。
    *
-   * ⚠ 副本战败要能直接给出「降一档难度」的建议（设计稿 §3），
-   *   所以这个字段必须跟着动作结果回到界面（铁律 #27：规则要写在玩家眼前）。
+   * ⚠ 服务端在落库前把它挪到响应的 `replay` 字段：
+   *   `BattleResult.log` 上限 1500 条，存进 24 小时幂等日志 = 每天几十 MB。
    */
-  dungeon?: OfflineSettlementResult['dungeon']
+  battle?: BattleResult
+}
+
+/**
+ * **副本手动挑战**的结果。
+ */
+export interface DungeonChallengeResult {
+  /** 副本关卡 id */
+  stageId: string
+  win: boolean
+  /** 本次是否首次通关（并已记入 dungeons.cleared） */
+  firstClear: boolean
+  rewards: RewardBundle
+  /** 战斗回放（**不进幂等日志**，同 `CampaignChallengeResult.battle`） */
+  battle?: BattleResult
+}
+
+/**
+ * **遗物祈愿**的结果（遗物的独立获取入口，§1.3 / U3）。
+ */
+export interface RelicAcquireResult {
+  /** 遗物定义 id */
+  relicId: string
+  /** 遗物实例 uid */
+  uid: string
+  /** 消耗的银两 */
+  silver: number
 }
 
 /**
@@ -311,8 +382,11 @@ export interface ActionResultMap {
   'gacha.pull': PullActionResult
   'idle.tick': IdleActionResult
   'idle.heartbeat': true
-  'idle.claimOffline': OfflineSettlementResult | null
-  'idle.setTarget': { target: IdleTarget; stageId: number }
+  'idle.claimOffline': IdleActionResult
+  'idle.setChannel': IdleChannelResult
+  'campaign.challenge': CampaignChallengeResult
+  'dungeon.challenge': DungeonChallengeResult
+  'relic.acquire': RelicAcquireResult
   'settings.update': true
   'hero.feedExp': FeedExpResult
   'hero.feedBooks': FeedBooksResult
@@ -448,43 +522,10 @@ export function applyRewardBundle(
 /**
  * 奖励包**通用聚合**（结算明细用）。
  *
- * ⚠ 旧实现是硬编码键数组 `['silver','exp','skillStones','relicStones','emblems']`
- *   → 新增的 `items`（经验书 / 五行材料 / 强化石）根本不会出现在结算面板里
- *   （铁律 #26：掉落必须有真实链路）。
- *   现在改为**遍历奖励包**本身，新增资源类型自动出现在明细里。
+ * ⚠ **唯一一份口径在 `core/systems/idle.ts`**（铁律 #4：两处各写一套必然对不上），
+ *   这里**转出**而不是再写一遍。
  */
-export function mergeRewardBundles(target: RewardBundle, source: RewardBundle): RewardBundle {
-  for (const [key, value] of Object.entries(source)) {
-    if (value === undefined) continue
-    if (key === 'relics' || key === 'heroes') {
-      const list = value as string[]
-      if (list.length === 0) continue
-      const bucket = (target[key] as string[] | undefined) ?? []
-      bucket.push(...list)
-      target[key as 'relics' | 'heroes'] = bucket
-      continue
-    }
-    if (key === 'shards') {
-      const bucket = { ...(target.shards ?? {}) }
-      for (const [id, n] of Object.entries(value as Record<string, number>)) {
-        bucket[id] = (bucket[id] ?? 0) + n
-      }
-      target.shards = bucket
-      continue
-    }
-    if (key === 'items') {
-      const bucket = { ...(target.items ?? {}) }
-      for (const [id, n] of Object.entries(value as Record<string, number>)) {
-        bucket[id as ItemId] = (bucket[id as ItemId] ?? 0) + n
-      }
-      target.items = bucket
-      continue
-    }
-    const num = value as number
-    target[key as 'silver' | 'crystals'] = ((target[key as 'silver' | 'crystals'] as number | undefined) ?? 0) + num
-  }
-  return target
-}
+export { mergeRewardBundles } from './idle.ts'
 
 /** 负载内的 uid 去重（重复提交的第一层防护） */
 function dedupeUids(uids: readonly string[]): string[] {
@@ -620,260 +661,345 @@ function actionPull(
   )
 }
 
-function measureIdleLedger(save: SaveData, ctx: ActionContext): void {
-  settleIdleLedger(save, ctx, 0)
-}
-
-/** 共用时间账本。lastTickAt是未消费时间的起点，不是最后请求时间。 */
-export function settleIdleLedger(save: SaveData, ctx: ActionContext, upperLimit: number = IDLE.MAX_REPLAY_BATTLES): OfflineSettlementResult | null {
-  const from = save.idle.measuredAt ?? save.lastTickAt
-  if (ctx.now < from) return null
-  const elapsedMs = Math.max(0, ctx.now - from)
-  const capMs = IDLE.CAP_HOURS * 3600 * 1000
-  const team = buildTeam(save)
-  if (elapsedMs > 0) {
-    const onlineMs = Math.max(0, Math.min(ctx.now, save.idle.activeUntil ?? from) - from)
-    const offlineMs = elapsedMs - onlineMs
-    const oldOffline = onlineMs > 0 ? 0 : (save.idle.offlineElapsedMs ?? 0)
-    const effectiveOffline = (offlineEffectiveSeconds((oldOffline + offlineMs) / 1000)
-      - offlineEffectiveSeconds(oldOffline / 1000)) * 1000
-    save.idle.offlineElapsedMs = oldOffline + offlineMs
-    save.idle.effectiveMs = team.length === 0 ? 0 : Math.min(capMs,
-      (save.idle.effectiveMs ?? 0) + onlineMs * IDLE.ONLINE_MULTIPLIER + effectiveOffline)
-    save.idle.measuredAt = ctx.now
+/**
+ * **结算三条挂机通道并把奖励入库**（动作层入口）。
+ *
+ * ⚠ 入库只认 `rewards`（铁律 #26）：`settleIdleChannels` 只**产出**奖励包，
+ *   入库由本函数统一走 `applyRewardBundle`（唯一入口，铁律 #4）。
+ * ⚠ 三条通道**各自独立**：一条通道的目标失效**不影响**另外两条；
+ *   无有效目标的通道**只推进计量水位**，不产出（设计稿 §3.6）。
+ */
+/**
+ * **结算三条挂机通道并把奖励入库**（动作层入口）。
+ *
+ * ⚠ 入库只认 `rewards`（铁律 #26）：`settleIdleChannels` 只**产出**奖励包，
+ *   入库由本函数统一走 `applyRewardBundle`（唯一入口，铁律 #4）。
+ * ⚠ 三条通道**各自独立**：一条通道的目标失效**不影响**另外两条；
+ *   无有效目标的通道**只推进计量水位**，不产出（设计稿 §3.6）。
+ *
+ * @param options.only 只结算指定通道（切换通道时只结清那一条）
+ */
+export function settleIdleAndApply(
+  save: SaveData,
+  ctx: ActionContext,
+  options: { only?: IdleChannelKind } = {},
+): IdleActionResult {  const result = settleIdleChannels(save, ctx, { only: options.only })
+  for (const detail of result.channels) {
+    applyRewardBundle(save, detail.rewards, ctx.rng, ctx.now)
   }
-  const budgetMs = save.idle.effectiveMs ?? 0
-  const battleMs = BATTLE.SECONDS_PER_BATTLE * 1000
-  const battles = Math.min(Math.floor((budgetMs + 0.000001) / battleMs), upperLimit, IDLE.MAX_REPLAY_BATTLES)
-  if (team.length === 0) {
-    if (elapsedMs > 0) save.lastTickAt = ctx.now
-    return null
+  // 任务计数：**只累计主线挂机成功结算次数**（设计稿 §3.5）
+  const mainRolls = result.channels
+    .filter((c) => c.channel === 'main')
+    .reduce((sum, c) => sum + c.rolls, 0)
+  if (mainRolls > 0) {
+    save.daily = advanceTasks(save.daily, 'battle', mainRolls, ctx.now)
   }
-  if (battles <= 0) return null
-  // 刷取胜场和重试进度都随档保存，结算分批不会提前重试挑战。
-  const pve = buildPveContext(save)
-  const run: OfflineSettlementResult = {
-    battles: 0,
-    rewards: {},
-    reachedStage: save.campaign.clearedStage,
-    lastClearedStage: null,
-    nextTargetStage: Math.min(save.idle.currentStage, save.campaign.clearedStage + 1),
-    blockedAtStage: null,
-    newRelics: [],
-    elapsedSeconds: elapsedMs / 1000,
-    cappedSeconds: budgetMs / 1000,
-    efficiency: 1,
-    overflow: emptyOverflow(),
-  }
-
-  // ── 挂机去向：主线 / 技能副本 / 强化副本 ──
-  // ⚠ 三个去向**共用同一份时间账本**，但产出与进度**分别记账**
-  //   （副本不写 `campaign`，主线首通结晶也只在主线去向结算）。
-  const target = save.idle.target ?? { kind: 'campaign' as const }
-  if (target.kind !== 'campaign') {
-    return settleDungeonLedger(save, ctx, target, run, budgetMs, battleMs, battles, pve)
-  }
-
-  let farm = save.idle.farm
-  for (let i = 0; i < battles; i++) {
-    const farmStage = farm && farm.winsUntilRetry > 0 ? farm.stage : null
-    const stage = farmStage ?? run.nextTargetStage
-    const one = runIdle(team, stage, 1, ctx.rng.nextSeed(), undefined, pve, farmStage === null && save.idle.autoAdvance)
-    run.battles += one.battles
-    if (one.blockedAtStage !== null) {
-      run.blockedAtStage ??= one.blockedAtStage
-      if (farmStage === 1) break
-      const fallback = farmStage !== null
-        ? farmStage - 1
-        : farm?.stage ?? Math.min(run.reachedStage, stage - 1)
-      farm = { stage: fallback || null, winsUntilRetry: fallback ? IDLE.FARM_WINS_BEFORE_RETRY : 0 }
-      // 尚无可刷关卡，保留余额，避免本次结算连续撞同一场战斗。
-      if (farm.stage === null) break
-      continue
-    }
-
-    const overflow = applyRewardBundle(save, one.rewards, ctx.rng, ctx.now)
-    // ⚠ 结算明细用**通用聚合**（遍历奖励包），不再硬编码键数组——
-    //   否则新增的 `items`（经验书 / 五行材料 / 强化石）不会出现在结算面板里。
-    mergeRewardBundles(run.rewards, one.rewards)
-    // 溢出自动分解的折算也要进结算明细（玩家看得见，不静默吞掉掉落）
-    if (overflow.salvaged > 0) {
-      run.overflow.salvaged += overflow.salvaged
-      run.overflow.silver += overflow.silver
-      run.rewards.silver = (run.rewards.silver ?? 0) + overflow.silver
-    }
-    run.overflow.skipped += overflow.skipped
-    run.lastClearedStage = Math.max(run.lastClearedStage ?? 0, stage)
-    run.reachedStage = Math.max(run.reachedStage, stage)
-    run.newRelics.push(...one.newRelics)
-    if (farm && farmStage !== null) {
-      farm.winsUntilRetry--
-    } else {
-      farm = undefined
-      run.nextTargetStage = one.nextTargetStage
-    }
-  }
-  save.idle.currentStage = run.nextTargetStage
-  save.idle.farm = farm
-  save.campaign.clearedStage = run.reachedStage
-  // ⚠ **主线首通结晶**（账号级）：按 `clearedStage` 高水位增量判定，
-  //   离线连续过关也**逐关发奖**（设计稿 §3）。
-  //   圣杯重启不重置 `campaign` ⇒ 它天然跨设备、跨重启都在。
-  const firstClear = grantFirstClearCrystals(save)
-  if (firstClear > 0) run.rewards.crystals = (run.rewards.crystals ?? 0) + firstClear
-  save.idle.effectiveMs = Math.max(0, budgetMs - run.battles * battleMs)
-  // 兼容旧水位展示；实际计量由measuredAt + effectiveMs负责。
-  save.lastTickAt = Math.max(save.lastTickAt, (save.idle.measuredAt ?? ctx.now) - save.idle.effectiveMs)
-  save.idle.totalIdleSeconds += run.battles * BATTLE.SECONDS_PER_BATTLE
-  // 任务计数：推征场次（每日任务与周目标同时推进）
-  save.daily = advanceTasks(save.daily, 'battle', run.battles, ctx.now)
-  return run
+  return { channels: result.channels, rolls: result.rolls }
 }
 
 /**
- * **副本去向**的挂机结算。
+ * **一键领取**（`idle.tick` / `idle.claimOffline` 共用同一入口）。
  *
- * ⚠ 与主线结算**共用同一份时间账本**（`effectiveMs` 结转），
- *   但**不写 `campaign`**（副本进度与主线记录分别记账）。
- *
- * ⚠ 副本胜利**只发所选材料**：不发银两 / 经验 / 遗物 / 首通结晶。
- * ⚠ 战败即停，并在结算明细里回报「第 N 场战败」+ 建议降难度。
+ * ⚠ 挂机**不跑战斗**：结算按掉落表逐次掷奖，三条通道各自独立。
+ * ⚠ 领取次数由服务端按各通道的可用预算决定，客户端**不能**创造时间。
  */
-function settleDungeonLedger(
-  save: SaveData,
-  ctx: ActionContext,
-  target: Exclude<IdleTarget, { kind: 'campaign' }>,
-  run: OfflineSettlementResult,
-  budgetMs: number,
-  battleMs: number,
-  battles: number,
-  pve: BattleContext,
-): OfflineSettlementResult {
-  const variant = target.kind === 'skill'
-    ? findDungeonVariant('skill', target.element)
-    : findDungeonVariant('enhance', undefined, target.tier)
-  if (!variant) {
-    // 配置异常：回落到主线去向（宁可刷主线，也不要让挂机空转）
-    save.idle.target = { kind: 'campaign' }
-    return settleIdleLedger(save, ctx, 0) ?? run
-  }
-  const unlock = dungeonUnlocked(save, variant)
-  if (!unlock.unlocked) {
-    // 未解锁：不跑副本，预算**留在账本里**（解锁后还能用），去向回落到主线
-    save.idle.target = { kind: 'campaign' }
-    run.dungeon = { itemId: variant.itemId, blockedAtBattle: null, suggestDifficulty: null }
-    return run
-  }
-
-  const dungeon = runDungeon(save, variant, target.difficulty, battles, ctx.rng.nextSeed(), pve)
-  run.battles = dungeon.battles
-  run.reachedStage = save.campaign.clearedStage
-  run.lastClearedStage = null
-  run.nextTargetStage = save.idle.currentStage
-  run.dungeon = {
-    itemId: variant.itemId,
-    blockedAtBattle: dungeon.blockedAtBattle,
-    suggestDifficulty: dungeon.suggestDifficulty,
-  }
-  if (dungeon.wins > 0) {
-    const rewards: RewardBundle = { items: dungeon.items as RewardBundle['items'] }
-    applyRewardBundle(save, rewards, ctx.rng, ctx.now)
-    mergeRewardBundles(run.rewards, rewards)
-  }
-  save.idle.effectiveMs = Math.max(0, budgetMs - dungeon.battles * battleMs)
-  save.lastTickAt = Math.max(save.lastTickAt, (save.idle.measuredAt ?? ctx.now) - save.idle.effectiveMs)
-  save.idle.totalIdleSeconds += dungeon.battles * BATTLE.SECONDS_PER_BATTLE
-  // ⚠ 副本场次**不计入**「推征」任务口径（那是另一种活动）
-  return run
-}
-
-/** 推进挂机：客户端场次数只是上限，不能创造时间。 */
 function actionIdleTick(
   save: SaveData,
-  payload: Extract<GameAction, { type: 'idle.tick' }>,
+  _payload: Extract<GameAction, { type: 'idle.tick' }>,
   ctx: ActionContext,
 ): ActionOutcome<IdleActionResult> {
-  if (!Number.isSafeInteger(payload.battles) || payload.battles <= 0) {
-    return fail(GAME_ERROR_CODES.NOT_FOUND, '场次数必须是正整数')
-  }
-  if (buildTeam(save).length === 0) return fail(GAME_ERROR_CODES.TEAM_EMPTY, '请先在阵位中编队')
-  const run = settleIdleLedger(save, ctx, payload.battles)
-  return ok<IdleActionResult>(run ?? {
-    battles: 0, rewards: {}, reachedStage: save.campaign.clearedStage, blockedAtStage: null,
-  })
+  const result = settleIdleAndApply(save, ctx)
+  return ok<IdleActionResult>({ channels: result.channels, rolls: result.rolls })
 }
 
-/** 离线领取与在线共用同一个时间账本，不接受客户端倍率。 */
+/** 离线领取与在线领取共用同一个入口、同一份账本、同一套限额。 */
 function actionIdleClaimOffline(
   save: SaveData,
   _payload: Extract<GameAction, { type: 'idle.claimOffline' }>,
   ctx: ActionContext,
-): ActionOutcome<OfflineSettlementResult | null> {
-  if (buildTeam(save).length === 0) return fail(GAME_ERROR_CODES.TEAM_EMPTY, '请先在阵位中编队')
-  return ok(settleIdleLedger(save, ctx))
+): ActionOutcome<IdleActionResult> {
+  const result = settleIdleAndApply(save, ctx)
+  return ok<IdleActionResult>({ channels: result.channels, rolls: result.rolls })
+}
+
+/** 两个目标是否等价（用于「相同目标直接返回」） */
+function sameChannelTarget(a: IdleChannelTarget | null, b: IdleChannelTarget | null): boolean {
+  if (a === null || b === null) return a === b
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'main' && b.kind === 'main') return a.stageId === b.stageId
+  if (a.kind === 'skill' && b.kind === 'skill') return a.dungeonStageId === b.dungeonStageId
+  if (a.kind === 'enhance' && b.kind === 'enhance') return a.dungeonStageId === b.dungeonStageId
+  return false
 }
 
 /**
- * 设定挂机去向（主线 / 技能副本 / 强化副本）。
+ * **设置挂机通道**（主线 / 技能副本 / 强化副本）。
  *
- * ⚠ **实施修正（资源/背包版本 v10）**：三个去向**共用一份挂机时间账本**，
- *   切换时**先按旧去向结清**，再写新去向（设计稿 §3）。
- *   剩余预算（`idle.effectiveMs`）**结转**到新去向——不因为切换而清零。
- *
- * ⚠ 切换本身**不产生场次**：结清时那一场是「旧目标在切换前应得的时间」，
- *   不是切换发的（实现文档 §3）。
- *
- * ⚠ 关卡目标是**存档状态**，服务端权威后必须由服务端改——
- *   客户端直接写 `save.idle.currentStage` 会在下一次响应时被服务端版本覆盖。
+ * ⚠ **三通道各自独立**：设置某一条通道**不影响**另外两条的时间账本。
+ * ⚠ **切换或关闭前结清旧目标**（铁律 #49）：先按旧目标把完整次数结清，
+ *   再换新目标；剩余不足一次的余数结转（不清零）——否则「切一次通道就多刷几场」。
+ * ⚠ **目标必须已通关**：挂机只挂已通关内容，永不卡关。
+ * ⚠ **相同目标直接返回**（无操作，不报错）。
  */
-function actionIdleSetTarget(
+function actionIdleSetChannel(
   save: SaveData,
-  payload: Extract<GameAction, { type: 'idle.setTarget' }>,
+  payload: Extract<GameAction, { type: 'idle.setChannel' }>,
   ctx: ActionContext,
-): ActionOutcome<{ target: IdleTarget; stageId: number }> {
-  const kind = payload.kind
+): ActionOutcome<IdleChannelResult> {
+  const kind = payload.channel
+  if (!IDLE_CHANNEL_KINDS.includes(kind)) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '挂机通道不存在')
+  }
+  const ch = save.idle.channels[kind]
 
-  if (kind === 'skill' || kind === 'enhance') {
-    const variant = findDungeonVariant(kind, payload.element, payload.tier)
-    if (!variant) {
-      return fail(GAME_ERROR_CODES.NOT_FOUND, '副本不存在')
+  // ── 先校验目标（失败时存档一个字节未变） ──
+  let next: IdleChannelTarget | null = null
+  if (payload.disabled) {
+    if (kind === 'main') {
+      return fail(GAME_ERROR_CODES.NOT_FOUND, '主线通道不能关闭')
     }
-    const difficulty = payload.difficulty ?? 'easy'
-    if (!DUNGEON_DIFFICULTY_IDS.includes(difficulty)) {
-      return fail(GAME_ERROR_CODES.NOT_FOUND, '副本难度不存在')
+    next = null
+  } else if (kind === 'main') {
+    const stageId = payload.stageId ?? null
+    if (stageId !== null) {
+      if (!Number.isSafeInteger(stageId) || !STAGE_INDEX.has(stageId)) {
+        return fail(GAME_ERROR_CODES.NOT_FOUND, '关卡不存在')
+      }
+      // 只接受**已通关**的关卡
+      if (stageId > save.campaign.clearedStage) {
+        return fail(GAME_ERROR_CODES.NOT_FOUND, '只能挂已通关的关卡')
+      }
     }
-    const unlock = dungeonUnlocked(save, variant)
-    if (!unlock.unlocked) {
-      return fail(GAME_ERROR_CODES.MATERIAL_UNLOCKED, unlock.reason)
+    next = { kind: 'main', stageId }
+  } else {
+    const id = payload.dungeonStageId
+    if (!id) return fail(GAME_ERROR_CODES.NOT_FOUND, '副本关卡不存在')
+    const stage = dungeonStageById(id)
+    if (!stage) return fail(GAME_ERROR_CODES.NOT_FOUND, '副本关卡不存在')
+    const variant = DUNGEON_INDEX.get(stage.variantId)
+    if (!variant || variant.kind !== kind) {
+      return fail(GAME_ERROR_CODES.NOT_FOUND, '副本关卡与通道不匹配')
     }
-    // ── 先结清旧去向（用旧 target 结算），再换新去向 ──
-    settleIdleLedger(save, ctx)
-    save.idle.target = {
-      kind,
-      ...(kind === 'skill'
-        ? { element: payload.element as Element, difficulty }
-        : { tier: payload.tier as RelicStoneTierId, difficulty }),
-    } as IdleTarget
-    delete save.idle.farm
-    return ok<{ target: IdleTarget; stageId: number }>(
-      { target: save.idle.target, stageId: save.idle.currentStage },
-      '挂机去向已更新',
-    )
+    // 副本必须**已通关**才可挂机
+    if (save.dungeons.cleared[stage.id] !== true) {
+      return fail(GAME_ERROR_CODES.NOT_FOUND, '该副本关卡尚未通关')
+    }
+    next = { kind, dungeonStageId: id } as IdleChannelTarget
   }
 
-  // 主线去向
-  const stageId = payload.stageId ?? save.idle.currentStage
-  if (!Number.isSafeInteger(stageId) || !STAGE_INDEX.has(stageId) || stageId > save.campaign.clearedStage + 1) {
+  // 相同目标 → 无操作
+  if (sameChannelTarget(ch.target, next)) {
+    return ok<IdleChannelResult>({ channel: kind, target: next, settled: [] }, '挂机通道未变化')
+  }
+
+  // ── 结清旧目标（只结清这一条通道） ──
+  const settled = settleIdleAndApply(save, ctx, { only: kind }).channels
+
+  // ── 换目标 / 开关 ──
+  const wasOpen = ch.target !== null
+  ch.target = next
+  if (next === null) {
+    // 关闭：结清后清掉剩余预算与离线累计，重新打开从开启时刻起算
+    ch.effectiveMs = 0
+    ch.offlineElapsedMs = 0
+    ch.pendingOfflineMs = 0
+    ch.measuredAt = ctx.now
+  } else if (!wasOpen) {
+    // 开启：从开启时刻起算
+    ch.effectiveMs = 0
+    ch.offlineElapsedMs = 0
+    ch.pendingOfflineMs = 0
+    ch.measuredAt = ctx.now
+  } else {
+    // 换目标：保留不足一次的余数，水位不得回退
+    ch.effectiveMs = ch.effectiveMs % (IDLE.SECONDS_PER_ROLL * 1000)
+  }
+
+  const label = next === null ? '已关闭' : '挂机通道已更新'
+  return ok<IdleChannelResult>({ channel: kind, target: next, settled }, label)
+}
+
+/**
+ * **手动挑战主线关卡**（挂机改版 v11：主线推进改为纯手动挑战）。
+ *
+ * ⚠ **先校验后修改**：关卡必须合法且 **≤ 已通关 + 1**（不能跳关）。
+ * ⚠ 每次胜利发一次**基础掉落**；首胜追加**经验书保底**与**首通结晶**。
+ * ⚠ 首胜推进 `campaign.clearedStage`；主线通道若处于「跟随」模式，
+ *   **推进前先按旧目标结清完整次数**（否则旧目标那段时间的收益会被吞掉）。
+ * ⚠ **战败只返回挑战结果**，奖励包为空，通关记录保持原值。
+ */
+function actionCampaignChallenge(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'campaign.challenge' }>,
+  ctx: ActionContext,
+): ActionOutcome<CampaignChallengeResult> {
+  const cleared = save.campaign.clearedStage
+  const stageId = payload.stageId ?? cleared + 1
+  if (!Number.isSafeInteger(stageId) || !STAGE_INDEX.has(stageId)) {
     return fail(GAME_ERROR_CODES.NOT_FOUND, '关卡不存在')
   }
-  settleIdleLedger(save, ctx)
-  save.idle.target = { kind: 'campaign' }
-  save.idle.currentStage = stageId
-  delete save.idle.farm
-  return ok<{ target: IdleTarget; stageId: number }>(
-    { target: save.idle.target, stageId },
-    '挂机目标已更新',
+  // 不能跳关：只能挑战「下一关」或已通关的关卡
+  if (stageId > cleared + 1) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '关卡不存在')
+  }
+  const team = buildTeam(save)
+  if (team.length === 0) return fail(GAME_ERROR_CODES.TEAM_EMPTY, '请先在阵位中编队')
+
+  const stage = STAGE_INDEX.get(stageId)!
+  const seed = ctx.rng.nextSeed()
+  const pve = buildPveContext(save)
+  const enemies = stage.enemyIds
+    .map((id) => getEnemy(id))
+    .filter((e): e is NonNullable<typeof e> => e !== null)
+  if (enemies.length === 0) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '关卡配置异常')
+  }
+  const battle = runBattle({
+    allies: team,
+    enemies,
+    enemyScale: stage.enemyScale,
+    ctx: { ...pve, mode: 'pve', seed },
+  })
+
+  const win = battle.win
+  const firstClear = win && stageId > cleared
+  const rewards: RewardBundle = {}
+
+  if (win) {
+    // ① 基础掉落（与挂机同一张表、同一套掷奖口径）
+    mergeRewardBundles(rewards, rollMainDrop(stage, ctx.rng))
+    // ② 首通保底：没掷到经验书就补一本小经验书，保证三种首通奖励到账
+    if (firstClear && !hasExpBook(rewards)) {
+      rewards.items = { ...(rewards.items ?? {}), [EXP_BOOK.small.id]: 1 }
+    }
+    // ③ 首通推进前，**先按旧目标结清主线通道**（跟随模式不能吞掉旧目标的收益）
+    if (firstClear) {
+      settleIdleAndApply(save, ctx, { only: 'main' })
+      save.campaign.clearedStage = stageId
+    }
+    // ④ 首通结晶（账号级，每关只发一次）
+    //    ⚠ `grantFirstClearCrystals` **只记水位不入账**（铁律 #26），
+    //    结晶一律进 `rewards` 由 `applyRewardBundle` 入库 —— 两条路径只能有一条。
+    if (firstClear) {
+      const crystals = grantFirstClearCrystals(save)
+      if (crystals > 0) rewards.crystals = (rewards.crystals ?? 0) + crystals
+    }
+    applyRewardBundle(save, rewards, ctx.rng, ctx.now)
+  }
+
+  return ok<CampaignChallengeResult>({ stageId, win, firstClear, rewards, battle })
+}
+
+/** 奖励包里是否已经有经验书 */
+function hasExpBook(rewards: RewardBundle): boolean {
+  if (!rewards.items) return false
+  return Object.keys(rewards.items).some((id) => isExpBook(id as ItemId))
+}
+
+/**
+ * **手动挑战副本关卡**（挂机改版 v11）。
+ *
+ * ⚠ 副本是**独立关卡**：`(变体 × 难度) = 1 关`，打赢一次即通关。
+ * ⚠ 每次胜利发一份对应材料；首胜登记通关并**解锁该关的挂机设置**。
+ * ⚠ 副本**不写 `campaign`**（进度与主线分开记账）。
+ */
+function actionDungeonChallenge(
+  save: SaveData,
+  payload: Extract<GameAction, { type: 'dungeon.challenge' }>,
+  ctx: ActionContext,
+): ActionOutcome<DungeonChallengeResult> {
+  const stage = dungeonStageById(payload.stageId)
+  if (!stage) return fail(GAME_ERROR_CODES.NOT_FOUND, '副本关卡不存在')
+  const unlock = dungeonStageUnlocked(save, stage)
+  if (!unlock.unlocked) {
+    return fail(GAME_ERROR_CODES.MATERIAL_UNLOCKED, unlock.reason)
+  }
+  const team = buildTeam(save)
+  if (team.length === 0) return fail(GAME_ERROR_CODES.TEAM_EMPTY, '请先在阵位中编队')
+
+  const seed = ctx.rng.nextSeed()
+  const { win, battle } = runDungeonLevel(save, stage.id, seed, buildPveContext(save))
+
+  const firstClear = win && save.dungeons.cleared[stage.id] !== true
+  const rewards: RewardBundle = {}
+  if (win) {
+    const count = ctx.rng.int(stage.drop.min, stage.drop.max)
+    if (count > 0) {
+      rewards.items = { [stage.drop.itemId]: count } as RewardBundle['items']
+    }
+    if (firstClear) save.dungeons.cleared[stage.id] = true
+    applyRewardBundle(save, rewards, ctx.rng, ctx.now)
+  }
+
+  return ok<DungeonChallengeResult>({
+    stageId: stage.id,
+    win,
+    firstClear,
+    rewards,
+    battle: battle ?? undefined,
+  })
+}
+
+/** 遗物稀有度档（祈愿抽签用；权重来自 `RELIC_ACQUIRE`） */
+const RELIC_RARITY_ENTRIES: readonly { rarity: Rarity }[] = [
+  { rarity: 'N' },
+  { rarity: 'R' },
+  { rarity: 'SR' },
+  { rarity: 'SSR' },
+]
+
+/**
+ * **遗物祈愿**（遗物的**独立获取入口**，§1.3 / U3）。
+ *
+ * ⚠ 遗物不再由挂机 / 手动挑战产出——三条通道与手动挑战的奖励范围是
+ *   「经验书 / 银两 / 圣杯结晶 / 副本材料」（设计稿 §3.1）。
+ *   遗物走这个**独立入口**，保证「首件遗物在初阶强化副本解锁前可达」。
+ *
+ * ⚠ 扣费前先校验余额（铁律 #10 / #22）：不足直接拒绝，不产生负数。
+ */
+function actionRelicAcquire(
+  save: SaveData,
+  _payload: Extract<GameAction, { type: 'relic.acquire' }>,
+  ctx: ActionContext,
+): ActionOutcome<RelicAcquireResult> {
+  const cost = RELIC_ACQUIRE.SILVER_COST
+  if (save.player.silver < cost) {
+    return fail(
+      GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
+      `银两不足（${save.player.silver}/${cost}），无法祈愿遗物`,
+    )
+  }
+  // ⚠ 先校验通过再取种子（失败不消耗随机序列）
+  const defId = rollRelicDefId(ctx.rng)
+  if (!defId) {
+    return fail(GAME_ERROR_CODES.NOT_FOUND, '遗物配置异常')
+  }
+  save.player.silver -= cost
+  const uid = nextRelicUid(save)
+  save.relics.push(generateRelic(defId, ctx.rng, RELIC.MIN_LEVEL, uid))
+  enforceInventoryCap(save)
+  return ok<RelicAcquireResult>(
+    { relicId: defId, uid, silver: cost },
+    '祈愿成功',
   )
+}
+
+/** 按稀有度权重抽一件遗物定义 id（权重来自 `RELIC_ACQUIRE`，唯一出处） */
+function rollRelicDefId(rng: Rng): string | null {
+  const weights = RELIC_ACQUIRE.RARITY_WEIGHTS
+  const entries = RELIC_RARITY_ENTRIES
+  const total = entries.reduce((sum, e) => sum + (weights[e.rarity] ?? 0), 0)
+  if (total <= 0) return null
+  let roll = rng.next() * total
+  for (const entry of entries) {
+    roll -= weights[entry.rarity] ?? 0
+    if (roll < 0) {
+      const pool = relicIdsByRarity(entry.rarity)
+      if (pool.length === 0) continue
+      return rng.pick(pool)
+    }
+  }
+  return null
 }
 
 /**
@@ -1429,9 +1555,8 @@ function actionSetSlot(
   if (payload.heroId !== null && !save.heroes[payload.heroId]) {
     return silentFail(GAME_ERROR_CODES.NOT_FOUND)
   }
-  settleIdleLedger(save, _ctx)
-  // 超过单次回放上限的旧队积压不允许转交新队追领。
-  save.idle.effectiveMs = (save.idle.effectiveMs ?? 0) % (BATTLE.SECONDS_PER_BATTLE * 1000)
+  // ⚠ 挂机改版 v11：挂机**不跑战斗**，编队变化**不影响**已通关目标的挂机资格
+  //   ⇒ 换人不需要结清挂机账本（旧实现里的「旧队积压转交新队」已随回放模型退场）。
   const slots = save.team.slots
   if (payload.heroId) {
     const existing = slots.indexOf(payload.heroId)
@@ -1467,8 +1592,7 @@ function actionApplyPreset(
 ): ActionOutcome<true> {
   const preset = save.team.presets.find((p) => p.id === payload.presetId)
   if (!preset) return silentFail(GAME_ERROR_CODES.NOT_FOUND)
-  settleIdleLedger(save, _ctx)
-  save.idle.effectiveMs = (save.idle.effectiveMs ?? 0) % (BATTLE.SECONDS_PER_BATTLE * 1000)
+  // ⚠ 挂机改版 v11：编队不影响挂机产出（挂机不跑战斗），不需要结清账本。
   save.team.slots = [...preset.slots]
   return ok<true>(true)
 }
@@ -1494,9 +1618,14 @@ function actionRebirth(
     return fail(GAME_ERROR_CODES.REBIRTH_LOCKED, preview.reason || '暂不可重启')
   }
   const result = performRebirth(save)
-  save.idle.measuredAt = _ctx.now
-  save.idle.effectiveMs = 0
-  save.idle.offlineElapsedMs = 0
+  // 挂机改版 v11：重启后**三条通道**的计量水位与预算一并归零
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    const ch = save.idle.channels[kind]
+    ch.measuredAt = _ctx.now
+    ch.effectiveMs = 0
+    ch.offlineElapsedMs = 0
+    ch.pendingOfflineMs = 0
+  }
   save.idle.activeUntil = _ctx.now
   save.lastTickAt = _ctx.now
   return ok<RebirthPreview>(
@@ -1870,9 +1999,14 @@ function actionImport(
     return fail(GAME_ERROR_CODES.IMPORT_INVALID, '存档数据无效')
   }
   Object.assign(save, imported)
-  save.idle.measuredAt = ctx.now
-  save.idle.effectiveMs = 0
-  save.idle.offlineElapsedMs = 0
+  // 导入路径重置挂机账本：三条通道从导入时刻起算，不继承导入前的离线收益
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    const ch = save.idle.channels[kind]
+    ch.measuredAt = ctx.now
+    ch.effectiveMs = 0
+    ch.offlineElapsedMs = 0
+    ch.pendingOfflineMs = 0
+  }
   save.idle.activeUntil = ctx.now
   save.lastTickAt = ctx.now
   return ok<true>(true, '存档已导入')
@@ -1897,15 +2031,19 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
   'gacha.pull': actionPull,
   'idle.tick': actionIdleTick,
   'idle.heartbeat': (save, _payload, ctx) => {
-    // 只计量过去、不领奖；新租约严格从服务端now往未来生效。
-    measureIdleLedger(save, ctx)
-    if (ctx.now >= (save.idle.measuredAt ?? save.lastTickAt)) {
+    // ⚠ 心跳是「轻量心跳」：**只计量、不发奖**；计量结束后才续租。
+    //   计量是纯数值运算，成本与单条通道同量级（铁律 #33）。
+    const measurable = measureIdleChannels(save, ctx.now)
+    if (measurable) {
       save.idle.activeUntil = ctx.now + IDLE.ACTIVE_LEASE_MS
     }
     return ok(true)
   },
   'idle.claimOffline': actionIdleClaimOffline,
-  'idle.setTarget': actionIdleSetTarget,
+  'idle.setChannel': actionIdleSetChannel,
+  'campaign.challenge': actionCampaignChallenge,
+  'dungeon.challenge': actionDungeonChallenge,
+  'relic.acquire': actionRelicAcquire,
   'settings.update': actionSettingsUpdate,
   'hero.feedExp': actionFeedExp,
   'hero.feedBooks': actionFeedBooks,

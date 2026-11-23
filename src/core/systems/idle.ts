@@ -1,7 +1,17 @@
 /**
- * 挂机与离线结算（§5.7）。
+ * 挂机与离线结算（§5.7 · **挂机改版 v11**）。
  *
- * 离线收益曲线（⚠ 数值一律读 `IDLE` 配置，此处只描述**结构**）：
+ * ## 三通道并行 + 已通关直挂
+ *
+ * - **主线 / 技能副本 / 强化副本各自一条独立通道**，
+ *   各自计量同一段墙钟时间、各自记账，产出互不干扰（玩家可同时挂三条）。
+ * - **挂机不再跑战斗**：通道目标必须是「已通关」的内容，
+ *   结算时按掉落表**逐次掷奖**直接入库 ⇒ 永不卡关、不会战败、不会空转。
+ * - 主线推进改为**纯手动挑战**（`campaign.challenge`）；
+ *   副本同样要手动挑战通关才可挂机（`dungeon.challenge`）。
+ *
+ * ## 离线收益曲线（⚠ 数值一律读 `IDLE` 配置，此处只描述**结构**）
+ *
  *   t ≤ FULL_EFFICIENCY_HOURS → 100%
  *   满效率 < t ≤ CAP_HOURS     → 线性衰减 100% → TAIL_RATE
  *   t > CAP_HOURS              → 封顶（按 CAP_HOURS 的平均尾部效率结算）
@@ -10,17 +20,29 @@
  *   原值下「一天的挂机预算」是整个游戏内容量的 4~5 倍 ⇒ 新号首日顶格、经济贬值。
  *
  * 在线效率恒定为离线的 3 倍（IDLE.ONLINE_MULTIPLIER）。
- * 收益通过**回放真实战斗**结算，而非按时长线性发放——
- * 这样不会出现"挂机 12 小时打不过却照样领满"的割裂感。
  */
-import type { BattleContext, BattleUnit, HeroRuntime, RewardBundle, StageDef } from '../model/types.ts'
-import { BATTLE, DROP_TABLES, IDLE, RELIC } from '../config/economy.ts'
-import { getStage } from '../config/stages.ts'
+import type {
+  IdleChannelKind,
+  IdleChannelState,
+  IdleChannelTarget,
+  RewardBundle,
+  SaveData,
+  StageDef,
+} from '../model/types.ts'
+import { IDLE_CHANNEL_KINDS } from '../model/types.ts'
+import { IDLE, DROP_TABLES } from '../config/economy.ts'
+import { STAGE_INDEX } from '../config/stages.ts'
+import {
+  DUNGEON_INDEX,
+  DUNGEON_STAGE_INDEX,
+  dungeonStageById,
+  type DungeonStageDef,
+} from '../config/dungeons.ts'
 import { Rng } from '../rng.ts'
-import { runBattle } from './battle.ts'
-import { getTeamPower } from './team.ts'
-import { getRelicMods, generateRelic } from './relic.ts'
 import { emptyOverflow, type InventoryOverflowResult } from './inventory.ts'
+
+/** 三条通道的固定顺序（遍历顺序 = 界面展示顺序 = 锚点表顺序） */
+export { IDLE_CHANNEL_KINDS }
 
 /**
  * 离线效率（0..1）：把真实时长折算成"满效率等价时长"。
@@ -48,210 +70,114 @@ export function offlineEffectiveSeconds(seconds: number): number {
 /** 满效率上限：CAP_HOURS（现 3 小时）封顶，超出部分不再产出 */
 export const OFFLINE_CAP_SECONDS = IDLE.CAP_HOURS * 3600
 
-export interface IdleRunResult {
-  battles: number
-  rewards: RewardBundle
-  /** 战斗中推进到的最高关卡 */
-  /** 本次真正打赢的最高关卡；全败/零场为null。 */
-  lastClearedStage: number | null
-  /** 下次应挑战的关卡，与通关进度明确区分。 */
-  nextTargetStage: number
-  reachedStage: number
-  /** 卡住的关卡（战力不足） */
-  blockedAtStage: number | null
-  /** 新获得的遗物实例 id */
-  newRelics: string[]
+/** 单次掷奖的毫秒数（挂机节奏单位） */
+export const ROLL_MS = IDLE.SECONDS_PER_ROLL * 1000
+
+// ─────────────────────────── 通道目标 ───────────────────────────
+
+/**
+ * **已解析的通道目标**（结算时的唯一事实）。
+ *
+ * ⚠ 目标**必须已通关**——这是「挂机永不卡关」的根本保证。
+ */
+export interface ResolvedChannelTarget {
+  kind: IdleChannelKind
+  /** 目标显示名（主线取关卡名，副本取副本关卡名） */
+  name: string
+  /** 主线：关卡 id（跟随模式下取当前已通关的最高关） */
+  stageId: number | null
+  /** 副本：副本关卡 id */
+  dungeonStageId: string | null
+  /** 主线：掉落表 id */
+  dropTableId: string | null
+  /** 副本：每胜产量 */
+  drop: { itemId: string; min: number; max: number } | null
 }
 
 /**
- * 回放一段挂机战斗。
+ * 解析通道目标。
  *
- * @param team       编队英灵
- * @param startStage 起始关卡
- * @param battles    模拟场次
- * @param seed       随机种子
- */
-export function runIdle(
-  team: HeroRuntime[],
-  startStage: number,
-  battles: number,
-  seed: number,
-  onRelicFound?: (relicId: string) => void,
-  ctx: BattleContext = { mode: 'pve', seed },
-  autoAdvance = true,
-): IdleRunResult {
-  const rng = new Rng(seed)
-  const rewards: RewardBundle = {}
-  const shards: Record<string, number> = {}
-  const newRelics: string[] = []
-
-  let stageId = startStage
-  let blockedAt: number | null = null
-  let done = 0
-  let lastClearedStage: number | null = null
-  const limit = team.length === 0 ? 0 : Math.min(Math.max(0, Math.floor(battles)), IDLE.MAX_REPLAY_BATTLES)
-
-  for (let i = 0; i < limit; i++) {
-    const stage = getStage(stageId)
-    const result = runBattle({
-      allies: team,
-      enemies: stage.enemyIds.map((id) => ENEMY_LOOKUP(id)),
-      enemyScale: stage.enemyScale,
-      ctx: { ...ctx, mode: 'pve', seed: seed + i },
-    })
-
-    done++
-
-    if (!result.win) {
-      // 卡关：停留在当前关卡，不再推进
-      blockedAt = stageId
-      break
-    }
-
-    lastClearedStage = stageId
-    const drop = rollRewards(stage, rng)
-    mergeRewards(rewards, drop.rewards, shards)
-    for (const relicId of drop.relics) {
-      newRelics.push(relicId)
-      onRelicFound?.(relicId)
-    }
-
-    // 自动推进到下一关（若战力足够）
-    const nextStageId = stageId + 1
-    if (autoAdvance && nextStageId <= 310) {
-      const next = getStage(nextStageId)
-      const power = getTeamPower(team, ctx)
-      if (power >= next.powerRequired) {
-        stageId = nextStageId
-      }
-    }
-  }
-
-  if (Object.keys(shards).length > 0) rewards.shards = shards
-
-  return {
-    battles: done,
-    rewards,
-    reachedStage: lastClearedStage ?? startStage,
-    lastClearedStage,
-    nextTargetStage: stageId,
-    blockedAtStage: blockedAt,
-    newRelics,
-  }
-}
-
-export interface OfflineSettlementResult {
-  elapsedSeconds: number
-  cappedSeconds: number
-  efficiency: number
-  battles: number
-  rewards: RewardBundle
-  blockedAtStage: number | null
-  /** 本次真正打赢的最高关卡；全败/零场为null。 */
-  lastClearedStage: number | null
-  /** 下次应挑战的关卡，与通关进度明确区分。 */
-  nextTargetStage: number
-  reachedStage: number
-  newRelics: string[]
-  /**
-   * 库存溢出处理结果（仓库超过上限时自动分解了最没用的遗物）。
-   *
-   * ⚠ **可见**：玩家必须看见「仓库满了，有 N 件被自动分解」，
-   *   否则「掉落被悄悄吞掉」会被当成 bug。
-   */
-  overflow: InventoryOverflowResult
-  /**
-   * 副本结算明细（**只在挂机去向是副本时出现**）。
-   *
-   * ⚠ 副本战败要**直接给出「降一档难度」的建议**
-   *   （设计稿「副本失败给出可刷的低难度选择」）。
-   */
-  dungeon?: {
-    /** 产出的道具 id */
-    itemId: string
-    /** 战败发生在第几场（1 起） */
-    blockedAtBattle: number | null
-    /** 建议降到的难度（已最低时为 null） */
-    suggestDifficulty: string | null
-  }
-}
-
-/**
- * 离线结算。
+ * - **主线跟随模式**（`stageId = null`）：取 `campaign.clearedStage`。
+ *   首胜前（`clearedStage = 0`）没有可挂的目标 ⇒ 返回 `null`（不计收益）。
+ * - **主线指定模式**：必须**已通关**（`stageId ≤ clearedStage`）且是合法关卡。
+ * - **副本**：必须属于该通道种类，且**已记录通关**（`dungeons.cleared`）。
  *
- * @param elapsedSeconds 距上次 tick 的秒数
+ * @returns 解析失败返回 `null`（通道停止计量与产出）
  */
-export function settleOffline(
-  team: HeroRuntime[],
-  currentStage: number,
-  elapsedSeconds: number,
-  seed: number,
-  ctx: BattleContext = { mode: 'pve', seed },
-  autoAdvance = true,
-): OfflineSettlementResult {
-  const capped = Math.min(Math.max(0, elapsedSeconds), OFFLINE_CAP_SECONDS)
-  const effective = offlineEffectiveSeconds(capped)
-  const rawBattles = Math.floor(effective / BATTLE.SECONDS_PER_BATTLE)
-  const battles = Math.min(rawBattles, IDLE.MAX_REPLAY_BATTLES)
+export function resolveChannelTarget(
+  save: SaveData,
+  kind: IdleChannelKind,
+  target: IdleChannelTarget | null,
+): ResolvedChannelTarget | null {
+  if (!target) return null
 
-  if (battles <= 0 || team.length === 0) {
+  if (target.kind === 'main') {
+    if (kind !== 'main') return null
+    const stageId = target.stageId ?? save.campaign.clearedStage
+    // 首胜前没有可挂的目标
+    if (!Number.isSafeInteger(stageId) || stageId <= 0) return null
+    const stage = STAGE_INDEX.get(stageId)
+    if (!stage) return null
+    // 指定模式：只接受**已通关**的关卡（跟随模式天然满足）
+    if (target.stageId !== null && target.stageId > save.campaign.clearedStage) return null
     return {
-      elapsedSeconds,
-      cappedSeconds: capped,
-      efficiency: computeOfflineEfficiency(elapsedSeconds) / Math.max(1, elapsedSeconds / 3600),
-      battles: 0,
-      rewards: {},
-      blockedAtStage: null,
-      reachedStage: currentStage,
-      lastClearedStage: null,
-      nextTargetStage: currentStage,
-      newRelics: [],
-      overflow: emptyOverflow(),
+      kind: 'main',
+      name: stage.name,
+      stageId,
+      dungeonStageId: null,
+      dropTableId: stage.dropTableId,
+      drop: null,
     }
   }
 
-  const run = runIdle(team, currentStage, battles, seed, undefined, ctx, autoAdvance)
+  if (target.kind === 'skill') {
+    if (kind !== 'skill') return null
+    return resolveDungeonTarget(save, kind, target.dungeonStageId)
+  }
 
+  if (kind !== 'enhance') return null
+  return resolveDungeonTarget(save, kind, target.dungeonStageId)
+}
+
+/** 副本通道的目标解析（技能 / 强化共用） */
+function resolveDungeonTarget(
+  save: SaveData,
+  kind: IdleChannelKind,
+  dungeonStageId: string,
+): ResolvedChannelTarget | null {
+  const stage = dungeonStageById(dungeonStageId)
+  if (!stage) return null
+  const variant = DUNGEON_INDEX.get(stage.variantId)
+  if (!variant || variant.kind !== kind) return null
+  // 副本必须**已通关**才可挂机
+  if (save.dungeons.cleared[stage.id] !== true) return null
   return {
-    elapsedSeconds,
-    cappedSeconds: capped,
-    efficiency: computeOfflineEfficiency(elapsedSeconds) / Math.max(1, elapsedSeconds / 3600),
-    battles: run.battles,
-    rewards: run.rewards,
-    blockedAtStage: run.blockedAtStage,
-    reachedStage: run.reachedStage,
-    lastClearedStage: run.lastClearedStage,
-    nextTargetStage: run.nextTargetStage,
-    newRelics: run.newRelics,
-    overflow: emptyOverflow(),
+    kind,
+    name: stage.name,
+    stageId: null,
+    dungeonStageId: stage.id,
+    dropTableId: null,
+    drop: { itemId: stage.drop.itemId, min: stage.drop.min, max: stage.drop.max },
   }
 }
 
-
-// ─────────────────────────── 掉落 ───────────────────────────
-
-interface RollResult {
-  rewards: RewardBundle
-  relics: string[]
-}
+// ─────────────────────────── 掷奖 ───────────────────────────
 
 /**
- * 按关卡掉落表结算一次战斗的收益。
+ * 按关卡掉落表**掷一次**奖励（主线口径）。
  *
- * ⚠ **实施修正（资源/背包版本 v10）**：经验池退役 → 掉落**经验书**；
- *   术式结晶 / 遗物强化石 / 英灵印记退役 → 不再投放。
- *   掉落表里每一类道具**各自独立**掷一次概率（见 `economy.ts` 的 `ItemDrop`）。
+ * ⚠ **实施修正（挂机改版 v11）**：主线掉落表**移除遗物掉落**——
+ *   遗物改走独立获取入口（§1.3），挂机与手动挑战都不再发遗物。
+ *
+ * ⚠ 每类道具**各自独立**掷一次概率（见 `economy.ts` 的 `ItemDrop`）。
  */
-export function rollRewards(stage: StageDef, rng: Rng): RollResult {
+export function rollMainDrop(stage: StageDef, rng: Rng): RewardBundle {
   const table = DROP_TABLES[stage.dropTableId]
   const rewards: RewardBundle = {}
-  const relics: string[] = []
-
-  if (!table) return { rewards, relics }
+  if (!table) return rewards
 
   rewards.silver = rng.int(table.silver[0], table.silver[1])
 
-  // 堆叠道具：各自独立掷概率（概率 × 数量 = 期望产量）
   if (table.items.length > 0) {
     const items: Record<string, number> = {}
     for (const drop of table.items) {
@@ -264,76 +190,307 @@ export function rollRewards(stage: StageDef, rng: Rng): RollResult {
       rewards.items = items as RewardBundle['items']
     }
   }
+  return rewards
+}
 
-  // 遗物掉落：按稀有度权重抽取
-  const totalWeight = table.relicDrop.reduce((s, r) => s + r.weight, 0)
-  let roll = rng.next() * totalWeight
-  let chosen = table.relicDrop[0]
-  for (const entry of table.relicDrop) {
-    roll -= entry.weight
-    if (roll < 0) {
-      chosen = entry
-      break
+/**
+ * 按副本关卡产量**掷一次**奖励（必掉，落在 `min ~ max` 区间）。
+ *
+ * ⚠ 副本掉落**只发所选材料**：不发银两 / 经验书 / 遗物 / 首通结晶。
+ */
+export function rollDungeonDrop(
+  stage: DungeonStageDef,
+  rng: Rng,
+): RewardBundle {
+  const count = rng.int(stage.drop.min, stage.drop.max)
+  if (count <= 0) return {}
+  return { items: { [stage.drop.itemId]: count } as RewardBundle['items'] }
+}
+
+/**
+ * 通道的**逐次掷奖**（挂机不跑战斗，这里只按掉落表掷骰）。
+ *
+ * @param rolls 掷奖次数
+ */
+export function rollChannelRewards(
+  target: ResolvedChannelTarget,
+  rolls: number,
+  rng: Rng,
+): RewardBundle {
+  const rewards: RewardBundle = {}
+  for (let i = 0; i < rolls; i++) {
+    const one =
+      target.kind === 'main'
+        ? rollMainDrop(STAGE_INDEX.get(target.stageId!)!, rng)
+        : rollDungeonDrop(DUNGEON_STAGE_INDEX.get(target.dungeonStageId!)!, rng)
+    mergeRewardBundles(rewards, one)
+  }
+  return rewards
+}
+
+/**
+ * 奖励包**通用聚合**（**唯一一份口径**，铁律 #4 / #26）。
+ *
+ * ⚠ 遍历奖励包本身，新增资源类型自动出现在明细里——
+ *   旧实现硬编码键数组 `['silver','exp','skillStones',…]`，
+ *   新增的 `items`（经验书 / 五行材料 / 强化石）根本不会出现在结算面板里。
+ */
+export function mergeRewardBundles(target: RewardBundle, source: RewardBundle): RewardBundle {
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) continue
+    if (key === 'relics' || key === 'heroes') {
+      const list = value as string[]
+      if (list.length === 0) continue
+      const bucket = (target[key] as string[] | undefined) ?? []
+      bucket.push(...list)
+      target[key as 'relics' | 'heroes'] = bucket
+      continue
     }
-  }
-  const pool = RELIC_POOL_BY_RARITY[chosen.rarity]
-  if (pool.length > 0) {
-    relics.push(rng.pick(pool))
-  }
-
-  // 遗物清单**同时**放进 rewards：表现层只认 `rewards` 这一份口径（铁律 #4）。
-  //
-  // ⚠ 历史 bug：遗物只留在 core 的独立数组 `relics` 里，`rewards.relics` 从未被赋值，
-  //   而表现层的 `applyRewards` **只读 `rewards`** → 挂机 / 离线结算产出的遗物
-  //   100% 被丢弃，玩家一个遗物都拿不到（整条遗物养成线是死的）。
-  //   `newRelics` 保留给表现层做「本次获得提示」，但**入库只认 rewards.relics**。
-  if (relics.length > 0) rewards.relics = [...relics]
-
-  return { rewards, relics }
-}
-
-function mergeRewards(target: RewardBundle, source: RewardBundle, shards: Record<string, number>) {
-  target.silver = (target.silver ?? 0) + (source.silver ?? 0)
-  target.crystals = (target.crystals ?? 0) + (source.crystals ?? 0)
-  if (source.items) {
-    const bucket = { ...(target.items ?? {}) }
-    for (const [k, v] of Object.entries(source.items)) {
-      bucket[k as keyof typeof bucket] = (bucket[k as keyof typeof bucket] ?? 0) + v
+    if (key === 'shards') {
+      const bucket = { ...(target.shards ?? {}) }
+      for (const [k, v] of Object.entries(value as Record<string, number>)) {
+        bucket[k] = (bucket[k] ?? 0) + v
+      }
+      target.shards = bucket
+      continue
     }
-    target.items = bucket
+    if (key === 'items') {
+      const bucket = { ...(target.items ?? {}) }
+      for (const [k, v] of Object.entries(value as Record<string, number>)) {
+        bucket[k as keyof typeof bucket] = (bucket[k as keyof typeof bucket] ?? 0) + v
+      }
+      target.items = bucket
+      continue
+    }
+    const num = value as number
+    target[key as 'silver' | 'crystals'] = ((target[key as 'silver' | 'crystals'] as number | undefined) ?? 0) + num
   }
-  if (source.shards) {
-    for (const [k, v] of Object.entries(source.shards)) shards[k] = (shards[k] ?? 0) + v
+  return target
+}
+
+// ─────────────────────────── 计量与结算 ───────────────────────────
+
+/** 结算所需的最小上下文（时间与随机都由调用方注入，铁律 #1） */
+export interface IdleSettleContext {
+  /** 当前时间（毫秒） */
+  now: number
+  /**
+   * 全局权威随机序列（抽卡 / 战斗用）。
+   *
+   * ⚠ **挂机掷奖不用它**——挂机走**每条通道各自的持久化序列**
+   *   （`save.rng.channels[kind]`，挂机改版 v11 · 设计稿 §3.3）。
+   *   保留这个字段是为了动作层的统一上下文形状。
+   */
+  rng: Rng
+}
+
+/**
+ * 取一条通道**自己的**随机序列（挂机改版 v11）。
+ *
+ * ⚠ 状态住在 `save.rng.channels[kind]`（私有随机块，随存档落盘）——
+ *   计数器必须落盘，否则刷新页面就回到序列开头（铁律 #24）。
+ *
+ * ⚠ 缺字段时按根种子补一条（畸形存档兜底），保证不会退化成「所有人同一条序列」。
+ */
+function channelRngOf(save: SaveData, kind: IdleChannelKind): Rng {
+  const state = save.rng.channels?.[kind]
+  if (!state) return new Rng(0x9e3779b9)
+  return Rng.fromSnapshot(state.seed, state.counter)
+}
+
+/**
+ * **单条通道的一次结算明细**。
+ */
+export interface ChannelSettlement {
+  channel: IdleChannelKind
+  /** 目标显示名（由关卡登记表提供） */
+  targetName: string
+  /** 实际结算次数 */
+  rolls: number
+  /** 本次产出（**唯一入库口径**） */
+  rewards: RewardBundle
+  /** 本次结算覆盖的实际离线时长（秒） */
+  elapsedSeconds: number
+}
+
+/**
+ * **离线结算结果**（三通道明细）。
+ *
+ * ⚠ 只含**本次有产出**的通道；无产出的通道不出现（界面据此分段展示）。
+ */
+export interface OfflineSettlementResult {
+  /** 三通道明细（只含本次有产出的通道） */
+  channels: ChannelSettlement[]
+  /** 本次结算总次数 */
+  rolls: number
+  /** 本次覆盖的最长实际离线时长（秒）——离线弹窗的阈值判定用 */
+  elapsedSeconds: number
+  /** 库存溢出处理结果（仓库超限时自动分解） */
+  overflow: InventoryOverflowResult
+}
+
+export interface SettleOptions {
+  /** 单通道结算次数上限（默认 `IDLE.MAX_ROLLS_PER_SETTLEMENT`） */
+  maxRolls?: number
+  /** 是否发奖（心跳只计量、不发奖 ⇒ `false`） */
+  payout?: boolean
+  /** 只结算这一条通道（切换通道时只结清那一条） */
+  only?: IdleChannelKind
+}
+
+/**
+ * 计量**单条通道**的时间预算（原地改存档）。
+ *
+ * ⚠ 只计量、不发奖。
+ *
+ * @param active 通道是否**有有效目标**（无目标 = 不计收益）
+ * @returns 本次累计的离线时长（毫秒）；时钟回退时返回 0 且水位不动
+ */
+function measureChannel(
+  save: SaveData,
+  ch: IdleChannelState,
+  now: number,
+  active: boolean,
+): number {
+  const from = ch.measuredAt
+  // ⚠ 时钟回退：本次不计量、不产出，水位保持原值
+  if (now < from) return 0
+  const elapsedMs = now - from
+  ch.measuredAt = now
+
+  if (!active) {
+    // 未启用 / 目标失效：不计收益，离线曲线从此刻重新起算
+    ch.offlineElapsedMs = 0
+    ch.effectiveMs = 0
+    return 0
   }
-  // 遗物：合并进 rewards（多场战斗的遗物清单必须累加，否则只剩最后一场的）
-  if (source.relics && source.relics.length > 0) {
-    target.relics = [...(target.relics ?? []), ...source.relics]
+  if (elapsedMs <= 0) return 0
+
+  const leaseUntil = save.idle.activeUntil ?? from
+  const onlineMs = Math.max(0, Math.min(now, leaseUntil) - from)
+  const offlineMs = elapsedMs - onlineMs
+  // ⚠ 只有真的在线（onlineMs > 0）时才重置连续离线起点
+  const oldOffline = onlineMs > 0 ? 0 : ch.offlineElapsedMs
+  const effectiveOffline =
+    (offlineEffectiveSeconds((oldOffline + offlineMs) / 1000) -
+      offlineEffectiveSeconds(oldOffline / 1000)) * 1000
+  ch.offlineElapsedMs = oldOffline + offlineMs
+  ch.pendingOfflineMs += offlineMs
+  const capMs = IDLE.CAP_HOURS * 3600 * 1000
+  ch.effectiveMs = Math.min(
+    capMs,
+    ch.effectiveMs + onlineMs * IDLE.ONLINE_MULTIPLIER + effectiveOffline,
+  )
+  return offlineMs
+}
+
+/**
+ * **结算三条挂机通道**（挂机改版 v11 的核心入口）。
+ *
+ * 流程（设计稿 §3.6）：
+ *   ① 解析目标 → ② 计量预算 → ③ 掷奖入库 → ④ 生成回执
+ *
+ * ⚠ 三条通道**各自独立**：一条通道的目标失效**不影响**另外两条。
+ * ⚠ 时钟回退时**跳过该通道**，水位保持原值（不重发）。
+ * ⚠ 无完整次数时**不发奖、不耗随机**。
+ */
+export function settleIdleChannels(
+  save: SaveData,
+  ctx: IdleSettleContext,
+  options: SettleOptions = {},
+): OfflineSettlementResult {
+  const maxRolls = options.maxRolls ?? IDLE.MAX_ROLLS_PER_SETTLEMENT
+  const payout = options.payout ?? true
+
+  const channels: ChannelSettlement[] = []
+  let totalRolls = 0
+  let maxOfflineSeconds = 0
+
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    if (options.only && kind !== options.only) continue
+    const ch = save.idle.channels[kind]
+    const target = resolveChannelTarget(save, kind, ch.target)
+    const offlineMs = measureChannel(save, ch, ctx.now, target !== null)
+    if (!target) {
+      // 失效目标：副本目标清空（主线跟随模式保留，等首胜后自然生效）
+      if (kind !== 'main' && ch.target !== null) ch.target = null
+      continue
+    }
+    if (!payout) continue
+
+    const rolls = Math.min(
+      Math.floor((ch.effectiveMs + 0.000001) / ROLL_MS),
+      maxRolls,
+    )
+    if (rolls <= 0) continue
+
+    // ⚠ **挂机改版 v11**：掷奖走**这条通道自己的随机序列**（不是全局序列）——
+    //   开 / 关另一条通道不会改变本通道的掉落，
+    //   「分批领取 == 一次领取」在每条通道各自成立（设计稿 §3.3 / §3.6）。
+    const chanRng = channelRngOf(save, kind)
+    const rewards = rollChannelRewards(target, rolls, chanRng)
+    save.rng.channels[kind] = chanRng.snapshot()
+    // 同一事务扣除本次消耗的预算
+    ch.effectiveMs = Math.max(0, ch.effectiveMs - rolls * ROLL_MS)
+
+    const elapsedSeconds = ch.pendingOfflineMs / 1000
+    ch.pendingOfflineMs = 0
+
+    channels.push({
+      channel: kind,
+      targetName: target.name,
+      rolls,
+      rewards,
+      elapsedSeconds,
+    })
+    totalRolls += rolls
+    if (elapsedSeconds > maxOfflineSeconds) maxOfflineSeconds = elapsedSeconds
+  }
+
+  if (totalRolls > 0) {
+    save.idle.totalIdleSeconds += totalRolls * IDLE.SECONDS_PER_ROLL
+  }
+
+  return {
+    channels,
+    rolls: totalRolls,
+    elapsedSeconds: maxOfflineSeconds,
+    overflow: emptyOverflow(),
   }
 }
 
-/** 生成一件遗物实例（uid 由调用方给出——存档内的遗物用 `nextRelicUid(save)`） */
-export function rollRelicInstance(relicId: string, rng: Rng, uid: string) {
-  return generateRelic(relicId, rng, RELIC.MIN_LEVEL, uid)
+/**
+ * **只计量、不发奖**（心跳用；铁律 #33：心跳保持轻量）。
+ *
+ * ⚠ 心跳只续租约、不发奖 ⇒ 计量结束后才续租。
+ *
+ * @returns 是否所有通道都可正常计量（**false** = 有通道时钟回退，不能续租）
+ */
+export function measureIdleChannels(save: SaveData, now: number): boolean {
+  let measurable = true
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    const ch = save.idle.channels[kind]
+    if (now < ch.measuredAt) {
+      // 时钟回退：本通道本次不计量，水位保持原值
+      measurable = false
+      continue
+    }
+    const target = resolveChannelTarget(save, kind, ch.target)
+    measureChannel(save, ch, now, target !== null)
+  }
+  return measurable
 }
 
-// ─────────────────────────── 内部索引 ───────────────────────────
-
-import { ENEMIES } from '../config/enemies.ts'
-import { RELICS } from '../config/relics.ts'
-
-const ENEMY_MAP = new Map(ENEMIES.map((e) => [e.id, e]))
-function ENEMY_LOOKUP(id: string) {
-  const enemy = ENEMY_MAP.get(id)
-  if (!enemy) throw new Error(`未知敌人：${id}`)
-  return enemy
+/**
+ * 某条通道当前**可结算的次数**（界面显示用；与结算口径同一份换算）。
+ */
+export function idleChannelRolls(ch: IdleChannelState): number {
+  return Math.max(0, Math.floor(ch.effectiveMs / ROLL_MS))
 }
 
-const RELIC_POOL_BY_RARITY: Record<string, string[]> = {
-  SSR: RELICS.filter((r) => r.rarity === 'SSR').map((r) => r.id),
-  SR: RELICS.filter((r) => r.rarity === 'SR').map((r) => r.id),
-  R: RELICS.filter((r) => r.rarity === 'R').map((r) => r.id),
-  N: RELICS.filter((r) => r.rarity === 'N').map((r) => r.id),
+/**
+ * 某条通道的**有效预算剩余毫秒**（界面显示用）。
+ */
+export function idleChannelRemainingMs(ch: IdleChannelState): number {
+  return Math.max(0, ch.effectiveMs)
 }
-
-export { getRelicMods }
-export type { BattleUnit }

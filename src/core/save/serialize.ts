@@ -15,7 +15,7 @@
  *   「持久化表示」与「线上协议」两层，core 的动作层看到的仍是完整的存档。
  */
 import type { RelicInstance, SaveData } from '../model/types.ts'
-import { migrate, normalizeSave, SAVE_VERSION } from './schema.ts'
+import { migrate, normalizeSave, SAVE_VERSION, createChannelRng } from './schema.ts'
 
 /** 存档主体（不含遗物实例数组） */
 export type SaveBody = Omit<SaveData, 'relics'>
@@ -106,10 +106,11 @@ export function serializePublicSave(save: SaveData): string {
  * 客户端读取投影 → 存档形态（`relics` 只含已装备遗物）。
  *
  * 随机状态在客户端一律清零——权威序列只在服务端（铁律 #24）。
+ * ⚠ 挂机改版 v11：三条挂机通道的随机序列也一并清零（它们住在同一个私有块里）。
  */
 export function deserializePublicSave(text: string): SaveData {
   const save = deserialize(text)
-  save.rng = { seed: 0, counter: 0 }
+  save.rng = { seed: 0, counter: 0, channels: createChannelRng(0) }
   return save
 }
 

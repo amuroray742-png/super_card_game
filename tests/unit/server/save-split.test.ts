@@ -197,7 +197,7 @@ describe('存档分包', () => {
     // 客户端读回来：形状不变，rng 清零
     const mirror = deserializePublicSave(payload)
     expect(mirror.relics).toHaveLength(2)
-    expect(mirror.rng).toEqual({ seed: 0, counter: 0 })
+    expect(mirror.rng).toMatchObject({ seed: 0, counter: 0 })
     expect(mirror.player).toBeDefined()
   })
 

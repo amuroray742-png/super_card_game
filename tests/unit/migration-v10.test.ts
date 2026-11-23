@@ -104,7 +104,7 @@ describe('v9 → v10 迁移', () => {
 
   it('存档版本升到 10', () => {
     expect(migrate(legacyV9Save()).version).toBe(SAVE_VERSION)
-    expect(SAVE_VERSION).toBe(10)
+    expect(SAVE_VERSION).toBe(11)
   })
 
   it('normalizeSave 保留原始版本号（迁移由 migrate 负责，不由规范化负责）', () => {

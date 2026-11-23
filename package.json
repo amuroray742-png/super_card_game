@@ -19,6 +19,7 @@
     "balance:rates": "tsx tools/balance/tenpull-rates.ts",
     "balance:newplayer": "tsx tools/balance/newplayer.ts",
     "balance:recalibrate": "tsx tools/balance/recalibrate.ts",
+    "balance:recalibrate:dungeon": "tsx tools/balance/recalibrate-dungeon.ts",
     "balance:ladder": "tsx tools/balance/ladder.ts",
     "balance:pvp": "tsx tools/balance/pvp-sample.ts",
     "validate:config": "tsx tools/validate-config.ts",

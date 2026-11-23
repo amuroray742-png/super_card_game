@@ -20,21 +20,15 @@
  *   存档**一个字节都没变**，客户端按 `code` 翻译文案。
  * - **协议失败**（负载不合法 / 未登录 / 限流）→ 4xx，错误体 `{ error }`。
  */
-import type { GameAction, GameActionType, ActionResultMap } from './actions.ts'
+import type { GameAction, GameActionType, ActionResultMap, IdleActionResult } from './actions.ts'
 import { SAVE_IMPORT } from '../config/save-import.ts'
-import {
-  LADDER,
-  RELIC,
-  RELIC_STONE_TIER_IDS,
-  DUNGEON_DIFFICULTY_IDS,
-  type DungeonDifficultyId,
-  type RelicStoneTierId,
-} from '../config/economy.ts'
+import { LADDER, RELIC, RELIC_STONE_TIER_IDS, type RelicStoneTierId } from '../config/economy.ts'
 import { isExpBook, type ItemId } from '../config/items.ts'
 import type { GameErrorCode } from '../config/game-errors.ts'
-import type { Element, Rarity } from '../model/types.ts'
+import type { Element, IdleChannelKind, Rarity } from '../model/types.ts'
 import { ELEMENTS } from '../model/types.ts'
-import type { OfflineSettlementResult } from './idle.ts'
+import type { BattleResult } from '../model/types.ts'
+import { IDLE_CHANNEL_KINDS } from './idle.ts'
 
 /** 动作请求体（客户端 → 服务端） */
 export interface ActionRequest {
@@ -71,7 +65,16 @@ export interface ActionResponse {
   /** 服务端权威存档快照（客户端据此刷新本地镜像） */
   save?: SaveSnapshot
   /** 本次入口触发的离线结算明细（客户端据此弹结算窗）；null = 本次没有离线收益 */
-  offline?: OfflineSettlementResult | null
+  offline?: IdleActionResult | null
+  /**
+   * **战斗回放**（挑战类动作的一次性回传）。
+   *
+   * ⚠ **不进幂等日志**：`BattleResult.log` 上限 1500 条，单条约 120 KB，
+   *   存进 24 小时幂等日志 = 每天几十 MB（设计稿 §3.7）。
+   *   副作用：24 小时内重放同一 actionId 时拿不到回放数据 →
+   *   客户端按「已结算」处理，不再重播演出（结果与奖励仍一致）。
+   */
+  replay?: BattleResult
   /** 该 actionId 已执行，本次未重复执行 */
   replayed?: boolean
 }
@@ -165,54 +168,58 @@ export function parseGameAction(raw: unknown): GameAction | null {
       if (!poolId || poolId.length > 64 || count === null) return null
       return { type: 'gacha.pull', poolId, count }
     }
-    case 'idle.tick': {
-      const battles = int(raw.battles)
-      if (battles === null || battles < 1 || battles > 1000) return null
-      return { type: 'idle.tick', battles }
-    }
+    case 'idle.tick':
+      return { type: 'idle.tick' }
     case 'idle.heartbeat':
       return { type: 'idle.heartbeat' }
     case 'idle.claimOffline':
       return { type: 'idle.claimOffline' }
-    case 'idle.setTarget': {
-      // ⚠ **实施修正（资源/背包版本 v10）**：负载扩展为「挂机去向」
-      //   （主线 / 技能副本 / 强化副本），三个去向共用一份时间账本。
-      const kind = str(raw.kind)
-      if (kind === 'campaign') {
-        const out: Extract<GameAction, { type: 'idle.setTarget' }> = { type: 'idle.setTarget', kind: 'campaign' }
-        if (raw.stageId !== undefined) {
-          const stageId = int(raw.stageId)
-          if (stageId === null || stageId < 1) return null
-          out.stageId = stageId
-        }
+    case 'idle.setChannel': {
+      // ⚠ **挂机改版 v11**：三条通道各自独立账本；目标必须是**已通关**的内容。
+      const channel = str(raw.channel)
+      if (!channel || !IDLE_CHANNEL_KINDS.includes(channel as IdleChannelKind)) return null
+      const out: Extract<GameAction, { type: 'idle.setChannel' }> = {
+        type: 'idle.setChannel',
+        channel: channel as IdleChannelKind,
+      }
+      if (raw.disabled === true) {
+        out.disabled = true
         return out
       }
-      if (kind === 'skill') {
-        const element = str(raw.element)
-        if (!element || !ELEMENTS.includes(element as Element)) return null
-        const difficulty = str(raw.difficulty) ?? 'easy'
-        if (!DUNGEON_DIFFICULTY_IDS.includes(difficulty as DungeonDifficultyId)) return null
-        return {
-          type: 'idle.setTarget',
-          kind: 'skill',
-          element: element as Element,
-          difficulty: difficulty as DungeonDifficultyId,
-        }
+      if (raw.disabled !== undefined && raw.disabled !== false) return null
+      if (raw.stageId !== undefined && raw.stageId !== null) {
+        const stageId = int(raw.stageId)
+        if (stageId === null || stageId < 1) return null
+        out.stageId = stageId
+      } else if (raw.stageId === null) {
+        // 显式 null = 跟随最新通关关卡
+        out.stageId = null
       }
-      if (kind === 'enhance') {
-        const tier = str(raw.tier)
-        if (!tier || !RELIC_STONE_TIER_IDS.includes(tier as RelicStoneTierId)) return null
-        const difficulty = str(raw.difficulty) ?? 'easy'
-        if (!DUNGEON_DIFFICULTY_IDS.includes(difficulty as DungeonDifficultyId)) return null
-        return {
-          type: 'idle.setTarget',
-          kind: 'enhance',
-          tier: tier as RelicStoneTierId,
-          difficulty: difficulty as DungeonDifficultyId,
-        }
+      if (raw.dungeonStageId !== undefined) {
+        const dungeonStageId = str(raw.dungeonStageId)
+        if (!dungeonStageId || dungeonStageId.length > 64) return null
+        out.dungeonStageId = dungeonStageId
       }
-      return null
+      // 一个目标都没给 = 无效负载（关闭通道必须显式传 disabled）
+      if (out.stageId === undefined && !out.dungeonStageId) return null
+      return out
     }
+    case 'campaign.challenge': {
+      const out: Extract<GameAction, { type: 'campaign.challenge' }> = { type: 'campaign.challenge' }
+      if (raw.stageId !== undefined) {
+        const stageId = int(raw.stageId)
+        if (stageId === null || stageId < 1) return null
+        out.stageId = stageId
+      }
+      return out
+    }
+    case 'dungeon.challenge': {
+      const stageId = str(raw.stageId)
+      if (!stageId || stageId.length > 64) return null
+      return { type: 'dungeon.challenge', stageId }
+    }
+    case 'relic.acquire':
+      return { type: 'relic.acquire' }
     case 'settings.update': {
       const out: Extract<GameAction, { type: 'settings.update' }> = { type: 'settings.update' }
       if (raw.speed !== undefined) {

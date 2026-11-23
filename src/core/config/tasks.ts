@@ -11,7 +11,7 @@
  *
  * | 来源 | 统计口径 | 对应玩法 |
  * |---|---|---|
- * | 推征 | 实际跑掉的战斗场次 | 推征页 |
+ * | 主线挂机 | 主线通道的挂机结算次数 | 推征页 |
  * | 召唤 | 抽卡次数 | 召唤页 |
  * | 遗物 | 遗物强化件数 | 铸造页 |
  * | 签到 | 签到次数 | 每日页 |
@@ -92,11 +92,15 @@ export interface TaskDef {
  *
  * 目标数都取「几分钟内可达」——任务是**引导**，不是**门槛**：
  * 一条每天都要做的事，不该让玩家因为它而卡住。
+ *
+ * ⚠ **实施修正（挂机改版 v11）**：「推征」口径改为**主线挂机结算次数**
+ *   （副本场次与手动挑战都不计入——那是另一种活动）。
+ *   文案同步改成「主线挂机结算」，让玩家知道自己在数什么。
  */
 export const DAILY_TASKS: readonly TaskDef[] = [
   {
     id: 'd_battle',
-    title: '推征 30 场',
+    title: '主线挂机结算 30 次',
     metric: 'battle',
     period: 'daily',
     target: 30,
@@ -143,7 +147,7 @@ export const DAILY_TASKS: readonly TaskDef[] = [
 export const WEEKLY_TASKS: readonly TaskDef[] = [
   {
     id: 'w_battle',
-    title: '累计推征 200 场',
+    title: '累计主线挂机结算 200 次',
     metric: 'battle',
     period: 'weekly',
     target: 200,

@@ -1,78 +1,49 @@
 import { test, expect, type Page } from '@playwright/test'
-import type { ActionRequest, ActionResponse } from '../../src/core/systems/action-protocol.ts'
 import type { SaveData } from '../../src/core/model/types.ts'
-import { createNewSave } from '../../src/core/save/schema.ts'
-import { exportSave } from '../../src/core/save/serialize.ts'
-import { createHeroState } from '../../src/core/systems/growth.ts'
-import { DUNGEON_DIFFICULTIES } from '../../src/core/config/economy.ts'
+import { DUNGEON_STAGES, dungeonStageId, dungeonStagesOf } from '../../src/core/config/dungeons.ts'
 import { ITEM_BY_ELEMENT } from '../../src/core/config/items.ts'
-import { DUNGEON_VARIANTS, dungeonDropAmount } from '../../src/core/config/dungeons.ts'
+import { DUNGEON_DIFFICULTY_ORDER } from '../../src/core/config/economy.ts'
+import { getStage } from '../../src/core/config/stages.ts'
+import { GAME_ERROR_CODES } from '../../src/core/config/game-errors.ts'
 import {
-  accessTokenOf,
   cachedSaveOf,
-  loginAccount,
+  giveTeam,
+  importFixture,
   postAction,
-  registerAccount,
-  seedSession,
-  settleIdleThroughUi,
-  uniqueUsername,
+  waitForAction,
 } from './helpers'
 
 /**
- * 材料副本端到端用例（**资源/背包版本 v10**）。
+ * 材料副本端到端用例（**挂机改版 v11**）。
  *
- * 副本是**两类材料的唯一来源**（五行技能材料 / 三档强化石），所以这条链路
- * 必须真的跑通：设去向 → 挂机 → 拿到材料 → 切回主线 → 主线继续推进。
+ * 副本现在是 **24 个独立关卡**（`(变体 × 难度) = 1 关`），
+ * 打通一次即通关，通关记录写 `save.dungeons.cleared`（与主线**分开记账**）。
  *
  * ## 守的语义
  *
- * 1. **副本进度与主线分开记账**——副本跑完 `campaign.clearedStage` 不动；
- * 2. **副本胜利只发所选材料**——不发银两 / 经验书 / 遗物；
- * 3. **三个去向共用一份挂机时间账本**——切换去向时先结清旧去向；
- * 4. **战败要给「降一档难度」的出口**（铁律 #27：规则写在玩家眼前）。
+ * 1. **24 关都在页面上**，按难度段分组（简易 / 普通 / 困难）；
+ * 2. **通关记录**：`dungeon.challenge` 胜利 → `dungeons.cleared[id] === true`，
+ *    回包 `firstClear === true`，**奖励只有材料**（不发银两 / 经验书 / 遗物）；
+ * 3. **战败不发奖**：不写通关记录、不发任何东西；
+ * 4. **未通关的关卡不能设为挂机通道**（界面禁用 + 服务端拒绝）；
+ * 5. **已通关的关卡可以设为对应通道**（技能 / 强化），通道目标写对；
+ * 6. **主线通道跟随最新通关关卡**（`stageId = null`）。
  *
- * ⚠ 前置用**玩家可用的 `save.import` 动作**导入（铁律 #11），导入后
- *   一切养成动作仍由服务端权威执行。
+ * ⚠ 前置用**玩家可用的 `save.import` 动作**导入（铁律 #11）。
+ *   ⚠ 但导入**不能**用来伪造副本通关：服务端在导入后会**清空** `dungeons.cleared`
+ *   （导入的进度不是可信的通关凭证）⇒ 「已通关才能挂机」这条**必须真的打赢一次**。
  */
 
 test.setTimeout(240_000)
 
-/** 一支能打赢第 1 章的队伍（Lv60 → 战力远高于第 1 章门槛） */
-const STRONG_TEAM = ['hanxin', 'luban', 'zhugeliang', 'libai', 'xiangyu', 'chengjisihan']
+/** 一支能打赢简易副本的队伍（Lv60 → 战力远高于简易档门槛） */
+const STRONG_TEAM = ['hanxin', 'luban', 'zhugeliang', 'libai', 'xiangyu', 'chengjisihan'] as const
 /** 火系英灵（技能副本用） */
 const FIRE_HERO = 'libai'
-
-/**
- * 造一个前置存档。
- *
- * ⚠ 编队**必须**有货：挂机结算要真的有战斗可跑（`buildTeam(save).length === 0`
- *   时服务端直接返回「请先在阵位中编队」）。
- */
-async function importFixture(
-  page: Page,
-  prefix: string,
-  mutate: (save: SaveData) => void,
-): Promise<number> {
-  const session = await registerAccount(uniqueUsername(prefix))
-  const token = await accessTokenOf(session)
-  const save = createNewSave(Date.now())
-  mutate(save)
-  const imported = await postAction(token, `${prefix}-fixture`, {
-    type: 'save.import',
-    payload: exportSave(save),
-  })
-  expect(imported.ok, '前置存档导入失败').toBe(true)
-  await seedSession(page, await loginAccount(session.user.username))
-  return session.user.id
-}
-
-/** 给存档塞一支满级队伍 */
-function giveTeam(save: SaveData, ids: readonly string[], level = 60): void {
-  ids.forEach((id, slot) => {
-    save.heroes[id] = { ...createHeroState(id, Date.now()), level }
-    save.team.slots[slot] = id
-  })
-}
+/** 技能副本 · 火 · 简易（副本关卡 id 的唯一出处是 core 的 `dungeonStageId`） */
+const FIRE_EASY = dungeonStageId('skillFire', 'easy')
+/** 强化副本 · 初阶 · 简易 */
+const TIER1_EASY = dungeonStageId('enhanceTier1', 'easy')
 
 /** 读背包里某个道具的数量 */
 async function itemCountOf(page: Page, accountId: number, itemId: string): Promise<number> {
@@ -84,162 +55,295 @@ async function clearedStageOf(page: Page, accountId: number): Promise<number> {
   return (await cachedSaveOf(page, accountId))?.campaign?.clearedStage ?? 0
 }
 
-/** 等待某个动作的权威响应 */
-async function waitAction(page: Page, type: string): Promise<ActionResponse> {
-  const responsePromise = page.waitForResponse((response) => {
-    const request = response.request()
-    if (request.method() !== 'POST' || new URL(response.url()).pathname !== '/api/action') return false
-    return (request.postDataJSON() as ActionRequest).action.type === type
-  })
-  const response = await responsePromise
-  expect(response.ok()).toBe(true)
-  const body = await response.json() as ActionResponse
-  expect(body.ok, body.message).toBe(true)
-  return body
+/** 读副本通关记录 */
+async function dungeonClearedOf(
+  page: Page,
+  accountId: number,
+  stageId: string,
+): Promise<boolean> {
+  return (await cachedSaveOf(page, accountId))?.dungeons?.cleared?.[stageId] === true
 }
 
-test.describe('材料副本页', () => {
-  test('种类 / 变体 / 难度都能选，每胜产量写在页面上', async ({ page }) => {
-    await importFixture(page, 'dgpage', (save) => {
-      giveTeam(save, STRONG_TEAM)
+/** 打开副本页（hash 路由深链，`kind` 是唯一的 tab 参数） */
+async function openDungeon(page: Page, kind: 'skill' | 'enhance'): Promise<void> {
+  await page.goto(`/#/dungeon?kind=${kind}`)
+  await page.waitForLoadState('networkidle')
+  // ⚠ 同文档导航不会重载：必须等页面**渲染出来**再断言
+  await expect(page.getByTestId(`dungeon-kind-${kind}`)).toBeVisible()
+}
+
+test.describe('副本页（24 个独立关卡）', () => {
+  test('技能 15 关 + 强化 9 关 = 24 关，按难度段分组', async ({ page }) => {
+    await importFixture(page, 'dgpage', (save: SaveData) => {
+      giveTeam(save, STRONG_TEAM, 60)
     })
 
-    await page.goto('/#/dungeon?kind=skill&element=火&difficulty=easy')
-    await page.waitForLoadState('networkidle')
+    // 配置侧：24 关是**唯一出处**（core 的关卡表）
+    expect(DUNGEON_STAGES).toHaveLength(24)
+    expect(dungeonStagesOf('skill')).toHaveLength(15)
+    expect(dungeonStagesOf('enhance')).toHaveLength(9)
 
-    // 技能副本：5 个五行变体（testid 用**变体 id**，口径取 core）
-    const skillVariants = DUNGEON_VARIANTS.filter((v) => v.kind === 'skill')
-    expect(skillVariants).toHaveLength(5)
-    for (const v of skillVariants) {
-      await expect(page.getByTestId(`dungeon-variant-${v.id}`)).toBeVisible()
-    }
-    await expect(page.getByTestId('dungeon-variant-skillFire')).toHaveClass(/on/)
+    // ── 技能副本 tab：15 关，3 个难度段各 5 关 ─────────────
+    await openDungeon(page, 'skill')
+    await expect(page.locator('.dgn-row')).toHaveCount(15)
 
-    // 3 档难度，每档都写着「每胜 N 个」（产量取 core，不写死）
-    for (const d of DUNGEON_DIFFICULTIES) {
-      const chip = page.getByTestId(`dungeon-difficulty-${d.id}`)
-      await expect(chip).toBeVisible()
-      await expect(chip).toContainText('每胜')
+    const groups = page.locator('.page > .panel')
+    // 3 个难度段 + 1 个「规则」面板
+    await expect(groups).toHaveCount(4)
+    const difficultyNames = ['简易', '普通', '困难']
+    for (let i = 0; i < DUNGEON_DIFFICULTY_ORDER.length; i++) {
+      const group = groups.nth(i)
+      await expect(group).toContainText(difficultyNames[i])
+      // 段内关卡数 = 变体数（技能副本 5 个变体）
+      await expect(group.locator('.dgn-row')).toHaveCount(5)
     }
-    const fireMat = ITEM_BY_ELEMENT.火
-    const fireVariant = DUNGEON_VARIANTS.find((v) => v.id === 'skillFire')!
-    const easyDrop = dungeonDropAmount(fireVariant, 'easy')
-    await expect(page.getByTestId('dungeon-difficulty-easy')).toContainText(
-      String(easyDrop.min === easyDrop.max ? easyDrop.min : `${easyDrop.min}~${easyDrop.max}`),
+
+    // 关卡按难度段**逐段排列**（顺序口径取 core）
+    const order = await page.locator('.dgn-row').evaluateAll((els) =>
+      els.map((el) => el.getAttribute('data-testid')),
     )
+    const expected = DUNGEON_DIFFICULTY_ORDER.flatMap((difficulty) =>
+      dungeonStagesOf('skill')
+        .filter((s) => s.difficulty === difficulty)
+        .map((s) => `dungeon-stage-${s.id}`),
+    )
+    expect(order).toEqual(expected)
 
-    // 强化副本：3 档石
+    // ── 强化副本 tab：9 关，3 个难度段各 3 关 ───────────────
     await page.getByTestId('dungeon-kind-enhance').click()
-    await page.waitForLoadState('networkidle')
-    await expect(page.getByTestId('dungeon-variant-enhanceTier1')).toBeVisible()
-    await expect(page.getByTestId('dungeon-variant-enhanceTier2')).toBeVisible()
-    await expect(page.getByTestId('dungeon-variant-enhanceTier3')).toBeVisible()
+    await expect(page.locator('.dgn-row')).toHaveCount(9)
+    const enhanceGroups = page.locator('.page > .panel')
+    for (let i = 0; i < 3; i++) {
+      await expect(enhanceGroups.nth(i).locator('.dgn-row')).toHaveCount(3)
+    }
   })
 
-  test('没英灵时技能副本未解锁，并写清原因', async ({ page }) => {
-    await importFixture(page, 'dglock', (save) => {
-      void save
+  test('每关都写着门槛、产量与通关状态', async ({ page }) => {
+    await importFixture(page, 'dginfo', (save: SaveData) => {
+      giveTeam(save, STRONG_TEAM, 60)
     })
 
-    await page.goto('/#/dungeon?kind=skill&element=火&difficulty=easy')
-    await page.waitForLoadState('networkidle')
-
-    await expect(page.getByText('未解锁').first()).toBeVisible()
-    await expect(page.getByText(/还没有英灵/).first()).toBeVisible()
-    await expect(page.getByTestId('dungeon-set-target')).toBeDisabled()
-  })
-
-  test('没有 Lv60 遗物时中阶强化副本未解锁', async ({ page }) => {
-    await importFixture(page, 'dgtier', (save) => {
-      giveTeam(save, STRONG_TEAM)
-    })
-
-    await page.goto('/#/dungeon?kind=enhance&tier=relicStoneTier2&difficulty=easy')
-    await page.waitForLoadState('networkidle')
-
-    await expect(page.getByText('未解锁').first()).toBeVisible()
-    await expect(page.getByText(/需要持有 Lv60 遗物/).first()).toBeVisible()
-    await expect(page.getByTestId('dungeon-set-target')).toBeDisabled()
+    await openDungeon(page, 'skill')
+    const row = page.getByTestId(`dungeon-stage-${FIRE_EASY}`)
+    await expect(row).toBeVisible()
+    await expect(row).toContainText('门槛')
+    await expect(row).toContainText('每胜')
+    // 产量口径取 core，不写死数字
+    const stage = DUNGEON_STAGES.find((s) => s.id === FIRE_EASY)!
+    const amount = stage.drop.min === stage.drop.max
+      ? String(stage.drop.min)
+      : `${stage.drop.min}~${stage.drop.max}`
+    await expect(row).toContainText(`每胜 ${amount}`)
+    // 未通关
+    await expect(row).toContainText('未通关')
   })
 })
 
-test.describe('挂机去向与副本产出', () => {
-  test('设为挂机去向 → 挂机拿到材料 → 切回主线 → 主线继续推进', async ({ page }) => {
-    const accountId = await importFixture(page, 'dgrun', (save) => {
-      giveTeam(save, STRONG_TEAM)
-      // 主线从第 1 关起步，方便断言「切回主线后主线继续推进」
-      save.campaign.clearedStage = 0
-      save.campaign.chapterProgress = 1
-      save.idle.currentStage = 1
-      save.idle.autoAdvance = false
+test.describe('副本挑战与通关记录', () => {
+  test('挑战胜利：写入 dungeons.cleared，回包 firstClear，奖励只有材料', async ({ page }) => {
+    const { accountId } = await importFixture(page, 'dgwin', (save: SaveData) => {
+      giveTeam(save, STRONG_TEAM, 60)
     })
 
-    const fireMat = ITEM_BY_ELEMENT.火
+    await openDungeon(page, 'skill')
+    const body = await waitForAction(page, 'dungeon.challenge', {
+      trigger: async () => {
+        await page.getByTestId(`dungeon-challenge-${FIRE_EASY}`).click()
+      },
+    })
+    const result = body.result as unknown as {
+      stageId: string
+      win: boolean
+      firstClear: boolean
+      rewards: {
+        silver?: number
+        crystals?: number
+        items?: Record<string, number>
+        relics?: string[]
+        shards?: Record<string, number>
+      }
+    }
 
-    // ── 1) 设为挂机去向（技能副本 · 火 · 简易）────────
-    await page.goto('/#/dungeon?kind=skill&element=火&difficulty=easy')
-    await page.waitForLoadState('networkidle')
-    await expect(page.getByTestId('dungeon-set-target')).toBeEnabled()
-    await page.getByTestId('dungeon-set-target').click()
-    const setRes = await waitAction(page, 'idle.setTarget')
-    expect((setRes.result as { target: { kind: string } }).target.kind).toBe('skill')
+    expect(result.stageId).toBe(FIRE_EASY)
+    expect(result.win).toBe(true)
+    expect(result.firstClear).toBe(true)
+    // 奖励**只有材料**：不发银两 / 经验书 / 遗物 / 碎片 / 结晶
+    expect(result.rewards.items?.[ITEM_BY_ELEMENT.火] ?? 0).toBeGreaterThan(0)
+    expect(result.rewards.silver).toBeUndefined()
+    expect(result.rewards.crystals).toBeUndefined()
+    expect(result.rewards.relics).toBeUndefined()
+    expect(result.rewards.shards).toBeUndefined()
+    expect(Object.keys(result.rewards.items ?? {})).toEqual([ITEM_BY_ELEMENT.火])
 
-    // ── 2) 推征页看得到当前去向 ────────────────────────
-    await page.goto('/#/expedition')
-    await page.waitForLoadState('networkidle')
-    await expect(page.getByTestId('idle-target-name')).toContainText('技能副本')
-    await expect(page.getByTestId('idle-target-name')).toContainText('火')
+    // 材料真的入库
+    await expect.poll(() => itemCountOf(page, accountId, ITEM_BY_ELEMENT.火), { timeout: 10_000 })
+      .toBeGreaterThan(0)
 
-    // ── 3) 挂机 → 拿到副本材料 ────────────────────────
-    const matBefore = await itemCountOf(page, accountId, fireMat)
-    expect(matBefore).toBe(0)
-
-    const run = await settleIdleThroughUi(page, accountId)
-    expect(run.dungeon, '副本去向的结算必须带回副本明细').toBeTruthy()
-    expect(run.dungeon!.itemId).toBe(fireMat)
-
-    await expect.poll(() => itemCountOf(page, accountId, fireMat), { timeout: 10_000 })
-      .toBeGreaterThan(matBefore)
-
-    // 副本**不写主线进度**（分开记账）
+    // 通关记录写进 `dungeons.cleared`（**副本不写主线进度**）
+    await expect.poll(() => dungeonClearedOf(page, accountId, FIRE_EASY), { timeout: 10_000 }).toBe(true)
     expect(await clearedStageOf(page, accountId)).toBe(0)
 
-    // ── 4) 切回主线 → 主线继续推进 ─────────────────────
-    await page.getByTestId('idle-target-campaign').click()
-    await page.getByTestId('idle-target-apply').click()
-    const backRes = await waitAction(page, 'idle.setTarget')
-    expect((backRes.result as { target: { kind: string } }).target.kind).toBe('campaign')
+    // 页面上标成「已通关」
+    await expect(page.getByTestId(`dungeon-stage-${FIRE_EASY}`)).toContainText('已通关')
 
-    await expect.poll(() => page.getByTestId('idle-target-name').innerText(), { timeout: 10_000 })
-      .toContain('主线')
-
-    await settleIdleThroughUi(page, accountId)
-    await expect.poll(() => clearedStageOf(page, accountId), { timeout: 15_000 }).toBeGreaterThan(0)
+    // ⚠ **副本挑战也要演出来**：服务端执行 → 响应的一次性 `replay` → 页面级回放面板。
+    //   （曾经的缺口：客户端只取 `result`，`battle` 恒为 undefined ⇒ 副本页挑战后毫无反馈。）
+    const panel = page.getByTestId('challenge-replay')
+    await expect(panel).toBeVisible({ timeout: 10_000 })
+    await expect(panel.locator('canvas.battle-canvas')).toHaveAttribute('data-visible-units', /[1-9]/)
   })
 
-  test('副本战败时给出「降一档难度」的出口', async ({ page }) => {
-    const accountId = await importFixture(page, 'dglose', (save) => {
-      // 一支一级小队打第 8 章（困难档取材章）→ 必败
-      save.heroes[FIRE_HERO] = { ...createHeroState(FIRE_HERO, Date.now()), level: 1 }
-      save.team.slots[0] = FIRE_HERO
-      save.campaign.clearedStage = 0
-      save.idle.currentStage = 1
-      save.idle.target = { kind: 'skill', element: '火', difficulty: 'hard' }
+  test('挑战失败：win=false、不发奖、不写通关记录', async ({ page }) => {
+    const { accountId } = await importFixture(page, 'dglose', (save: SaveData) => {
+      // 一级小队打简易档技能副本 → 必败
+      giveTeam(save, [FIRE_HERO], 1)
     })
 
+    await openDungeon(page, 'skill')
+    const body = await waitForAction(page, 'dungeon.challenge', {
+      trigger: async () => {
+        await page.getByTestId(`dungeon-challenge-${FIRE_EASY}`).click()
+      },
+    })
+    const result = body.result as unknown as {
+      win: boolean
+      firstClear: boolean
+      rewards: Record<string, unknown>
+    }
+
+    expect(result.win).toBe(false)
+    expect(result.firstClear).toBe(false)
+    // 战败不发任何奖励
+    expect(Object.keys(result.rewards)).toHaveLength(0)
+
+    // 不写通关记录
+    expect(await dungeonClearedOf(page, accountId, FIRE_EASY)).toBe(false)
+    // 材料也没发
+    expect(await itemCountOf(page, accountId, ITEM_BY_ELEMENT.火)).toBe(0)
+    // 界面仍然标成「未通关」
+    await expect(page.getByTestId(`dungeon-stage-${FIRE_EASY}`)).toContainText('未通关')
+  })
+
+  test('未通关的副本关卡不能设为挂机通道（界面禁用 + 服务端拒绝）', async ({ page }) => {
+    const { token } = await importFixture(page, 'dglock', (save: SaveData) => {
+      giveTeam(save, STRONG_TEAM, 60)
+    })
+
+    await openDungeon(page, 'skill')
+    // 界面：未通关 → 按钮禁用
+    await expect(page.getByTestId(`dungeon-set-channel-${FIRE_EASY}`)).toBeDisabled()
+
+    // 服务端：同样拒绝（**存档一个字节都没变**）
+    const rejected = await postAction(token, 'dg-lock-1', {
+      type: 'idle.setChannel',
+      channel: 'skill',
+      dungeonStageId: FIRE_EASY,
+    })
+    expect(rejected.ok).toBe(false)
+    expect(rejected.code).toBe(GAME_ERROR_CODES.NOT_FOUND)
+    expect(String(rejected.message ?? '')).toContain('尚未通关')
+  })
+})
+
+test.describe('挂机通道（三通道并行）', () => {
+  test('已通关的副本关卡可以设为对应通道，通道目标写对', async ({ page }) => {
+    const { accountId } = await importFixture(page, 'dgchan', (save: SaveData) => {
+      giveTeam(save, STRONG_TEAM, 60)
+    })
+
+    // ── 1) 先真的打赢一次（导入给不了通关凭证）──────────────
+    await openDungeon(page, 'skill')
+    await waitForAction(page, 'dungeon.challenge', {
+      trigger: async () => {
+        await page.getByTestId(`dungeon-challenge-${FIRE_EASY}`).click()
+      },
+    })
+    await expect.poll(() => dungeonClearedOf(page, accountId, FIRE_EASY), { timeout: 10_000 }).toBe(true)
+
+    // ── 2) 设为技能通道 ────────────────────────────────────
+    const setRes = await waitForAction(page, 'idle.setChannel', {
+      trigger: async () => {
+        await page.getByTestId(`dungeon-set-channel-${FIRE_EASY}`).click()
+      },
+    })
+    const result = setRes.result as unknown as {
+      channel: string
+      target: { kind: string; dungeonStageId: string } | null
+    }
+    expect(result.channel).toBe('skill')
+    expect(result.target).toEqual({ kind: 'skill', dungeonStageId: FIRE_EASY })
+
+    // 权威存档里的通道目标写对了
+    await expect
+      .poll(async () => (await cachedSaveOf(page, accountId))?.idle?.channels?.skill?.target, { timeout: 10_000 })
+      .toEqual({ kind: 'skill', dungeonStageId: FIRE_EASY })
+
+    // 推征页看得到这条通道的目标
     await page.goto('/#/expedition')
     await page.waitForLoadState('networkidle')
+    await expect(page.getByTestId('idle-channel-skill')).toContainText('已开启')
+    await expect(page.getByTestId('idle-channel-skill')).toContainText('火')
+  })
 
-    // 去向已是困难档技能副本
-    await expect(page.getByTestId('idle-target-name')).toContainText('技能副本')
-    await expect(page.getByTestId('idle-target-difficulty-hard')).toHaveClass(/on/)
+  test('强化副本走自己的通道，两条通道互不干扰', async ({ page }) => {
+    const { accountId, token } = await importFixture(page, 'dgenh', (save: SaveData) => {
+      giveTeam(save, STRONG_TEAM, 60)
+    })
 
-    // 战败 → 界面给出「降一档难度」的出口（铁律 #27：规则写在玩家眼前）
-    const run = await settleIdleThroughUi(page, accountId)
-    expect(run.dungeon, '副本去向的结算必须带回副本明细').toBeTruthy()
-    expect(run.dungeon!.blockedAtBattle, '一级小队打困难档必须战败').not.toBeNull()
-    expect(run.dungeon!.suggestDifficulty).toBe('normal')
+    // 强化副本 · 初阶 · 简易：需要「持有任意遗物」才解锁
+    // ⚠ 新档没有遗物 → 这里用**遗物祈愿**（遗物的独立获取入口）拿一件
+    const acquired = await postAction(token, 'dg-enh-acquire', { type: 'relic.acquire' })
+    expect(acquired.ok, '遗物祈愿应当成功').toBe(true)
 
-    await expect(page.getByTestId('idle-lower-difficulty')).toBeVisible()
+    await openDungeon(page, 'enhance')
+    await waitForAction(page, 'dungeon.challenge', {
+      trigger: async () => {
+        await page.getByTestId(`dungeon-challenge-${TIER1_EASY}`).click()
+      },
+    })
+    await expect.poll(() => dungeonClearedOf(page, accountId, TIER1_EASY), { timeout: 10_000 }).toBe(true)
+
+    const setRes = await waitForAction(page, 'idle.setChannel', {
+      trigger: async () => {
+        await page.getByTestId(`dungeon-set-channel-${TIER1_EASY}`).click()
+      },
+    })
+    const result = setRes.result as unknown as { channel: string; target: { kind: string } | null }
+    expect(result.channel).toBe('enhance')
+    expect(result.target?.kind).toBe('enhance')
+
+    await expect
+      .poll(async () => (await cachedSaveOf(page, accountId))?.idle?.channels?.enhance?.target, { timeout: 10_000 })
+      .toEqual({ kind: 'enhance', dungeonStageId: TIER1_EASY })
+  })
+
+  test('主线通道跟随最新通关关卡（stageId = null）', async ({ page }) => {
+    const { accountId } = await importFixture(page, 'dgmain', (save: SaveData) => {
+      giveTeam(save, STRONG_TEAM, 60)
+      // 已通关到第 5 关 → 主线通道跟随它
+      save.campaign.clearedStage = 5
+    })
+
+    // 导入后主线通道恢复「跟随」模式
+    await expect
+      .poll(async () => (await cachedSaveOf(page, accountId))?.idle?.channels?.main?.target, { timeout: 10_000 })
+      .toEqual({ kind: 'main', stageId: null })
+
+    // 推征页的主线卡显示的是**最新通关关卡**的名字
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+    await expect(page.getByTestId('idle-channel-main')).toContainText(getStage(5).name)
+
+    // 手动挑战推进到第 6 关 → 跟随目标跟着走（目标本身仍是 null）
+    await waitForAction(page, 'campaign.challenge', {
+      trigger: async () => {
+        await page.getByTestId('campaign-challenge').click()
+      },
+    })
+    await expect.poll(() => clearedStageOf(page, accountId), { timeout: 10_000 }).toBe(6)
+    await expect
+      .poll(async () => (await cachedSaveOf(page, accountId))?.idle?.channels?.main?.target, { timeout: 10_000 })
+      .toEqual({ kind: 'main', stageId: null })
+    await expect(page.getByTestId('idle-channel-main')).toContainText(getStage(6).name)
   })
 })

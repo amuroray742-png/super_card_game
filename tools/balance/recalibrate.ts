@@ -46,26 +46,24 @@ import { referenceTeam } from './reference-build.ts'
 import { judgeRecycle } from './recycle-verdict.ts'
 import { feedBooks, itemsToExp, materialTotals, storedExp } from './item-flow.ts'
 import {
-  applyIdleTarget,
-  decideIdleTarget,
-  resolveDungeonDifficulty,
+  applyChannels,
+  challengeDungeonStage,
+  decideChannels,
   targetPlanName,
   teamSkillLevel,
-  type IdleTargetPlan,
 } from './dungeon-loop.ts'
 import { ITEM_BY_ELEMENT, type ItemId } from '../../src/core/config/items.ts'
 import {
-  BATTLE,
   EXP_BOOK,
   IDLE,
   LEVEL,
   RELIC,
+  RELIC_ACQUIRE,
   SKILL,
   STAGE,
   STAR,
   START_ITEMS,
   START_RESOURCES,
-  type DungeonDifficultyId,
 } from '../../src/core/config/economy.ts'
 import type {
   HeroDef,
@@ -90,6 +88,20 @@ const { values } = parseArgs({
     offlineHours: { type: 'string', default: '24' },
     /** 每天在线时长（小时）——0 = 纯离线基线；>0 = 活跃玩家 */
     onlineHours: { type: 'string', default: '0' },
+    /**
+     * 每天**手动挑战**主线关卡数上限（挂机改版 v11）。
+     *
+     * ⚠ 挂机不再跑战斗 ⇒ 主线推进**只能**靠手动挑战 ⇒ 曲线的推进速度
+     *   由这个值决定。默认 8：310 关 / 40 天 ≈ 7.75 关/天。
+     */
+    challengesPerDay: { type: 'string', default: '8' },
+    /**
+     * 每天**祈愿遗物**的件数上限（遗物的独立获取入口）。
+     *
+     * ⚠ 理性玩家不会把全部银两砸进祈愿——银两同时要付境界突破 /
+     *   技能升级 / 遗物强化。默认 2。
+     */
+    relicsPerDay: { type: 'string', default: '2' },
     /** 机读结果输出路径 */
     out: { type: 'string', default: 'artifacts/baselines/recalibrate.json' },
     /** 只看报告，不落盘 */
@@ -102,21 +114,27 @@ const TRIALS = Math.max(10, Number(values.trials) || 40)
 const BISECT = Math.max(6, Number(values.bisect) || 18)
 const OFFLINE_HOURS = Math.max(0, Number(values.offlineHours) || 0)
 const ONLINE_HOURS = Math.max(0, Number(values.onlineHours) || 0)
+const CHALLENGES_PER_DAY = Math.max(0, Number(values.challengesPerDay) || 0)
+const RELICS_PER_DAY = Math.max(0, Number(values.relicsPerDay) || 0)
 const OUT_PATH = values.out ? resolve(process.cwd(), values.out) : ''
 
 const HOUR_MS = 3_600_000
 const BASE_NOW = Date.UTC(2026, 0, 5, 4, 0, 0)
 const SEED = 20260105
 /**
- * 每个「挂机日」的场次。
+ * 每个「挂机日」的**掷奖次数**（每条通道各自一份）。
  *
  * ⚠ 口径必须走 core 的**离线效率曲线**（`computeOfflineEfficiency`），
  *   不能拿「满效率小时数 × 场次/小时」糊弄：
  *   真实玩家每天上线的收益是 f(离线时长)，不是 f(FULL_EFFICIENCY_HOURS)——
  *   尾部衰减与 CAP_HOURS 封顶都在 f 里（铁律 #1：口径必须复用 core）。
+ *
+ * ⚠ **挂机改版 v11**：挂机不再跑战斗，节奏单位从「战斗耗时」变成
+ *   **掉落掷奖间隔**（`IDLE.SECONDS_PER_ROLL`）。两者数值都是 6 秒，
+ *   但语义完全不同，名字必须跟着语义走（铁律 #4）。
  */
-const BATTLES_PER_DAY = Math.floor(
-  (computeOfflineEfficiency(OFFLINE_HOURS * 3600) * 3600) / BATTLE.SECONDS_PER_BATTLE,
+const ROLLS_PER_DAY = Math.floor(
+  (computeOfflineEfficiency(OFFLINE_HOURS * 3600) * 3600) / IDLE.SECONDS_PER_ROLL,
 )
 
 /** 章内总跨度（普通关铺开 × 章末 BOSS 倍率） */
@@ -606,10 +624,12 @@ interface DaySnapshot {
   skillLevel: number
   /** 上阵英灵的**平均**星级（同名碎片的升星维度；模拟里没有碎片来源 ⇒ 恒为 1） */
   starLevel: number
-  /** 当天实际回放的战斗场次 */
-  battles: number
-  /** 当天被卡住的关卡 */
+  /** 当天实际结算的掷奖次数（三通道合计） */
+  rolls: number
+  /** 当天被卡住的关卡（手动挑战打不赢的那一关） */
   blockedAtStage: number | null
+  /** 当天手动挑战打通的关卡数（主线推进只能靠它） */
+  manualWins: number
   /**
    * 当天**用的挂机去向**（主线 / 技能副本 · 五行 / 强化副本 · 石档）。
    *
@@ -656,6 +676,67 @@ function applyAnchors(scales: readonly number[], powers: readonly number[]): voi
 }
 
 /**
+ * **手动挑战主线关卡**（挂机改版 v11：主线推进只走手动挑战）。
+ *
+ * ⚠ 挂机不再跑战斗 ⇒ 关卡进度**不会**自己往前走。
+ *   模型口径：玩家每次上线打若干关，**打不赢就停**（等明天的养成把战力拉上去）。
+ *
+ * ⚠ 走**真实动作层**（`campaign.challenge`）⇒ 战斗判定、奖励、首通保底
+ *   全部是 core 的真实逻辑，不是复算的规则。
+ *
+ * @returns 战败停下的那一关（= 玩家卡住的地方）、当天打通的关卡数
+ */
+function runManualCampaignChallenges(
+  save: SaveData,
+  ctx: ActionContext,
+  limit: number,
+): { blockedAt: number | null; wins: number } {
+  let wins = 0
+  for (let i = 0; i < limit; i++) {
+    const next = save.campaign.clearedStage + 1
+    if (next > STAGES.length) break
+    const res = applyAction(save, { type: 'campaign.challenge', stageId: next }, ctx)
+    if (!res.ok) return { blockedAt: next, wins }
+    if (!res.result.win) return { blockedAt: next, wins }
+    wins++
+  }
+  return { blockedAt: null, wins }
+}
+
+/** 资源快照（银两 / 道具 / 结晶）——用来算动作的**净产出** */
+function snapshotResources(save: SaveData): {
+  silver: number
+  crystals: number
+  items: Record<string, number>
+} {
+  return {
+    silver: save.player.silver,
+    crystals: save.player.crystals,
+    items: { ...save.items },
+  }
+}
+
+/**
+ * 两个资源快照的**差**（产出侧）。
+ *
+ * ⚠ 为什么用差值而不是动作回包：`campaign.challenge` 首通时会在内部
+ *   结清主线通道，那部分奖励**直接入库、不在回包里**——
+ *   只看回包会凭空少记一块产出，回收比直接失真。
+ */
+function diffResources(
+  before: ReturnType<typeof snapshotResources>,
+  after: ReturnType<typeof snapshotResources>,
+): { silver: number; items: Record<string, number> } {
+  const silver = after.silver - before.silver
+  const items: Record<string, number> = {}
+  for (const [id, count] of Object.entries(after.items)) {
+    const diff = count - (before.items[id] ?? 0)
+    if (diff > 0) items[id] = diff
+  }
+  return { silver, items }
+}
+
+/**
  * 模拟玩家从新号推进到通关。
  *
  * ⚠ 战力的门槛放行由 `idle.tick` 动作内部完成（core 真实逻辑），
@@ -679,31 +760,44 @@ function simulate(): SimulationResult {
   const seenBoss = new Set<number>()
   let clearedAll = false
   let finalDay = 0
-  /**
-   * 副本难度（自适应状态）。
-   *
-   * ⚠ 副本战败就降一档，没战败就按当前战力往上走（战力只涨不跌）。
-   *   口径在 `tools/balance/dungeon-loop.ts`（与 newplayer.ts 共用，铁律 #4）。
-   */
-  let dungeonDifficulty: DungeonDifficultyId = 'easy'
-
   for (let day = 1; day <= DAYS; day++) {
     // 当天开打时的队伍状态（成长只发生在每天结束时）
     const levelBefore = save.heroes[teamIds[0]]?.level ?? 1
     const powerBefore = getTeamPower(buildTeam(save), buildPveContext(save))
     // 当天**在打**的关卡属于哪一章（推进前的目标关卡）
     const chapterAtStart = chapterOfStage(save.campaign.clearedStage + 1)
-    // 当天用的是哪个去向（**昨天**选定的——去向是存档状态）
-    const todayTarget = save.idle.target
-    const todayTargetName =
-      todayTarget.kind === 'campaign'
-        ? '主线'
-        : targetPlanName({
-            kind: todayTarget.kind,
-            element: todayTarget.kind === 'skill' ? todayTarget.element : undefined,
-            tier: todayTarget.kind === 'enhance' ? todayTarget.tier : undefined,
-            difficulty: todayTarget.difficulty,
-          })
+
+    // ── ① 玩家上线：手动挑战（挂机改版 v11） ──
+    //
+    // ⚠ **主线推进只走手动挑战**（`campaign.challenge`）：挂机不再跑战斗，
+    //   关卡进度**不会**自己往前走 ⇒ 40 天曲线由「每天打几关」驱动
+    //   （`CHALLENGES_PER_DAY`）。
+    //
+    // ⚠ **副本也要手动挑战**才解锁挂机（`dungeon.challenge`）——
+    //   挂机目标必须**已通关**（设计稿 §3.1）。
+    //
+    // ⚠ 手动挑战的产出用**资源差值**统计，不用动作回包：
+    //   `campaign.challenge` 首通时会在内部结清主线通道，
+    //   那部分奖励**不在回包里**（直接入库），漏记就会凭空少一块产出。
+    const beforeChallenge = snapshotResources(save)
+    const mainResult = runManualCampaignChallenges(save, ctx, CHALLENGES_PER_DAY)
+    const draft = decideChannels(save, ctx, teamIds, ROLLS_PER_DAY)
+    for (const stageId of draft.challenges) {
+      challengeDungeonStage(save, ctx, stageId)
+    }
+    const challengeFlow = diffResources(beforeChallenge, snapshotResources(save))
+
+    // ── ② 定三通道目标（必须在离线期开始之前） ──
+    //
+    // ⚠ **目标是存档状态**：它决定了「下一段离线期归谁」。
+    //   切换时服务端先按**旧目标**结清，所以这里必须在
+    //   「那段挂机时间开始之前」选，而不是在结算之后。
+    //
+    // ⚠ **三通道并行**（挂机改版 v11）：不用分配时间，
+    //   每条通道各自拿满同一段墙钟时间。
+    const decision = decideChannels(save, ctx, teamIds, ROLLS_PER_DAY)
+    applyChannels(save, ctx, decision.plans)
+    const todayTargetName = targetPlanName(decision.plans)
 
     // ── 玩家上线：按真实客户端的行为序列走 ──
     //
@@ -727,26 +821,24 @@ function simulate(): SimulationResult {
       ctx.now += IDLE.HEARTBEAT_INTERVAL_MS
       applyAction(save, { type: 'idle.heartbeat' }, ctx)
     }
-    // ④ 领奖：回放战斗（场次由服务端已累计的有效时长决定，客户端只是上限）
-    const tick = applyAction(
-      save,
-      { type: 'idle.tick', battles: IDLE.MAX_REPLAY_BATTLES },
-      ctx,
-    )
+    // ④ 领奖：三通道按各自预算结算（次数由服务端按账本决定，客户端只是上限）
+    const tick = applyAction(save, { type: 'idle.tick' }, ctx)
     const idleResult = tick.ok ? tick.result : null
 
-    // 当天的产出：直接取真实挂机回放的奖励包（主线首通掉落也在这里面）
+    // 当天的产出：直接取真实挂机回放的奖励包（**分通道**）
     const produced = emptyFlow()
-    const rewards = idleResult?.rewards
-    if (rewards) {
-      produced.silver += rewards.silver ?? 0
+    for (const detail of idleResult?.channels ?? []) {
+      produced.silver += detail.rewards.silver ?? 0
       // ⚠ **实施修正（资源/背包版本 v10）**：经验书 → 经验折算，
       //   技能材料 / 强化石按道具 id 归类（主线只掉经验书与银两；
-      //   材料只能靠**刷副本**拿到——去向切到副本的那几天，这里才会有材料流入）。
-      addItemsToFlow(produced, rewards.items)
-      produced.shards += Object.values(rewards.shards ?? {}).reduce((a, b) => a + b, 0)
-      produced.relics += rewards.relics?.length ?? 0
+      //   材料只能靠**刷副本**拿到——技能 / 强化通道各自发自己的材料）。
+      addItemsToFlow(produced, detail.rewards.items)
+      produced.shards += Object.values(detail.rewards.shards ?? {}).reduce((a, b) => a + b, 0)
+      produced.relics += detail.rewards.relics?.length ?? 0
     }
+    // 手动挑战的产出（基础掉落 + 首通经验书保底 + 首通时结清的主线通道）
+    produced.silver += challengeFlow.silver
+    addItemsToFlow(produced, challengeFlow.items)
     // ⚠ **新号启动资金 + 新手十连的重复转化计入第 1 章的产出**：
     //   `createNewSave` 给的新号启动资金（银两 5 万 / 起步经验书）是真实流入，
     //   只是发生在 t=0、不在挂机回包里；新手十连的重复转化（同名碎片）同理——
@@ -768,36 +860,34 @@ function simulate(): SimulationResult {
       ladderDays[stage.chapter - 1] = day
     }
 
-    // 首日之后穿上遗物（与 newplayer.ts 同口径）
-    if (day === 1) {
-      for (const heroId of teamIds) applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
+    // ── 祈愿遗物（遗物的独立获取入口） ──
+    //
+    // ⚠ 挂机改版 v11：遗物**不再从掉落表出**（掉落表只剩银两 + 经验书），
+    //   遗物改走 `relic.acquire`（花 `RELIC_ACQUIRE.SILVER_COST` 银两祈愿一件）。
+    //   ⇒ 银两多了一个出口，强化链路才有「遗物 → 强化石 → 强化」的闭环。
+    //
+    // ⚠ **每天限量**：理性玩家不会把全部银两砸进祈愿——
+    //   银两同时要付境界突破 / 技能升级 / 遗物强化。限量由 `RELICS_PER_DAY` 给。
+    const relicCost = RELIC_ACQUIRE.SILVER_COST
+    let acquired = 0
+    for (let i = 0; i < RELICS_PER_DAY; i++) {
+      if (save.player.silver < relicCost) break
+      const wish = applyAction(save, { type: 'relic.acquire' }, ctx)
+      if (!wish.ok) break
+      acquired++
     }
-    const { spent, maxAction } = spendGrowth(save, ctx, teamIds)
-    syncRngState(save, ctx.rng)
+    if (acquired > 0) {
+      // 新遗物立即按推荐穿上（否则强化链路拿不到可升的对象）
+      for (const heroId of teamIds) {
+        applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
+      }
+    }
 
-    // ── 选明天的挂机去向 ──
-    //
-    // ⚠ **去向是存档状态**：它决定了「下一段离线期归谁」。
-    //   切换时服务端先按**旧去向**结清（设计稿 §3），所以这里必须在
-    //   「那段挂机时间开始之前」选，而不是在结算之后。
-    //
-    // ⚠ 一段离线期的有效时长是**一整块**（core 的离线曲线按累计时长折算），
-    //   没法在期间拆给两个去向 ⇒ 模拟的最小切分单位是「一段会话」
-    //   （这里 = 1 天；newplayer.ts = 1 小时）。
-    //
-    // ⚠ **顺序**：副本难度自适应必须**先于**这次决策——
-    //   否则「降一档难度」要晚一天才生效（今天的战败 → 明天仍按旧难度打 → 明天再降）。
-    //   newplayer.ts 的顺序天然是对的（每段开头决策、段尾更新难度），这里要手动对齐。
-    dungeonDifficulty = resolveDungeonDifficulty(
-      save,
-      ctx,
-      idleResult?.dungeon?.blockedAtBattle != null && todayTarget.kind !== 'campaign'
-        ? todayTarget.difficulty
-        : null,
-    )
-    const decision = decideIdleTarget(save, ctx, teamIds, dungeonDifficulty, BATTLES_PER_DAY)
-    const plan = decision.plan
-    applyIdleTarget(save, ctx, plan)
+    const { spent, maxAction } = spendGrowth(save, ctx, teamIds)
+    // 祈愿是**银两的出口**，记在消耗侧（回收比要看到它）
+    spent.silver += acquired * relicCost
+    maxAction.silver = Math.max(maxAction.silver, relicCost)
+    syncRngState(save, ctx.rng)
 
     const state = save.heroes[teamIds[0]]
     const level = state?.level ?? 1
@@ -831,8 +921,12 @@ function simulate(): SimulationResult {
       relicLevel: Math.round(relicLevel * 10) / 10,
       skillLevel: Math.round(skillLevel * 10) / 10,
       starLevel: Math.round(starLevel * 10) / 10,
-      battles: idleResult?.battles ?? 0,
-      blockedAtStage: idleResult?.blockedAtStage ?? null,
+      /** 当天实际结算的掷奖次数（三通道合计） */
+      rolls: idleResult?.rolls ?? 0,
+      /** 当天被卡住的关卡（手动挑战打不赢的那一关） */
+      blockedAtStage: mainResult.blockedAt,
+      /** 当天手动挑战打通的关卡数 */
+      manualWins: mainResult.wins,
       target: todayTargetName,
       produced,
       spent,
@@ -858,9 +952,13 @@ console.log('='.repeat(78))
 console.log('《超级圣杯战争》难度曲线重标定（§6.5 流程 · 设计阶梯 + 真实战斗标定）')
 console.log('='.repeat(78))
 console.log(
-  `  挂机日 ${BATTLES_PER_DAY} 场（离线 ${OFFLINE_HOURS}h → 折算 ` +
+  `  每通道每挂机日 ${ROLLS_PER_DAY} 次掷奖（离线 ${OFFLINE_HOURS}h → 折算 ` +
     `${computeOfflineEfficiency(OFFLINE_HOURS * 3600).toFixed(2)}h 有效时长` +
     `${ONLINE_HOURS > 0 ? ` + 在线 ${ONLINE_HOURS}h` : ''}）· 节奏验证 ${DAYS} 天`,
+)
+console.log(
+  `  手动挑战 ${CHALLENGES_PER_DAY} 关/天 · 祈愿遗物 ${RELICS_PER_DAY} 件/天` +
+    `（挂机改版 v11：主线推进只走手动挑战，三通道并行）`,
 )
 console.log(
   `  每章 ${LEVELS_PER_CHAPTER} 级 · 章内总跨度 = ${STAGE.IN_CHAPTER_SPAN} × ` +
@@ -912,13 +1010,14 @@ for (let c = 1; c <= STAGE.CHAPTERS; c++) {
 
 console.log('\n【推进曲线】')
 console.log(
-  '  天 | 关卡 | 章 | 等级 | 战力 | 场次 | 卡关 | 经验 | 银两 | 遗物 | 遗物等级 | 技能等级 | 星级 | 挂机去向',
+  '  天 | 关卡 | 章 | 等级 | 战力 | 掷奖 | 手动 | 卡关 | 经验 | 银两 | 遗物 | 遗物等级 | 技能等级 | 星级 | 通道',
 )
 for (const d of result.days) {
   console.log(
     `  ${String(d.day).padStart(2)} | ${String(d.clearedStage).padStart(4)} | ` +
       `${String(d.chapter).padStart(2)} | ${String(d.level).padStart(3)} | ` +
-      `${Math.round(d.power).toString().padStart(9)} | ${String(d.battles).padStart(4)} | ` +
+      `${Math.round(d.power).toString().padStart(9)} | ${String(d.rolls).padStart(4)} | ` +
+      `${String(d.manualWins).padStart(4)} | ` +
       `${String(d.blockedAtStage ?? '-').padStart(4)} | ` +
       `${Math.round(d.exp).toString().padStart(11)} | ` +
       `${Math.round(d.silver).toString().padStart(12)} | ${String(d.relics).padStart(4)} | ` +
@@ -930,7 +1029,7 @@ for (const d of result.days) {
 // ── 速度口径：产出速度 vs 消耗速度（§5.8）──
 //
 // ⚠ 为什么不能用「主线 310 关首通投放 ÷ 满养成消耗」的**存量**口径：
-//   挂机游戏里经验的产出主体是**挂机刷取**（每天上千场），
+//   挂机游戏里经验的产出主体是**挂机刷取**（每天上千次掷奖），
 //   主线 310 次首通只是零头（实测 4384万 vs 满养成 26.5亿 = 0.02×）。
 //   存量口径把零头当成全部产出，结论必然是「缺口」，而玩家实际并不缺经验。
 //   §5.8 原文就是「产出速度 vs 消耗速度」——这里按章聚合真实链路的收支。
@@ -1230,7 +1329,9 @@ if (OUT_PATH && !values.dry) {
     JSON.stringify(
       {
         generatedAt: new Date(BASE_NOW).toISOString(),
-        battlesPerDay: BATTLES_PER_DAY,
+        rollsPerDayPerChannel: ROLLS_PER_DAY,
+        challengesPerDay: CHALLENGES_PER_DAY,
+        relicsPerDay: RELICS_PER_DAY,
         levelsPerChapter: LEVELS_PER_CHAPTER,
         inChapterSpan: STAGE.IN_CHAPTER_SPAN,
         bossMultiplier: STAGE.BOSS_MULTIPLIER,

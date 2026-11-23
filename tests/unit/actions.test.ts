@@ -314,38 +314,86 @@ describe('动作层：成功路径', () => {
     expect(save.team.presets).toHaveLength(0)
   })
 
-  it('挂机：收益入库（含遗物），且只认 rewards 这一份口径', () => {
+  it('挂机：收益入库（银两 + 经验书），且只认 rewards 这一份口径', () => {
     seedTeam(save)
     save.player.silver = 0
+    // ⚠ 主线通道**跟随最新通关关卡**（挂机改版 v11）：首胜前没有可挂的目标 ⇒
+    //   先手动挑战通关一关，主线通道才有产出。
+    save.campaign.clearedStage = 1
     const { ctx } = makeCtx(save)
     ctx.now += 12_000
 
-    const res = applyAction(save, { type: 'idle.tick', battles: 2 }, ctx)
+    // ⚠ `idle.tick` **不带次数**（旧版是 `{ battles }`）——
+    //   次数由服务端按各通道的 `effectiveMs` 决定，客户端创造不出时间。
+    const res = applyAction(save, { type: 'idle.tick' }, ctx)
 
     expect(res.ok).toBe(true)
     if (!res.ok) return
-    expect(res.result.rewards.silver ?? 0).toBeGreaterThan(0)
-    expect(save.player.silver).toBe(res.result.rewards.silver ?? 0)
-    // 遗物进仓库（走 rewards.relics，铁律 #4 / #26）
-    expect(save.relics.length).toBe(res.result.rewards.relics?.length ?? 0)
+    const main = res.result.channels.find((c) => c.channel === 'main')
+    expect(main).toBeDefined()
+    expect(main!.rewards.silver ?? 0).toBeGreaterThan(0)
+    expect(save.player.silver).toBe(main!.rewards.silver ?? 0)
+    // ⚠ **遗物不再从掉落表出**（改走独立入口 `relic.acquire`）⇒ rewards.relics 恒空
+    expect(res.result.channels.every((c) => (c.rewards.relics?.length ?? 0) === 0)).toBe(true)
+    expect(save.relics).toHaveLength(0)
   })
 
-  it('离线结算：不足一场不结算；超过则结算并入库', () => {
+  it('离线结算：不足一次不结算；超过则结算并入库', () => {
     seedTeam(save)
-    save.lastTickAt = NOW - 3_000
+    save.campaign.clearedStage = 1
     const { ctx } = makeCtx(save)
     const tooSoon = applyAction(save, { type: 'idle.claimOffline' }, ctx)
     expect(tooSoon.ok).toBe(true)
-    if (tooSoon.ok) expect(tooSoon.result).toBeNull()
+    if (tooSoon.ok) expect(tooSoon.result.rolls).toBe(0)
 
-    save.lastTickAt = NOW - 2 * 3600 * 1000
     const { ctx: ctx2 } = makeCtx(save)
+    ctx2.now += 2 * 3600 * 1000
     const res = applyAction(save, { type: 'idle.claimOffline' }, ctx2)
     expect(res.ok).toBe(true)
-    if (res.ok && res.result) {
-      expect(res.result.battles).toBeGreaterThan(0)
+    if (res.ok) {
+      expect(res.result.rolls).toBeGreaterThan(0)
       expect(save.player.silver).toBeGreaterThan(0)
     }
+  })
+
+  it('主线推进只走手动挑战：挂机**不会**推进关卡', () => {
+    seedTeam(save)
+    save.campaign.clearedStage = 1
+    const { ctx } = makeCtx(save)
+    ctx.now += 3600 * 1000
+    applyAction(save, { type: 'idle.tick' }, ctx)
+    // ⚠ 挂机改版 v11：挂机只按掉落表掷奖，**不跑战斗、不推进关卡**
+    expect(save.campaign.clearedStage).toBe(1)
+
+    const res = applyAction(save, { type: 'campaign.challenge', stageId: 2 }, ctx)
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.result.stageId).toBe(2)
+    // 打得过就推进；打不过是另一回事，但**关卡号**一定是 2
+    if (res.result.win) expect(save.campaign.clearedStage).toBe(2)
+  })
+
+  it('首通结晶**只发一次**（钱包与奖励包是同一条入库路径）', () => {
+    // ⚠ 历史 bug（E2E 实测）：`grantFirstClearCrystals` 直接加 `player.crystals`，
+    //   调用方又把同一笔塞进 `rewards.crystals` → **同一笔结晶发两次**
+    //   （首通给了 20 而不是 10）。铁律 #26：入库只认 `rewards`。
+    seedTeam(save)
+    save.campaign.clearedStage = 0
+    save.campaign.creditedStages = 0
+    const crystalsBefore = save.player.crystals
+    const { ctx } = makeCtx(save)
+
+    const res = applyAction(save, { type: 'campaign.challenge', stageId: 1 }, ctx)
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.result.win).toBe(true)
+    expect(res.result.firstClear).toBe(true)
+
+    const granted = res.result.rewards.crystals ?? 0
+    expect(granted).toBeGreaterThan(0)
+    // 钱包只多**一笔**（= 奖励包里的那一笔），不是两笔
+    expect(save.player.crystals).toBe(crystalsBefore + granted)
+    expect(save.campaign.creditedStages).toBe(1)
   })
 
   it('竞技场：段位分与勋章入账，且产出不回流 PVE 经济', () => {

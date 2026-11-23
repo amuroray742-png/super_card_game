@@ -28,6 +28,7 @@ import type {
   ArenaMatch,
   Element,
   Rarity,
+  IdleChannelKind,
 } from '../../core/model/types.ts'
 import type { ItemId } from '../../core/config/items.ts'
 import type { DungeonDifficultyId, RelicStoneTierId } from '../../core/config/economy.ts'
@@ -39,7 +40,8 @@ import { systemClock } from '../../core/time.ts'
 import { HEROES, HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { STAGES } from '../../core/config/stages.ts'
 import { computeBondState, isTeamEmpty } from '../../core/systems/team.ts'
-import { type OfflineSettlementResult } from '../../core/systems/idle.ts'
+import { type IdleActionResult } from '../../core/systems/actions.ts'
+import { idleChannelRolls, type ChannelSettlement } from '../../core/systems/idle.ts'
 import { getEquippedRelics, equippedOwnerMap, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { getPool } from '../../core/config/pools.ts'
 import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, RELIC_SETS } from '../../core/systems/relic.ts'
@@ -85,6 +87,27 @@ import {
   buildTeamPower,
 } from '../../core/systems/derive.ts'
 
+/**
+ * **一次手动挑战的回放状态**（表现层播放战斗演出用）。
+ *
+ * ⚠ 只装**战斗事实**（core 产出的东西）：胜负、首通、实发奖励、战斗回放。
+ *   关卡名 / 章节由表现层按关卡 id 从 core 配置表查（唯一出处，铁律 #8）。
+ */
+export interface ChallengeReplay {
+  /** 挑战类型：主线 / 副本 */
+  kind: 'campaign' | 'dungeon'
+  /** 关卡 id（主线为数字，副本为字符串） */
+  stageId: number | string
+  /** 是否胜利 */
+  win: boolean
+  /** 是否首次通关 */
+  firstClear: boolean
+  /** 实发奖励（战败时为空包） */
+  rewards: RewardBundle
+  /** 战斗回放（`null` = 服务端这次没回传，见 `challengeReplay` 注释） */
+  battle: BattleResult | null
+}
+
 export const useGameStore = defineStore('game', () => {
   /**
    * 时钟必须是**会走动**的。
@@ -116,10 +139,22 @@ export const useGameStore = defineStore('game', () => {
   /** 正在发动作（UI 可据此禁用按钮） */
   const busy = ref(false)
 
-  /** 最近一次战斗的完整回放（供 Canvas 渲染器播放） */
-  const lastBattle = shallowRef<BattleResult | null>(null)
-  /** 离线结算结果 */
-  const offlineReport = shallowRef<OfflineSettlementResult | null>(null)
+  /**
+   * **手动挑战的战斗回放**（表现层播放用）。
+   *
+   * ⚠ 战斗在**服务端**执行（core 同一份），回放由响应**一次性**回传
+   *   （不进 24 小时幂等日志，设计稿 §3.7）⇒ 这里存的是「刚打完那一场」。
+   * ⚠ `battle` 可能为 `null`：24 小时内重放同一 `actionId` 时服务端不再回传回放，
+   *   客户端按「已结算」处理——只出结算，不重播演出（结果与奖励仍一致）。
+   */
+  const challengeReplay = shallowRef<ChallengeReplay | null>(null)
+
+  /** 关掉挑战回放面板（玩家点「收起」） */
+  function clearChallengeReplay() {
+    challengeReplay.value = null
+  }
+  /** 离线结算结果（三通道明细） */
+  const offlineReport = shallowRef<IdleActionResult | null>(null)
   /** 全局提示 */
   const toast = ref<{ text: string; kind: 'info' | 'ok' | 'warn' } | null>(null)
   /** 新手引导步骤（-1 = 结束） */
@@ -281,12 +316,8 @@ export const useGameStore = defineStore('game', () => {
         // 离线结算明细：只有「离线时长达到阈值」才弹窗。
         // ⚠ 服务端已经过滤过一次，这里再挡一道——在线期间累计的时间账本
         //   被下一次动作结算掉时，那明明是在线收益，不该弹「离线结算」。
-        if (
-          response.offline &&
-          response.offline.elapsedSeconds >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC
-        ) {
-          offlineReport.value = response.offline
-        }
+        const report = offlineReportable(response.offline)
+        if (report) offlineReport.value = report
         if (!response.ok) {
           if (!response.silent) {
             notify(response.message || messageOf(response.code), 'warn')
@@ -294,7 +325,16 @@ export const useGameStore = defineStore('game', () => {
           return null
         }
         if (response.message) notify(response.message, response.messageKind ?? 'ok')
-        return response.result as ActionResultMap[T]
+        const result = response.result as ActionResultMap[T] | undefined
+        // ⚠ **战斗回放一次性回传**（设计稿 §3.7）：服务端在落库前把它从结果里
+        //   摘出来放进响应的 `replay` 字段（`BattleResult.log` 太大，不能进幂等日志）。
+        //   客户端在这里把它接回结果的 `battle` 字段 ⇒ 表现层统一从 `res.battle` 取回放，
+        //   不用在每个调用点各写一套「replay 从哪来」。
+        //   24 小时内重放同一 actionId 时服务端不再回传 ⇒ `battle` 缺失 ⇒ 只出结算不重播。
+        if (response.replay && result && typeof result === 'object') {
+          return { ...result, battle: response.replay } as ActionResultMap[T]
+        }
+        return result ?? null
       })
     } finally {
       if (current()) busy.value = false
@@ -305,6 +345,18 @@ export const useGameStore = defineStore('game', () => {
   function messageOf(code: string | undefined): string {
     if (!code) return '操作失败'
     return GAME_ERROR_MESSAGES[code as keyof typeof GAME_ERROR_MESSAGES] ?? '操作失败'
+  }
+
+  /**
+   * 离线结算明细的**阈值判定**（服务端已过滤一道，这里再挡一道）。
+   *
+   * ⚠ **挂机改版 v11**：三条通道各自报告自己的实际离线时长 ⇒ 取**最大值**判定。
+   *   在线计量不计入该时长（只有离线段才累加）。
+   */
+  function offlineReportable(report: IdleActionResult | null | undefined): IdleActionResult | null {
+    if (!report || report.channels.length === 0) return null
+    const max = report.channels.reduce((m, c) => Math.max(m, c.elapsedSeconds), 0)
+    return max >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC ? report : null
   }
 
   /** 是不是「连不上服务器」 */
@@ -344,9 +396,8 @@ export const useGameStore = defineStore('game', () => {
         if (!current() || !cloud) return false
         await applyServerSave(cloud)
         if (!current()) return false
-        if (cloud.offline && cloud.offline.elapsedSeconds >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC) {
-          offlineReport.value = cloud.offline
-        }
+        const cloudReport = offlineReportable(cloud.offline)
+        if (cloudReport) offlineReport.value = cloudReport
         account.offline = false
         offline.value = false
         loaded.value = true
@@ -413,9 +464,8 @@ export const useGameStore = defineStore('game', () => {
       server.savedAt = cloud.savedAt
       save.value = server
       battleSpeed.value = server.settings.speed ?? 1
-      if (cloud.offline && cloud.offline.elapsedSeconds >= IDLE.OFFLINE_SETTLE_THRESHOLD_SEC) {
-        offlineReport.value = cloud.offline
-      }
+      const serverReport = offlineReportable(cloud.offline)
+      if (serverReport) offlineReport.value = serverReport
       await persist()
       if (!current()) return
       loaded.value = true
@@ -501,6 +551,8 @@ export const useGameStore = defineStore('game', () => {
     save.value = createNewSave(clock.now())
     // 上一个账号的离线结算报告不能带到新账号上
     offlineReport.value = null
+    // 同理：上一场战斗的回放不能带到新账号
+    challengeReplay.value = null
   }
 
   /**
@@ -536,8 +588,34 @@ export const useGameStore = defineStore('game', () => {
   const bondStates = computed(() => computeBondState(team.value))
   const teamEmpty = computed(() => isTeamEmpty(save.value.team.slots))
 
-  const currentStage = computed(() => STAGES.find((s) => s.id === save.value.idle.currentStage) ?? STAGES[0])
+  /**
+   * **当前主线关卡**（跟随最新通关关卡）。
+   *
+   * ⚠ 挂机改版 v11：主线通道默认「跟随最新通关关卡」，
+   *   所以「当前关卡」= `campaign.clearedStage`（首胜前是第 1 关）。
+   */
+  const currentStage = computed(() => {
+    const id = Math.max(1, save.value.campaign.clearedStage)
+    return STAGES.find((s) => s.id === id) ?? STAGES[0]
+  })
   const clearedStage = computed(() => save.value.campaign.clearedStage)
+
+  /** 下一关可挑战的关卡（首胜前是第 1 关） */
+  const nextChallengeStage = computed(() => {
+    const id = Math.min(STAGES.length, save.value.campaign.clearedStage + 1)
+    return STAGES.find((s) => s.id === id) ?? STAGES[0]
+  })
+
+  /**
+   * 三条挂机通道的**可结算次数**（界面显示用；口径与 core 同一份换算）。
+   */
+  const idleChannels = computed(() =>
+    (['main', 'skill', 'enhance'] as const).map((kind) => ({
+      kind,
+      state: save.value.idle.channels[kind],
+      rolls: idleChannelRolls(save.value.idle.channels[kind]),
+    })),
+  )
 
   /** 玩家持有的英灵列表（按稀有度、等级排序） */
   const ownedHeroes = computed(() => {
@@ -565,39 +643,81 @@ export const useGameStore = defineStore('game', () => {
     return task
   }
 
-  /** 推进挂机：跑 battles 场，结算掉落（服务端执行） */
-  async function tickIdle(battles = 1) {
-    if (teamEmpty.value) return null
-    return runAction({ type: 'idle.tick', battles })
+  /**
+   * **一键领取挂机收益**（三通道同时结算）。
+   *
+   * ⚠ **挂机改版 v11**：挂机**不跑战斗**，领取次数由服务端按各通道的
+   *   可用预算决定；客户端**不能**创造时间（不再传 `battles`）。
+   * ⚠ 挂机**不需要编队**：当前编队变化不影响已通关目标的挂机资格。
+   */
+  async function tickIdle() {
+    return runAction({ type: 'idle.tick' })
   }
 
   /** 离线结算（服务端在入口自动补算，这里取回明细） */
   async function claimOffline() {
-    if (teamEmpty.value) return null
     const res = await runAction({ type: 'idle.claimOffline' })
     if (res) offlineReport.value = res
     return res
   }
 
   /**
-   * 设定挂机**去向**。
+   * **设置挂机通道**（主线 / 技能副本 / 强化副本）。
    *
-   * ⚠ **实施修正（资源/背包版本 v10）**：主线 / 技能副本 / 强化副本
-   *   共用一份挂机时间账本，切换时服务端**先结清旧去向**再换新去向。
+   * ⚠ 三条通道**各自独立**账本：设置一条**不影响**另外两条。
+   * ⚠ 主线只能选**已通关**的关卡；副本只能选**已通关**的副本关卡。
    */
-  async function setIdleTarget(target: {
-    kind: 'campaign'
-    stageId?: number
-  } | {
-    kind: 'skill'
-    element: Element
-    difficulty: DungeonDifficultyId
-  } | {
-    kind: 'enhance'
-    tier: RelicStoneTierId
-    difficulty: DungeonDifficultyId
+  async function setIdleChannel(payload: {
+    channel: IdleChannelKind
+    stageId?: number | null
+    dungeonStageId?: string
+    disabled?: boolean
   }) {
-    return runAction({ type: 'idle.setTarget', ...target })
+    return runAction({ type: 'idle.setChannel', ...payload })
+  }
+
+  /**
+   * **手动挑战主线关卡**（主线推进的唯一路径）。
+   *
+   * ⚠ 战斗执行在服务端（core 同一份），回放一次性回传（不进幂等日志）。
+   */
+  async function challengeStage(stageId?: number) {
+    const res = await runAction({ type: 'campaign.challenge', ...(stageId !== undefined ? { stageId } : {}) })
+    if (!res) return null
+    challengeReplay.value = {
+      kind: 'campaign',
+      stageId: res.stageId,
+      win: res.win,
+      firstClear: res.firstClear,
+      rewards: res.rewards,
+      battle: res.battle ?? null,
+    }
+    return res
+  }
+
+  /** **手动挑战副本关卡**（打赢一次即通关） */
+  async function challengeDungeon(stageId: string) {
+    const res = await runAction({ type: 'dungeon.challenge', stageId })
+    if (!res) return null
+    challengeReplay.value = {
+      kind: 'dungeon',
+      stageId: res.stageId,
+      win: res.win,
+      firstClear: res.firstClear,
+      rewards: res.rewards,
+      battle: res.battle ?? null,
+    }
+    return res
+  }
+
+  /** **遗物祈愿**（遗物的独立获取入口） */
+  async function acquireRelic() {
+    const res = await runAction({ type: 'relic.acquire' }, true)
+    if (res) {
+      await loadRelicPage()
+      await loadRelicStats()
+    }
+    return res
   }
 
   // ─────────────────────────── 英灵 ───────────────────────────
@@ -1095,7 +1215,7 @@ export const useGameStore = defineStore('game', () => {
     save,
     offline,
     busy,
-    lastBattle,
+    challengeReplay,
     offlineReport,
     toast,
     guideStep,
@@ -1112,6 +1232,8 @@ export const useGameStore = defineStore('game', () => {
     dailyStatus,
     currentStage,
     clearedStage,
+    nextChallengeStage,
+    idleChannels,
     ownedHeroes,
     heroIndex,
     relicsByUid,
@@ -1138,7 +1260,11 @@ export const useGameStore = defineStore('game', () => {
     heartbeat,
     tickIdle,
     claimOffline,
-    setIdleTarget,
+    setIdleChannel,
+    challengeStage,
+    challengeDungeon,
+    clearChallengeReplay,
+    acquireRelic,
     pull,
     nextBattleSeed,
     feedBooks,

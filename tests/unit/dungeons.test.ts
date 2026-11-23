@@ -1,61 +1,69 @@
 /**
- * 材料副本（技能副本 / 强化副本）的口径守护。
+ * 材料副本（挂机改版 v11：**24 个独立关卡**）。
  *
- * 副本是**两类材料的唯一来源**（设计稿 §3），所以副本链路一旦空转，
- * 玩家的五行技能材料与三档强化石就永远攒不出来——
- * 而「配置齐全 ≠ 功能可用」正是这个项目反复踩的坑（铁律 #22）。
+ * ## 与旧版的差别
  *
- * 守四条：
- * 1. 副本**只发所选材料**（不发银两 / 经验 / 遗物）；
- * 2. 副本**不写 `campaign`**（进度与主线记录分别记账）；
- * 3. 战败即停，并给出「降一档难度」的建议；
- * 4. 解锁判定是**配置驱动**的（首个可升技能出现 / 持有对应等级遗物）。
+ * 旧版副本没有自己的关卡实体——「难度 = 取材主线某章」，副本其实是拿主线波次换皮。
+ * 新版副本是 `(变体 × 难度) = 1 关`，共 `5 技能变体 × 3 难度 + 3 强化变体 × 3 难度 = 24 关`，
+ * 每关有自己的敌人组合、缩放锚点、战力门槛与产量，**打赢一次即通关**。
+ *
+ * ## 守什么
+ *
+ * 1. **24 关齐全**：id 唯一且符合 `dgn_<变体>_<难度>`；
+ * 2. **同一变体三难度共用同一批敌人**——难度差异只来自缩放 / 门槛 / 产量，
+ *    不靠改敌人表救难度（设计稿 §3.2.1 ③ / U8）；
+ * 3. **敌人真实存在**（配错 id ⇒ 战斗直接开不起来）；
+ * 4. **段间单调**：easy < normal < hard（缩放与门槛严格递增）；
+ * 5. **锚点表与关卡表逐位对齐**（缩放 / 门槛都取自标定锚点，不许手填，铁律 #41）；
+ * 6. **解锁判定**：技能副本要「该五行有可升技能的英灵」，
+ *    强化副本要「仓库最高遗物等级 ≥ 解锁线」，未解锁要给原因与引导路由；
+ * 7. **副本与主线分开记账**（副本不写 `campaign`），胜利只发所选材料。
  */
 import { describe, expect, it } from 'vitest'
 import {
-  DUNGEON_VARIANTS,
   DUNGEON_INDEX,
-  findDungeonVariant,
-  dungeonDropAmount,
-  dungeonItemId,
-  type DungeonVariant,
+  DUNGEON_STAGES,
+  DUNGEON_STAGE_INDEX,
+  DUNGEON_VARIANTS,
+  DUNGEON_VARIANT_ORDER,
+  dungeonStageById,
+  dungeonStageId,
+  dungeonStagesOf,
+  dungeonStagesOfVariant,
 } from '../../src/core/config/dungeons.ts'
 import {
+  dungeonStageUnlocked,
   dungeonUnlocked,
-  dungeonStages,
-  dungeonChapter,
-  runDungeon,
+  runDungeonLevel,
   suggestLowerDifficulty,
+  variantById,
 } from '../../src/core/systems/dungeons.ts'
-import { DUNGEON_DIFFICULTIES, DUNGEON_DROPS, RELIC } from '../../src/core/config/economy.ts'
-import { ITEM_DEFS } from '../../src/core/config/items.ts'
+import { DUNGEON, DUNGEON_DIFFICULTIES, DUNGEON_DIFFICULTY_ORDER, RELIC } from '../../src/core/config/economy.ts'
+import { getEnemy } from '../../src/core/config/enemies.ts'
 import { createNewSave } from '../../src/core/save/schema.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
-import { makeTestRelic } from './helpers.ts'
-import { Rng } from '../../src/core/rng.ts'
 import { buildPveContext } from '../../src/core/systems/derive.ts'
+import { applyAction } from '../../src/core/systems/actions.ts'
+import { Rng } from '../../src/core/rng.ts'
+import { makeTestRelic } from './helpers.ts'
+import type { ActionContext } from '../../src/core/systems/actions.ts'
 import type { SaveData } from '../../src/core/model/types.ts'
 
 const NOW = 1_700_000_000_000
 
-function makeCtx(save: SaveData) {
-  return {
-    now: NOW,
-    rng: new Rng(4242),
-    randomSeed: () => 4242,
-    mode: 'pve' as const,
-    // ⚠ `BattleContext` 必须带 `seed`——战斗随机序列由它派生（core 不自己取随机）。
-    seed: 4242,
-    save,
-  }
+function actionCtx(now = NOW, seed = 4242): ActionContext {
+  return { now, rng: new Rng(seed), randomSeed: () => seed }
 }
 
-/** 造一份有队伍、有遗物、战力足够的存档 */
+/**
+ * 造一份有队伍、有遗物、战力足够的存档。
+ *
+ * ⚠ 技能等级刻意留低（1）：满级技能会让「可升技能的英灵」判定为假，
+ *   技能副本就会一直锁着（解锁判定读的是「还有没有技能能升」）。
+ */
 function strongSave(): SaveData {
   const save = createNewSave(NOW, 7)
   for (const id of ['xiangyu', 'hanxin']) {
-    // ⚠ 技能等级刻意留低（1）：满级技能会让「可升技能的英灵」判定为假，
-    //   技能副本就会一直锁着（解锁判定读的是「还有没有技能能升」）。
     save.heroes[id] = { ...createHeroState(id, NOW), level: 240, star: 6, skillLevels: [1, 1, 1] }
   }
   save.team.slots[0] = 'xiangyu'
@@ -68,120 +76,171 @@ function strongSave(): SaveData {
   return save
 }
 
-describe('副本配置', () => {
-  it('8 个变体：5 技能 + 3 强化', () => {
-    expect(DUNGEON_VARIANTS.filter((v) => v.kind === 'skill')).toHaveLength(5)
-    expect(DUNGEON_VARIANTS.filter((v) => v.kind === 'enhance')).toHaveLength(3)
-    expect(DUNGEON_VARIANTS).toHaveLength(8)
+describe('副本关卡表（24 关）', () => {
+  it('24 关 = 8 变体 × 3 难度，id 唯一且符合 `dgn_<变体>_<难度>`', () => {
+    // ⚠ 铁律 #8：关卡 id 的**唯一出处**是 `dungeonStageId`，
+    //   表现层与动作层都从这里取，禁止自行拼接（拼错了战斗直接开不起来）。
+    expect(DUNGEON_VARIANT_ORDER).toHaveLength(8)
+    expect(DUNGEON_DIFFICULTY_ORDER).toHaveLength(3)
+    expect(DUNGEON_STAGES).toHaveLength(24)
+
+    const ids = new Set<string>()
+    for (const stage of DUNGEON_STAGES) {
+      expect(ids.has(stage.id), `关卡 id 重复：${stage.id}`).toBe(false)
+      ids.add(stage.id)
+      expect(stage.id).toBe(dungeonStageId(stage.variantId, stage.difficulty))
+      expect(stage.id).toMatch(/^dgn_[A-Za-z0-9]+_(easy|normal|hard)$/)
+    }
+    expect(ids.size).toBe(24)
   })
 
-  it('每个变体的产出道具都已登记（漏登记 → 背包里出现无名道具）', () => {
-    for (const v of DUNGEON_VARIANTS) {
-      expect(ITEM_DEFS[v.itemId], `${v.id} 的产出道具未登记`).toBeTruthy()
-      expect(dungeonItemId(v)).toBe(v.itemId)
+  it('难度段顺序固定为 [简易 × 8, 普通 × 8, 困难 × 8]', () => {
+    // ⚠ 锚点表（SCALE_ANCHORS / POWER_ANCHORS）与关卡表**逐位对齐**，
+    //   顺序变了 ⇒ 难度锚点会张冠李戴（铁律 #4 / #41）。
+    const easy = DUNGEON_STAGES.filter((s) => s.difficulty === 'easy')
+    const normal = DUNGEON_STAGES.filter((s) => s.difficulty === 'normal')
+    const hard = DUNGEON_STAGES.filter((s) => s.difficulty === 'hard')
+    expect(easy).toHaveLength(8)
+    expect(normal).toHaveLength(8)
+    expect(hard).toHaveLength(8)
+    expect(DUNGEON_STAGES.slice(0, 8).every((s) => s.difficulty === 'easy')).toBe(true)
+    expect(DUNGEON_STAGES.slice(8, 16).every((s) => s.difficulty === 'normal')).toBe(true)
+    expect(DUNGEON_STAGES.slice(16).every((s) => s.difficulty === 'hard')).toBe(true)
+  })
+
+  it('缩放与门槛取自标定锚点表（不许手填）', () => {
+    // ⚠ 铁律 #41：锚点是**标定值**，改了英灵 / 成长数值后必须重跑标定。
+    //   这里锁住「关卡表与锚点表逐位对齐」，防止有人手填出一个与现实脱节的门槛。
+    expect(DUNGEON.SCALE_ANCHORS).toHaveLength(24)
+    expect(DUNGEON.POWER_ANCHORS).toHaveLength(24)
+    expect(DUNGEON.DESIGN_LEVELS).toHaveLength(24)
+    DUNGEON_STAGES.forEach((stage, index) => {
+      expect(stage.enemyScale, `${stage.id} 的缩放没有对齐锚点表`).toBe(
+        DUNGEON.SCALE_ANCHORS[index],
+      )
+      expect(stage.powerRequired, `${stage.id} 的门槛没有对齐锚点表`).toBe(
+        DUNGEON.POWER_ANCHORS[index],
+      )
+    })
+  })
+
+  it('同一变体的三个难度**共用同一批敌人**', () => {
+    // ⚠ 设计稿 §3.2.1 ③ / U8：难度问题一律回标定工具，
+    //   不靠改敌人表救难度——否则"难度"其实是敌人配置，标定结论全部失效。
+    for (const variantId of DUNGEON_VARIANT_ORDER) {
+      const stages = dungeonStagesOfVariant(variantId)
+      expect(stages, `${variantId} 应该有 3 个难度段`).toHaveLength(3)
+      const enemySets = new Set(stages.map((s) => s.enemyIds.join(',')))
+      expect(enemySets.size, `${variantId} 的三个难度用了不同的敌人`).toBe(1)
+      expect(stages[0].enemyIds.length).toBeGreaterThan(0)
     }
   })
 
-  it('副本道具**不出现在主线掉落表**里（主线只掉银两与经验书）', () => {
-    // 设计稿 §3：副本材料是副本专属产出，主线发它们就等于白送
-    const dungeonIds = new Set(DUNGEON_VARIANTS.map((v) => v.itemId))
-    for (const id of dungeonIds) {
-      expect(['expBookSmall', 'expBookLarge']).not.toContain(id)
+  it('每个 `enemyIds` 里的敌人都真实存在', () => {
+    // ⚠ 「配置齐全 ≠ 功能可用」（铁律 #22）：
+    //   敌人 id 写错 ⇒ 战斗开不起来 ⇒ 整条副本链路空转。
+    for (const stage of DUNGEON_STAGES) {
+      for (const id of stage.enemyIds) {
+        expect(() => getEnemy(id), `${stage.id} 引用了不存在的敌人 ${id}`).not.toThrow()
+        expect(getEnemy(id).id).toBe(id)
+      }
     }
   })
 
-  it('每个副本道具都在 DUNGEON_DROPS 里有产量，且 min ≤ max', () => {
-    for (const v of DUNGEON_VARIANTS) {
-      const drop = DUNGEON_DROPS[v.itemId]
-      expect(drop, `${v.itemId} 没登记产量`).toBeTruthy()
-      expect(drop!.min).toBeGreaterThanOrEqual(1)
-      expect(drop!.max).toBeGreaterThanOrEqual(drop!.min)
-    }
-  })
-
-  it('难度越高，单场产量越多', () => {
-    for (const v of DUNGEON_VARIANTS) {
-      const easy = dungeonDropAmount(v, 'easy')
-      const normal = dungeonDropAmount(v, 'normal')
-      const hard = dungeonDropAmount(v, 'hard')
-      expect(normal.min).toBeGreaterThanOrEqual(easy.min)
-      expect(hard.min).toBeGreaterThanOrEqual(normal.min)
-    }
-  })
-
-  it('findDungeonVariant 按「种类 + 五行 / 石档」唯一命中', () => {
-    expect(findDungeonVariant('skill', '金')?.id).toBe('skillGold')
-    expect(findDungeonVariant('enhance', undefined, 'relicStoneTier2')?.id).toBe('enhanceTier2')
-    expect(findDungeonVariant('skill')).toBeNull()
-    expect(findDungeonVariant('enhance')).toBeNull()
-  })
-
-  it('变体 id 索引与清单一致', () => {
-    expect(DUNGEON_INDEX.size).toBe(DUNGEON_VARIANTS.length)
-    for (const v of DUNGEON_VARIANTS) {
-      expect(DUNGEON_INDEX.get(v.id)).toEqual(v)
+  it('段间单调：easy < normal < hard（缩放、门槛、产量严格递增）', () => {
+    // ⚠ 难度曲线必须单调——否则玩家会撞上"简单比困难还难"的关卡。
+    for (const variantId of DUNGEON_VARIANT_ORDER) {
+      const [easy, normal, hard] = dungeonStagesOfVariant(variantId)
+      expect(easy.difficulty).toBe('easy')
+      expect(normal.difficulty).toBe('normal')
+      expect(hard.difficulty).toBe('hard')
+      expect(normal.enemyScale).toBeGreaterThan(easy.enemyScale)
+      expect(hard.enemyScale).toBeGreaterThan(normal.enemyScale)
+      expect(normal.powerRequired).toBeGreaterThan(easy.powerRequired)
+      expect(hard.powerRequired).toBeGreaterThan(normal.powerRequired)
+      expect(normal.drop.min).toBeGreaterThan(easy.drop.min)
+      expect(hard.drop.min).toBeGreaterThan(normal.drop.min)
     }
   })
 })
 
-describe('副本波次取材', () => {
-  it('难度 → 取材章节（简易第 1 章 / 普通第 4 章 / 困难第 8 章）', () => {
-    expect(dungeonChapter('easy')).toBe(1)
-    expect(dungeonChapter('normal')).toBe(4)
-    expect(dungeonChapter('hard')).toBe(8)
+describe('副本索引函数', () => {
+  it('`dungeonStageById` 与 `DUNGEON_STAGE_INDEX` 一致', () => {
+    expect(DUNGEON_STAGE_INDEX.size).toBe(24)
+    for (const stage of DUNGEON_STAGES) {
+      expect(dungeonStageById(stage.id)).toEqual(stage)
+    }
+    expect(dungeonStageById('dgn_not_exists_easy')).toBeNull()
   })
 
-  it('波次就是该章的主线关卡 id（难度天然落在已标定的锚点上）', () => {
-    for (const d of DUNGEON_DIFFICULTIES) {
-      const waves = dungeonStages(d.chapter)
-      expect(waves.length).toBeGreaterThan(0)
-      // 全是主线关卡 id
-      for (const id of waves) expect(id).toBeGreaterThan(0)
+  it('`dungeonStagesOf` 按种类切分（15 技能 + 9 强化）', () => {
+    expect(dungeonStagesOf('skill')).toHaveLength(15)
+    expect(dungeonStagesOf('enhance')).toHaveLength(9)
+    for (const stage of dungeonStagesOf('skill')) {
+      expect(DUNGEON_INDEX.get(stage.variantId)?.kind).toBe('skill')
     }
   })
 
-  it('不同难度的波次不重叠（不是同一批关卡换皮）', () => {
-    const easy = new Set(dungeonStages(dungeonChapter('easy')))
-    const hard = dungeonStages(dungeonChapter('hard'))
-    for (const id of hard) expect(easy.has(id)).toBe(false)
+  it('`dungeonStagesOfVariant` 按变体切分（每变体 3 关）', () => {
+    for (const variantId of DUNGEON_VARIANT_ORDER) {
+      const stages = dungeonStagesOfVariant(variantId)
+      expect(stages).toHaveLength(3)
+      expect(stages.every((s) => s.variantId === variantId)).toBe(true)
+    }
+  })
+
+  it('变体索引与清单一致，`variantById` 找不到返回 null', () => {
+    expect(DUNGEON_INDEX.size).toBe(DUNGEON_VARIANTS.length)
+    for (const variant of DUNGEON_VARIANTS) {
+      expect(DUNGEON_INDEX.get(variant.id)).toEqual(variant)
+      expect(variantById(variant.id)).toEqual(variant)
+    }
+    expect(variantById('not_a_variant' as never)).toBeNull()
+  })
+
+  it('降难度建议：已经最低档就返回 null', () => {
+    expect(suggestLowerDifficulty('easy')).toBeNull()
+    expect(suggestLowerDifficulty('normal')).toBe('easy')
+    expect(suggestLowerDifficulty('hard')).toBe('normal')
   })
 })
 
 describe('副本解锁判定', () => {
-  it('技能副本：有可升技能的该五行英灵即可进入', () => {
+  it('技能副本：该五行有可升技能的英灵即可进入', () => {
     const save = strongSave()
-    const variant = DUNGEON_VARIANTS.find((v) => v.id === 'skillEarth')!
+    const variant = DUNGEON_INDEX.get('skillEarth')!
     expect(dungeonUnlocked(save, variant).unlocked).toBe(true)
   })
 
-  it('技能副本：没有该五行英灵 → 锁定并给出原因', () => {
+  it('技能副本：没有该五行英灵 → 锁定并给出原因与引导路由', () => {
+    // ⚠ 铁律 #27：未解锁时必须写清"为什么"与"去哪儿"，
+    //   否则玩家只会看到一把锁，以为功能坏了。
     const save = strongSave()
-    const variant = DUNGEON_VARIANTS.find((v) => v.id === 'skillWater')!
+    const variant = DUNGEON_INDEX.get('skillWater')!
     const res = dungeonUnlocked(save, variant)
     expect(res.unlocked).toBe(false)
     expect(res.reason).toContain('水')
+    expect(res.hintRoute).toBe('hero')
   })
 
-  it('强化副本：持有对应等级遗物即可进入', () => {
-    const save = strongSave()
-    const tier1 = DUNGEON_VARIANTS.find((v) => v.id === 'enhanceTier1')!
-    expect(dungeonUnlocked(save, tier1).unlocked).toBe(true)
-  })
-
-  it('强化副本：没有遗物 → 高阶锁定', () => {
+  it('强化副本：仓库最高遗物等级 ≥ 解锁线才解锁（初阶 1 / 中阶 60 / 高阶 130）', () => {
     const save = createNewSave(NOW, 7)
-    const tier3 = DUNGEON_VARIANTS.find((v) => v.id === 'enhanceTier3')!
-    const res = dungeonUnlocked(save, tier3)
-    expect(res.unlocked).toBe(false)
-    expect(res.reason).toContain('Lv')
-  })
+    const tier1 = DUNGEON_INDEX.get('enhanceTier1')!
+    const tier2 = DUNGEON_INDEX.get('enhanceTier2')!
+    const tier3 = DUNGEON_INDEX.get('enhanceTier3')!
 
-  it('强化副本：遗物等级达标即解锁（档位解锁线取配置）', () => {
-    const save = strongSave()
+    // 新档仓库是空的 ⇒ 三档全锁（但初阶只要求 Lv1，
+    //   也就是"只要有第一件遗物就能进"——遗物祈愿入口就是为了这条）
+    expect(dungeonUnlocked(save, tier1).unlocked).toBe(false)
+    expect(dungeonUnlocked(save, tier2).unlocked).toBe(false)
+    expect(dungeonUnlocked(save, tier3).unlocked).toBe(false)
+    expect(dungeonUnlocked(save, tier3).reason).toContain('Lv130')
+
     const rng = new Rng(5)
     save.relics = [makeTestRelic('set_zhanshen_1', rng, RELIC.STONE_TIERS[1].unlockRelicLevel)]
-    const tier2 = DUNGEON_VARIANTS.find((v) => v.id === 'enhanceTier2')!
+    expect(dungeonUnlocked(save, tier1).unlocked).toBe(true)
     expect(dungeonUnlocked(save, tier2).unlocked).toBe(true)
+    expect(dungeonUnlocked(save, tier3).unlocked).toBe(false)
   })
 
   /**
@@ -195,7 +254,7 @@ describe('副本解锁判定', () => {
     const save = createNewSave(NOW, 7)
     // 客户端镜像：仓库里的 Lv60 那件**没有**出现在 relics 里
     expect(save.relics).toHaveLength(0)
-    const tier2 = DUNGEON_VARIANTS.find((v) => v.id === 'enhanceTier2')!
+    const tier2 = DUNGEON_INDEX.get('enhanceTier2')!
 
     // 没有 facts → 只能看到 0 → 判定为未解锁（这正是客户端的老毛病）
     expect(dungeonUnlocked(save, tier2).unlocked).toBe(false)
@@ -207,80 +266,131 @@ describe('副本解锁判定', () => {
 
   it('强化副本：服务端统计低于解锁线时仍锁定，并写清当前最高等级', () => {
     const save = createNewSave(NOW, 7)
-    const tier2 = DUNGEON_VARIANTS.find((v) => v.id === 'enhanceTier2')!
+    const tier2 = DUNGEON_INDEX.get('enhanceTier2')!
     const res = dungeonUnlocked(save, tier2, { maxRelicLevel: 12 })
     expect(res.unlocked).toBe(false)
     expect(res.reason).toContain('Lv60')
     expect(res.reason).toContain('Lv12')
   })
-})
 
-describe('副本运行器', () => {
-  it('胜利只发所选材料，不发银两 / 经验 / 遗物', () => {
+  it('关卡级判定与变体级判定口径一致（同一把钥匙）', () => {
+    // ⚠ 两处各写一套判定 ⇒ 玩家会看到"界面说能进，点了说不能"。
     const save = strongSave()
-    const variant = DUNGEON_VARIANTS.find((v) => v.id === 'skillEarth')!
-    const result = runDungeon(save, variant, 'easy', 3, 12345, makeCtx(save))
-    expect(result.battles).toBeGreaterThan(0)
-    const total = Object.values(result.items).reduce((a, b) => a + b, 0)
-    expect(total).toBeGreaterThan(0)
-    // 只有所选材料这一种
-    for (const id of Object.keys(result.items)) {
-      expect(id).toBe(variant.itemId)
+    for (const stage of DUNGEON_STAGES) {
+      const variant = variantById(stage.variantId)!
+      const byVariant = dungeonUnlocked(save, variant)
+      const byStage = dungeonStageUnlocked(save, stage)
+      expect(byStage.unlocked, `${stage.id} 的关卡判定与变体判定不一致`).toBe(
+        byVariant.unlocked,
+      )
+      expect(byStage.reason).toBe(byVariant.reason)
+      expect(byStage.hintRoute).toBe(byVariant.hintRoute)
     }
   })
+})
 
-  it('不写 campaign（主线首通记录不受副本影响）', () => {
+describe('副本战斗（runDungeonLevel）', () => {
+  it('返回真实战斗结果（名册含我方与关卡定义里的敌人）', () => {
+    // ⚠ 铁律 #22：「配置齐全 ≠ 功能可用」。
+    //   副本必须真的能打起来，敌人取自关卡定义里的 `enemyIds`。
+    const save = strongSave()
+    const stage = dungeonStageById(dungeonStageId('skillEarth', 'easy'))!
+    const res = runDungeonLevel(save, stage.id, 12345, buildPveContext(save))
+
+    expect(res.stage?.id).toBe(stage.id)
+    expect(res.battle).toBeTruthy()
+    const roster = res.battle!.roster
+    expect(roster.length).toBeGreaterThan(0)
+    // 敌方名册的 defId 必须来自关卡定义（战斗日志里的 id 带 `#序号`，这里比 defId）
+    const enemyDefIds = new Set(roster.filter((r) => r.side === 'enemy').map((r) => r.defId))
+    for (const id of stage.enemyIds) {
+      expect(enemyDefIds.has(id), `${stage.id} 的敌人 ${id} 没上战场`).toBe(true)
+    }
+    expect(roster.some((r) => r.side === 'ally')).toBe(true)
+  })
+
+  it('没有编队 → 不打，直接判负（不消耗任何资源）', () => {
+    const save = createNewSave(NOW, 7)
+    const stage = dungeonStageById(dungeonStageId('skillEarth', 'easy'))!
+    const res = runDungeonLevel(save, stage.id, 1, buildPveContext(save))
+    expect(res.win).toBe(false)
+    expect(res.battle).toBeNull()
+    expect(res.stage?.id).toBe(stage.id)
+  })
+
+  it('不存在的关卡 id → 直接失败（不崩）', () => {
+    const save = strongSave()
+    const res = runDungeonLevel(save, 'dgn_not_exists_easy', 1, buildPveContext(save))
+    expect(res.win).toBe(false)
+    expect(res.battle).toBeNull()
+    expect(res.stage).toBeNull()
+  })
+})
+
+describe('副本手动挑战（dungeon.challenge）', () => {
+  it('胜利只发所选材料，并登记通关；**不写 campaign**', () => {
+    // ⚠ 副本是独立关卡：进度与主线分开记账（`clearedStage` 不动）。
     const save = strongSave()
     const clearedBefore = save.campaign.clearedStage
-    const variant = DUNGEON_VARIANTS.find((v) => v.id === 'skillEarth')!
-    runDungeon(save, variant, 'easy', 3, 999, makeCtx(save))
+    const stageId = dungeonStageId('skillEarth', 'easy')
+    const res = applyAction(save, { type: 'dungeon.challenge', stageId }, actionCtx())
+
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.result.stageId).toBe(stageId)
+    expect(res.result.win).toBe(true)
+    expect(res.result.firstClear).toBe(true)
+    // 只发该副本的材料：不发银两、不发经验书
+    expect(Object.keys(res.result.rewards.items ?? {})).toEqual(['skillMatEarth'])
+    expect(res.result.rewards.silver).toBeUndefined()
+    expect(save.items.skillMatEarth).toBeGreaterThan(0)
+    // 通关登记
+    expect(save.dungeons.cleared[stageId]).toBe(true)
+    // 主线记录不受影响
     expect(save.campaign.clearedStage).toBe(clearedBefore)
   })
 
-  it('没有编队 → 直接判定为卡住并给出降难度建议', () => {
-    const save = createNewSave(NOW, 7)
-    const variant = DUNGEON_VARIANTS.find((v) => v.id === 'skillEarth')!
-    const result = runDungeon(save, variant, 'hard', 3, 1, makeCtx(save))
-    expect(result.blocked).toBe(true)
-    expect(result.blockedAtBattle).toBe(1)
-    expect(result.suggestDifficulty).toBe('normal')
-  })
-
-  it('降难度建议：已经最低档就返回 null', () => {
-    expect(suggestLowerDifficulty('easy')).toBeNull()
-    expect(suggestLowerDifficulty('normal')).toBe('easy')
-    expect(suggestLowerDifficulty('hard')).toBe('normal')
-  })
-
-  it('副本掉落数量落在配置的区间内', () => {
+  it('重复挑战同一关不再算首通', () => {
     const save = strongSave()
-    const variant = DUNGEON_VARIANTS.find((v) => v.id === 'enhanceTier1')!
-    const drop = DUNGEON_DROPS[variant.itemId]!
-    const result = runDungeon(save, variant, 'easy', 5, 777, makeCtx(save))
-    const total = result.items[variant.itemId] ?? 0
-    expect(total).toBeGreaterThanOrEqual(result.wins * drop.min)
-    expect(total).toBeLessThanOrEqual(result.wins * drop.max)
+    const stageId = dungeonStageId('skillEarth', 'easy')
+    applyAction(save, { type: 'dungeon.challenge', stageId }, actionCtx())
+    const again = applyAction(save, { type: 'dungeon.challenge', stageId }, actionCtx(NOW, 999))
+    expect(again.ok).toBe(true)
+    if (!again.ok) return
+    expect(again.result.firstClear).toBe(false)
+  })
+
+  it('未解锁的副本关卡被拒（不消耗任何资源）', () => {
+    // ⚠ 水系技能副本：队伍里没有水属性英灵 ⇒ 锁着。
+    const save = strongSave()
+    const before = JSON.stringify(save.items)
+    const res = applyAction(
+      save,
+      { type: 'dungeon.challenge', stageId: dungeonStageId('skillWater', 'easy') },
+      actionCtx(),
+    )
+    expect(res.ok).toBe(false)
+    expect(JSON.stringify(save.items)).toBe(before)
+  })
+
+  it('不存在的副本关卡被拒', () => {
+    const save = strongSave()
+    const res = applyAction(save, { type: 'dungeon.challenge', stageId: 'dgn_nope_easy' }, actionCtx())
+    expect(res.ok).toBe(false)
   })
 })
 
-describe('副本与主线共用战斗系统', () => {
-  it('副本用的是同一个 buildPveContext（数值口径一致）', () => {
-    const save = strongSave()
-    const ctx = buildPveContext(save, 1)
-    expect(ctx.mode).toBe('pve')
-    expect(ctx.seed).toBe(1)
-  })
-
-  it('变体定义在 config 层，不含逻辑（只读数据）', () => {
-    for (const v of DUNGEON_VARIANTS) {
-      expect(typeof v.unlockHint).toBe('string')
-      expect(v.unlockHint.length).toBeGreaterThan(0)
-      expect(Object.keys(v).sort()).toEqual(
-        ['element', 'id', 'itemId', 'kind', 'name', 'tier', 'unlockHint'].filter((k) => k in v).sort(),
-      )
+describe('副本难度档配置', () => {
+  it('三档难度都有名字与产量倍率（副本不借主线波次）', () => {
+    // ⚠ 挂机改版 v11：副本不再取材主线波次，
+    //   `chapter` 只用于说明"该难度段的设计阶梯对齐主线第几章"。
+    expect(DUNGEON_DIFFICULTIES).toHaveLength(3)
+    for (const d of DUNGEON_DIFFICULTIES) {
+      expect(d.name.length).toBeGreaterThan(0)
+      expect(d.dropMul).toBeGreaterThan(0)
     }
+    const muls = DUNGEON_DIFFICULTIES.map((d) => d.dropMul)
+    expect(muls[0]).toBeLessThan(muls[1])
+    expect(muls[1]).toBeLessThan(muls[2])
   })
 })
-
-/** 让 TS 知道 DungeonVariant 类型被用到了 */
-export type { DungeonVariant }

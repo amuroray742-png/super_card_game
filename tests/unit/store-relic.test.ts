@@ -1,15 +1,21 @@
 /**
  * 遗物获取链路（真实链路回归：store → 服务端 → core）。
  *
- * ⚠ 历史 bug：core 的 `rollRewards` 只把遗物放进**独立数组** `relics`，
+ * ⚠ 历史 bug：core 的掉落结算只把遗物放进**独立数组** `relics`，
  *   `rewards.relics` 从未被赋值；而 store 的 `applyRewards` **只读 rewards**
  *   → 挂机 / 离线结算产出的遗物 100% 被丢弃，玩家一个遗物都拿不到
  *   （整条遗物养成线是死的：强化石能掉但没东西可强化、套装效果永不触发）。
  *
- * 本文件守的是「玩家**真的**能拿到遗物」，不是「配置齐全」——
+ * ⚠ **挂机改版 v11**：遗物**彻底移出掉落表**，改走**独立获取入口**「遗物祈愿」
+ *   （`relic.acquire`，花 `RELIC_ACQUIRE.SILVER_COST` 银两换一件）。
+ *   ⇒ 本文件守的不再是「挂机掉遗物」，而是：
+ *     ① 挂机**确实不再**产出遗物（防止哪天又混回掉落表）；
+ *     ② 祈愿这条**唯一入口**真的能拿到遗物；
+ *     ③ 祈愿的扣费守铁律 #10（余额不足直接拒绝、不产生负数）。
+ *
  * 同 AGENTS.md 铁律 #22 的教训：养成链路的「配置齐全」≠「功能可用」。
  *
- * ⚠ 服务端权威后，遗物是**服务端**掉的、本地只是镜像：
+ * ⚠ 服务端权威后，遗物是**服务端**产出的、本地只是镜像：
  *   所以这里跑的是真实链路（真实后端 + 真实 core），不是客户端自算。
  *
  * ⚠ **存档分包**后，客户端镜像里**只有已装备遗物**（≤36 件）：
@@ -57,6 +63,7 @@ const { getRelicMods, relicUpgradeCost } = await import('../../src/core/systems/
 const { makeTestRelic } = await import('./helpers.ts')
 const { getEquippedRelics } = await import('../../src/core/systems/loadout.ts')
 const { Rng } = await import('../../src/core/rng.ts')
+const { RELIC_ACQUIRE } = await import('../../src/core/config/economy.ts')
 
 /** 强化一级的花费（与 core 的 relicUpgradeCost 同一口径，不在测试里写死数字） */
 const RELIC_UPGRADE = relicUpgradeCost(1)!
@@ -102,57 +109,89 @@ async function serverRelicTotal(): Promise<number> {
   return page?.total ?? 0
 }
 
-describe('遗物获取链路', () => {
+describe('遗物获取链路（独立入口「遗物祈愿」）', () => {
   beforeEach(async () => {
     await registerAndLoad('relic_user')
   })
 
-  it('挂机一场：遗物真的进了仓库（不是被丢弃）', async () => {
+  it('⚠ 挂机**不再产出遗物**（掉落表只剩银两 + 经验书）', async () => {
+    const store = useGameStore()
+    await seedSave((save) => {
+      // ⚠ 主线通道跟随最新通关关卡 ⇒ 先打通一关才有产出
+      save.campaign.clearedStage = 1
+    })
+    const before = await serverRelicTotal()
+
+    advanceBattles(3)
+    const result = await store.tickIdle()
+    expect(result).not.toBeNull()
+    // 三通道明细里的遗物清单**恒空**
+    expect(result!.channels.every((c) => (c.rewards.relics?.length ?? 0) === 0)).toBe(true)
+    // 仓库件数不变
+    expect(await serverRelicTotal()).toBe(before)
+  })
+
+  it('祈愿：花银两换一件遗物，仓库真的多了一件', async () => {
+    const store = useGameStore()
+    await seedSave()
+    const before = await serverRelicTotal()
+    const silver0 = store.save.player.silver
+
+    const wish = await store.acquireRelic()
+    expect(wish).not.toBeNull()
+    expect(wish!.silver).toBe(RELIC_ACQUIRE.SILVER_COST)
+    expect(store.save.player.silver).toBe(silver0 - RELIC_ACQUIRE.SILVER_COST)
+    expect(await serverRelicTotal()).toBe(before + 1)
+  })
+
+  it('祈愿出的遗物实例结构完整（defId / uid / 等级齐全，能被强化与装备）', async () => {
+    const store = useGameStore()
+    await seedSave()
+    const wish = await store.acquireRelic()
+    expect(wish).not.toBeNull()
+
+    const relics = await serverRelics()
+    expect(relics.length).toBeGreaterThan(0)
+    const relic = relics.find((r) => r.uid === wish!.uid)
+    expect(relic).toBeDefined()
+    expect(relic!.defId).toBeTruthy()
+    expect(relic!.level).toBeGreaterThanOrEqual(1)
+  })
+
+  it('⚠ 银两不足：祈愿被拒，余额不变、**不产生负数**', async () => {
+    const store = useGameStore()
+    await seedSave((save) => {
+      save.player.silver = RELIC_ACQUIRE.SILVER_COST - 1
+    })
+    const before = await serverRelicTotal()
+
+    const wish = await store.acquireRelic()
+    expect(wish).toBeNull()
+    // ⚠ 铁律 #10：扣费动作必须先做余额校验 ⇒ 余额不变、不为负
+    expect(store.save.player.silver).toBe(RELIC_ACQUIRE.SILVER_COST - 1)
+    expect(store.save.player.silver).toBeGreaterThanOrEqual(0)
+    expect(await serverRelicTotal()).toBe(before)
+  })
+
+  it('多次祈愿：每件 uid 唯一，仓库逐件累加', async () => {
     const store = useGameStore()
     await seedSave()
     const before = await serverRelicTotal()
 
-    advanceBattles(1)
-    const result = await store.tickIdle(1)
-    expect(result).not.toBeNull()
-    // core 产出的遗物清单
-    const dropped = result!.rewards.relics?.length ?? 0
-    expect(dropped).toBeGreaterThan(0)
-
-    // 服务端入库后，仓库里确实多了
-    expect(await serverRelicTotal()).toBe(before + dropped)
-  })
-
-  it('入库的遗物实例结构完整（defId / uid / 等级齐全，能被强化与装备）', async () => {
-    const store = useGameStore()
-    await seedSave()
-    advanceBattles(2)
-    await store.tickIdle(2)
-
-    const relics = await serverRelics()
-    expect(relics.length).toBeGreaterThan(0)
-    const relic = relics[0]
-    expect(relic.defId).toBeTruthy()
-    expect(relic.uid).toBeTruthy()
-    expect(relic.level).toBeGreaterThanOrEqual(1)
-  })
-
-  it('多场挂机：遗物逐场累加（不是只剩最后一场的）', async () => {
-    const store = useGameStore()
-    await seedSave()
-    advanceBattles(1)
-    await store.tickIdle(1)
-    const one = await serverRelicTotal()
-    advanceBattles(3)
-    await store.tickIdle(3)
-    expect(await serverRelicTotal()).toBe(one + 3)
+    const uids: string[] = []
+    for (let i = 0; i < 3; i++) {
+      const wish = await store.acquireRelic()
+      expect(wish).not.toBeNull()
+      uids.push(wish!.uid)
+    }
+    expect(new Set(uids).size).toBe(3)
+    expect(await serverRelicTotal()).toBe(before + 3)
   })
 
   it('仓库分页接口可用：分页取到的件数与总数对得上', async () => {
     const store = useGameStore()
     await seedSave()
-    advanceBattles(4)
-    await store.tickIdle(4)
+    for (let i = 0; i < 3; i++) await store.acquireRelic()
 
     const page = await store.loadRelicPage({ page: 1, size: 2 })
     expect(page).not.toBeNull()
@@ -164,8 +203,8 @@ describe('遗物获取链路', () => {
   it('遗物统计接口给出仓库总数（顶栏件数与图鉴收藏数靠它）', async () => {
     const store = useGameStore()
     await seedSave()
-    advanceBattles(2)
-    await store.tickIdle(2)
+    await store.acquireRelic()
+    await store.acquireRelic()
 
     const stats = await store.loadRelicStats()
     expect(stats).not.toBeNull()
@@ -190,15 +229,19 @@ describe('遗物获取链路', () => {
     expect(await serverRelicTotal()).toBe(3)
   })
 
-  it('离线结算同样产出遗物（服务端按自己的时间补算）', async () => {
+  it('⚠ 离线结算**同样不产出遗物**（服务端按自己的时间补算也不产出）', async () => {
     const store = useGameStore()
-    await seedSave()
+    await seedSave((save) => {
+      save.campaign.clearedStage = 1
+    })
     advanceBattles(10)
 
     await store.claimOffline()
     expect(store.offlineReport).not.toBeNull()
-    expect(store.offlineReport!.rewards.relics?.length ?? 0).toBeGreaterThan(0)
-    expect(await serverRelicTotal()).toBeGreaterThan(0)
+    expect(
+      store.offlineReport!.channels.every((c) => (c.rewards.relics?.length ?? 0) === 0),
+    ).toBe(true)
+    expect(await serverRelicTotal()).toBe(0)
   })
 })
 

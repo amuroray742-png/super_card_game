@@ -619,11 +619,11 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="battle-ctrl">
-      <button class="btn btn-sm" :disabled="!battle" @click="playing ? pause() : replay()">
+      <button class="btn btn-sm" :disabled="!battle" data-testid="battle-play" @click="playing ? pause() : replay()">
         {{ playing ? '暂停' : '播放' }}
       </button>
-      <button class="btn btn-sm" :disabled="!battle" @click="replay">重播</button>
-      <button class="btn btn-sm" :disabled="!battle" @click="skipToEnd">跳过</button>
+      <button class="btn btn-sm" :disabled="!battle" data-testid="battle-replay" @click="replay">重播</button>
+      <button class="btn btn-sm" :disabled="!battle" data-testid="battle-skip" @click="skipToEnd">跳过</button>
       <div class="speeds">
         <button
           v-for="v in SPEEDS"

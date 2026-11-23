@@ -320,16 +320,22 @@ describe('动作接口：离线补算与导入', () => {
     grantHero(old, 'hanxin', Date.now())
     old.team.slots[0] = 'xiangyu'
     old.team.slots[1] = 'hanxin'
+    // ⚠ 挂机改版 v11：主线通道**跟随最新通关关卡** ⇒ 首胜前（clearedStage = 0）
+    //   没有可挂的目标 ⇒ 离线补算产出恒为 0 ⇒ 这里必须预置「已通关第 1 关」。
+    old.campaign.clearedStage = 1
+    old.idle.channels.main.target = { kind: 'main', stageId: null }
     old.lastTickAt = Date.now() - 2 * 3600 * 1000
 
     writeSave(bundle.db, acc.user.id, serialize(old), old.savedAt, Date.now())
 
     const save = await pullSave(acc.accessToken)
     expect(save?.offline).toBeTruthy()
-    const offline = save?.offline as { battles: number; rewards: { silver?: number } }
-    expect(offline.battles).toBeGreaterThan(0)
+    const offline = save?.offline as { rolls: number; channels: { channel: string }[] }
+    expect(offline.rolls).toBeGreaterThan(0)
+    // 三通道分段：主线通道有产出
+    expect(offline.channels.some((c) => c.channel === 'main')).toBe(true)
     expect(save?.player.silver).toBeGreaterThan(old.player.silver)
-    // 结算后 lastTickAt 推进，不会重复结算
+    // 结算后账本推进，不会重复结算
     const again = await pullSave(acc.accessToken)
     expect(again?.offline).toBeFalsy()
   })
@@ -346,7 +352,9 @@ describe('动作接口：离线补算与导入', () => {
 
   it('无云档首次迁移，随机与时间由服务端重建', async () => {
     const acc = await signUp('alice')
-    const payload = btoa(serialize({ ...createNewSave(Date.now(), 42), version: 5 }))
+    // ⚠ 挂机改版 v11：**导入只接受 v11**（旧版号一律拒绝）⇒ 这里导入的就是 v11 档，
+    //   但**随机序列仍由服务端重建**（客户端提交的种子不作数）。
+    const payload = btoa(serialize({ ...createNewSave(Date.now(), 42), version: 11 }))
     const res = await post(acc.accessToken, 'import-2', { type: 'save.import', payload })
     expect(res.body.ok).toBe(true)
     const save = await pullSave(acc.accessToken)

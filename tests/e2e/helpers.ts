@@ -1,7 +1,11 @@
 import { expect, type Page } from '@playwright/test'
-import { BATTLE } from '../../src/core/config/economy.ts'
-import type { ActionResponse } from '../../src/core/systems/action-protocol.ts'
+import { IDLE } from '../../src/core/config/economy.ts'
+import type { ActionRequest, ActionResponse } from '../../src/core/systems/action-protocol.ts'
 import type { IdleActionResult } from '../../src/core/systems/actions.ts'
+import type { SaveData } from '../../src/core/model/types.ts'
+import { createNewSave } from '../../src/core/save/schema.ts'
+import { exportSave } from '../../src/core/save/serialize.ts'
+import { createHeroState } from '../../src/core/systems/growth.ts'
 import { ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../src/core/config/account.ts'
 
 /**
@@ -15,6 +19,13 @@ import { ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../src/core/config/acco
  * 注意：账号是**每个用例现注册的**，不是共用一个——
  * 云存档按账号隔离，共用账号会让前一个用例的抽卡结果影响后一个用例
  * （原本每个用例都是全新的浏览器上下文 = 全新的存档）。
+ *
+ * ## 挂机改版 v11 的口径变更
+ *
+ * - 挂机**不跑战斗**，按掉落表**逐次掷奖**；一次掷奖 = `IDLE.SECONDS_PER_ROLL` 秒。
+ * - 三条通道（主线 / 技能副本 / 强化副本）**各自独立**计量同一段墙钟时间。
+ * - `idle.tick` **不带负载**（不再有 `battles`）——领取次数完全由服务端按时间账本决定。
+ *   旧实现里的「推征 N 场」按钮已不存在，领取入口是推征页唯一的「全部领取」。
  */
 
 /** 与 playwright.config.ts 里的 webServer 端口保持一致 */
@@ -200,76 +211,155 @@ export async function cachedSaveOf(page: Page, accountId: number | string): Prom
 }
 
 /**
- * 清空编队，**暂停挂机收益**。
+ * 造一个前置存档（**玩家可用的 `save.import` 动作**）。
  *
- * ⚠ 为什么端到端里必须先做这一步：
- *   挂机用的是**时间账本**（`save.idle.effectiveMs`），在线时长按 3 倍倍率
- *   （`IDLE.ONLINE_MULTIPLIER`）持续累积，凑够一场战斗的时长就在
- *   **下一次动作**里一次性结算掉。
- *   于是「这次动作到底扣了多少」是**不可确定**的——玩家钱包在扣费的同时还在进账。
- *   实测：强化扣 2 枚强化石，同一次动作结算出 1 场战斗又补回 4 枚 → 净额 +2。
+ * ⚠ 走服务端动作层，不碰数据库（铁律 #11）。
+ * ⚠ **导入只接受 v11**，且导入后服务端会：
+ *   - 把三条挂机通道的计量水位重置为导入时刻（有效预算清零）；
+ *   - **清空副本通关记录**（`dungeons.cleared = {}`）与副本挂机目标；
+ *   - 主线通道恢复「跟随最新通关关卡」。
+ *   ⇒ 想测「已通关的副本关卡才能挂机」，**必须真的打赢一次**，导入给不了。
  *
- *   清空编队后 `settleIdleLedger` 直接返回 null（无编队 → 无战斗 → 无掉落），
- *   扣费口径就能被**精确断言**（银两正好 -500、强化石正好 -2）。
- *
- *   growth.spec.ts 用的是同一套做法 —— 两边共用这个 helper，避免两处各写一套。
+ * @returns 账号 id（读本地缓存槽位用）与 access token（直接调动作层用）
  */
-export async function pauseFarming(page: Page): Promise<void> {
-  await page.goto('/#/formation')
+export async function importFixture(
+  page: Page,
+  prefix: string,
+  mutate: (save: SaveData) => void,
+): Promise<{ accountId: number; token: string }> {
+  const session = await registerAccount(uniqueUsername(prefix))
+  const token = await accessTokenOf(session)
+  const save = createNewSave(Date.now())
+  mutate(save)
+  const imported = await postAction(token, `${prefix}-fixture`, {
+    type: 'save.import',
+    payload: exportSave(save),
+  })
+  expect(imported.ok, '前置存档导入失败').toBe(true)
+  await seedSession(page, await loginAccount(session.user.username))
+  // 载入一次页面 → 让客户端把服务端存档写进**本地缓存槽位**
+  // （`cachedSaveOf` 读的就是它；不载入的话槽位还是空的）
+  await page.goto('/#/gacha')
   await page.waitForLoadState('networkidle')
-  const slots = page.locator('.slot')
-  const picker = page.locator('.dialog').filter({ hasText: '选择英灵' })
-  // ⚠ 必须等阵位**渲染出来**再数：
-  //   `page.goto('/#/formation')` 从另一个 hash 出发属于**同文档导航**，
-  //   页面不会重载，`networkidle` 立刻满足 —— 此时 Vue 可能还没重渲染完，
-  //   直接 `count()` 会读到 0（曾误报成「阵位页挂了」，实际页面稍后就正常了）。
-  //   用 locator 自带的自动等待，语义也不变：等阵位渲染出来。
-  await expect(slots.first()).toBeVisible()
-  const total = await slots.count()
-  expect(total).toBeGreaterThan(0)
-  for (let i = 0; i < total; i++) {
-    const slot = slots.nth(i)
-    if ((await slot.locator('.slot-empty').count()) > 0) continue
-    await slot.click()
-    await picker.getByRole('button', { name: new RegExp(`清空第 ${i + 1} 槽`) }).click()
-    await expect(slot.locator('.slot-empty')).toHaveCount(1)
-    await picker.getByRole('button', { name: '关闭', exact: true }).click()
-  }
-  await expect(slots.locator('.slot-empty')).toHaveCount(total)
+  return { accountId: session.user.id, token }
 }
 
 /**
- * 等真实挂机时间后，通过玩家按钮领取一次服务端结算。
- * 场次数只是领取上限；不改时钟、不注入收益，也不假定在线倍率。
- * 每轮至少等一个基础场次，兼容在线 3x 与离线效率账本。
+ * 给存档塞一支队伍（按槽位顺序）。
+ *
+ * ⚠ `save.import` 的校验要求队里的英灵**都在 `save.heroes` 里**，
+ *   这里一并写入（等级可调——等级决定能不能打赢）。
  */
-export async function settleIdleThroughUi(page: Page, accountId: number, battles = 10): Promise<IdleActionResult> {
-  await page.waitForTimeout(BATTLE.SECONDS_PER_BATTLE * 1000)
-  const responsePromise = page.waitForResponse((response) => {
-    if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/action') return false
-    const request = response.request().postDataJSON()
-    return request?.action?.type === 'idle.tick' && request.action.battles === battles
+export function giveTeam(save: SaveData, ids: readonly string[], level = 60): void {
+  ids.forEach((id, slot) => {
+    save.heroes[id] = { ...createHeroState(id, Date.now()), level }
+    save.team.slots[slot] = id
   })
-  await page.getByRole('button', { name: `推征 ${battles} 场`, exact: true }).click()
+}
+
+/**
+ * 等某个动作的**权威响应**（页面自己发起的那个 `POST /api/action`）。
+ *
+ * ⚠ 断言前必须先**等渲染**：SPA 走 hash 路由，
+ *   `page.goto('/#/xxx')` 从另一个 hash 出发属于**同文档导航**——
+ *   页面不重载，`networkidle` 立刻满足，但 Vue 可能还没渲染完。
+ *   所以断言一律用 locator 的自动等待（`expect(...).toBeVisible()`）。
+ *
+ * @param expectOk 业务失败也是 HTTP 200（`{ ok: false, code }`），
+ *   负向用例要把它关掉才能拿到错误码。
+ * @param trigger 触发这个动作的操作（必须在**挂上监听之后**执行，
+ *   否则动作可能在监听挂上之前就发完了）。
+ */
+export async function waitForAction(
+  page: Page,
+  type: string,
+  options: { expectOk?: boolean; trigger?: () => Promise<void> } = {},
+): Promise<ActionResponse> {
+  const expectOk = options.expectOk ?? true
+  const responsePromise = page.waitForResponse((response) => {
+    if (response.request().method() !== 'POST') return false
+    if (new URL(response.url()).pathname !== '/api/action') return false
+    const request = response.request().postDataJSON() as ActionRequest | null
+    return request?.action?.type === type
+  })
+  if (options.trigger) await options.trigger()
   const response = await responsePromise
-  expect(response.ok(), '挂机请求应成功到达真实服务端').toBe(true)
-  const body = await response.json() as ActionResponse
-  expect(body.ok, body.message ?? '挂机动作失败').toBe(true)
-  expect(body.save, '成功动作应返回权威存档').toBeTruthy()
-  const snapshot = JSON.parse(body.save!.payload) as CachedSave
-  // 心跳会续租并写回更新的控制账本，不能要求整份 JSON 与旧响应精确相等。
-  // 没有其它玩家消费动作：资源不可比本次快照少，实例也必须全部保留。
-  await expect.poll(async () => {
-    const cached = await cachedSaveOf(page, accountId)
-    if (!cached || (cached.savedAt ?? 0) < body.save!.savedAt) return false
-    for (const [key, value] of Object.entries(snapshot.player ?? {})) {
-      if (typeof value === 'number' && ((cached.player as Record<string, number> | undefined)?.[key] ?? -1) < value) return false
-    }
-    return (snapshot.relics ?? []).every((relic) => cached.relics?.some((r) =>
-      r.uid === relic.uid && r.defId === relic.defId && r.level === relic.level))
-  }, { timeout: 10_000 }).toBe(true)
-  expect(body.result, '挂机应返回结算明细').toBeTruthy()
-  return body.result as IdleActionResult
+  expect(response.ok(), `动作 ${type} 的请求应成功到达服务端`).toBe(true)
+  const body = (await response.json()) as ActionResponse
+  if (expectOk) expect(body.ok, body.message ?? `动作 ${type} 失败`).toBe(true)
+  return body
+}
+
+/**
+ * 收下「离线挂机结算」弹窗（没有就什么都不做）。
+ *
+ * ⚠ 标题是「离线挂机结算」（v11 改成**三通道分段**），
+ *   旧的「离线推征结算」文案已随挂机改版一起退役。
+ */
+export async function dismissOfflineReport(page: Page): Promise<void> {
+  const dialog = page.getByTestId('offline-settlement')
+  const shown = await dialog
+    .waitFor({ state: 'visible', timeout: 2500 })
+    .then(() => true)
+    .catch(() => false)
+  if (!shown) return
+  await dialog.getByRole('button', { name: '收下', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+}
+
+/**
+ * **领取挂机收益**（推征页唯一的「全部领取」入口）。
+ *
+ * ⚠ 挂机改版 v11 的关键差异：
+ *   - 动作是 `idle.tick`，**不带任何负载**——次数由服务端的**时间账本**决定，
+ *     客户端**不能**创造时间（旧实现的「推征 N 场」按钮已下线）；
+ *   - 结果是**三通道分段**（`channels[]`），不是单个 `rewards`。
+ *
+ * ⚠ 必须**真实等时间**：一次掷奖 = `IDLE.SECONDS_PER_ROLL` 秒。
+ *   在线时长按 `IDLE.ONLINE_MULTIPLIER` 倍率计量，所以实际比 1:1 快，
+ *   但「没等就领」必然是 0 次——这里按掷奖节奏等待并重试。
+ *
+ * @param minRolls 本次至少要拿到的掷奖次数（默认 1）
+ */
+export async function claimIdleThroughUi(
+  page: Page,
+  options: { minRolls?: number; timeoutMs?: number } = {},
+): Promise<IdleActionResult> {
+  const minRolls = options.minRolls ?? 1
+  const timeoutMs = options.timeoutMs ?? 120_000
+  const deadline = Date.now() + timeoutMs
+
+  const claim = page.getByTestId('idle-claim-all')
+  const onExpedition = await claim
+    .waitFor({ state: 'visible', timeout: 3000 })
+    .then(() => true)
+    .catch(() => false)
+  if (!onExpedition) {
+    await page.goto('/#/expedition')
+    await page.waitForLoadState('networkidle')
+  }
+  await expect(claim).toBeVisible()
+  await dismissOfflineReport(page)
+
+  let last: IdleActionResult | null = null
+  while (Date.now() < deadline) {
+    // 真实等一个掷奖节奏（挂机不创造时间）
+    await page.waitForTimeout(IDLE.SECONDS_PER_ROLL * 1000)
+    const responsePromise = page.waitForResponse((response) => {
+      if (response.request().method() !== 'POST') return false
+      if (new URL(response.url()).pathname !== '/api/action') return false
+      const request = response.request().postDataJSON() as ActionRequest | null
+      return request?.action?.type === 'idle.tick'
+    })
+    await claim.click()
+    const response = await responsePromise
+    expect(response.ok(), '挂机请求应成功到达真实服务端').toBe(true)
+    const body = (await response.json()) as ActionResponse
+    expect(body.ok, body.message ?? '挂机动作失败').toBe(true)
+    last = body.result as IdleActionResult
+    if ((last?.rolls ?? 0) >= minRolls) return last
+  }
+  throw new Error(`挂机未攒够 ${minRolls} 次掷奖（最后一次 ${last?.rolls ?? 0} 次）`)
 }
 
 /** 本地缓存里常用的一小片字段 */
@@ -286,6 +376,21 @@ export interface CachedSave {
   heroes?: Record<string, { level: number; exp: number }>
   /** 主线进度（副本**不写**这里 → 分开记账的判据） */
   campaign?: { clearedStage: number; chapterProgress?: number }
+  /**
+   * 挂机账本（**三条通道各自独立**，挂机改版 v11）。
+   *
+   * ⚠ 主线通道的 `stageId = null` = 「跟随最新通关关卡」。
+   */
+  idle?: {
+    channels: {
+      main: { target: { kind: 'main'; stageId: number | null } | null }
+      skill: { target: { kind: 'skill'; dungeonStageId: string } | null }
+      enhance: { target: { kind: 'enhance'; dungeonStageId: string } | null }
+    }
+    totalIdleSeconds?: number
+  }
+  /** 副本通关记录（与主线分开记账） */
+  dungeons?: { cleared: Record<string, boolean> }
   relics?: Array<{ defId: string; uid: string; level: number }>
   equipped?: Record<string, { heroId: string }>
   settings?: { speed?: number }
@@ -324,11 +429,11 @@ export interface ServerRelicPage {
  * 仓库总件数（铸造页上显示的是**服务端**统计）。
  *
  * ⚠ 存档分包后，客户端镜像里**只有已装备遗物**（≤36 件），
- *   「仓库里有几件」不能看本地缓存——那会永远显示 0 或几十。
+ * 「仓库里有几件」不能看本地缓存——那会永远显示 0 或几十。
  *
  * ⚠ 刷新方式必须是「换一个路由再回来」，不能 `page.reload()`：
  *   整页重载会触发 `GET /api/save`，服务端趁这次载入补算挂机收益
- *   → 仓库件数凭空多出几件，「这一轮掉了几件」的对账就算不准了。
+ *   → 仓库/背包件数凭空多出几件，「这一轮掉了几件」的对账就算不准了。
  *   同理也不能 goto 到**当前就在的**那个 hash（可能整页重载）。
  */
 export async function relicTotal(page: Page): Promise<number> {

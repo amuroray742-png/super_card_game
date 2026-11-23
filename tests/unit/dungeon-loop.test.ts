@@ -1,18 +1,22 @@
 /**
- * **材料副本刷取口径**的守护（节奏模拟 × 副本产出的唯一出处）。
+ * **副本 / 挂机通道刷取口径**的守护（节奏模拟 × 副本产出的唯一出处）。
  *
- * ⚠ 守的是什么：
+ * ⚠ 守的是什么（挂机改版 v11 · 三通道并行模型）：
  *   1. **需求侧**：技能材料按五行分列、强化石按档位分列，
  *      数值口径取 core（等级上限 / 每级消耗 / 逐级真实价格）。
- *   2. **策略**：按「一夜能换多少战力」分配挂机时间；
- *      并且**不能死锁**——银两不够就不去刷副本（副本只发材料不发银两），
- *      境界门槛上主线是唯一出路（突破要银两）。
- *   3. **时间账本**：去向是**存档状态**，切换时先按**旧去向**结清。
+ *   2. **通道决策**：三条通道**同时跑**，各自选自己的目标——
+ *      主线跟随最新通关关卡；技能 / 强化各自选「该变体打得赢的最高一关」。
+ *      ⚠ 旧模型是「三选一分配一份时间」，新模型**不再分配**——
+ *        所以断言也从「只能选一个去向」改成「每条通道各自有目标或为空」。
+ *   3. **银两瓶颈**：副本只发材料不发银两 ⇒ 银两不够就不能开副本通道，
+ *      否则玩家会在副本里空转（历史上模拟在这条上死锁过）。
+ *   4. **副本目标必须已通关**：挂机只挂已通关内容（设计稿 §3.1）——
+ *      没通关但打得赢的那一关，要出现在 `challenges` 里（需要先手动挑战）。
  *
  * ⚠ 口径只有一份：`tools/balance/dungeon-loop.ts`
  *   （铁律 #4：工具与单测不得各写一套）。
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { createNewSave } from '../../src/core/save/schema.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
@@ -21,10 +25,19 @@ import { applyAction, type ActionContext } from '../../src/core/systems/actions.
 import { SKILL, RELIC } from '../../src/core/config/economy.ts'
 import { relicMainMultiplier } from '../../src/core/systems/relic.ts'
 import { ITEM_BY_ELEMENT } from '../../src/core/config/items.ts'
+import {
+  DUNGEON_STAGES,
+  dungeonStageById,
+  type DungeonStageDef,
+} from '../../src/core/config/dungeons.ts'
 import { makeTestRelic } from './helpers.ts'
 import {
-  applyIdleTarget,
-  decideIdleTarget,
+  applyChannels,
+  applyChannel,
+  bestDungeonStage,
+  bestIdleDungeonStage,
+  decideChannels,
+  dungeonExpectedYield,
   equippedRelicLevel,
   referenceRelicLevel,
   referenceSkillLevel,
@@ -36,8 +49,8 @@ import {
 import type { SaveData } from '../../src/core/model/types.ts'
 
 const NOW = 1_700_000_000_000
-/** 「一夜」的场次（与 recalibrate 的挂机日同量级） */
-const NIGHT_BATTLES = 1560
+/** 「一夜」的掷奖次数（与 recalibrate 的挂机日同量级） */
+const NIGHT_ROLLS = 1560
 /** 两名土系 SSR（真实英灵 id） */
 const TEAM = ['xiangyu', 'hannibal']
 
@@ -72,8 +85,36 @@ function makeSave(level = 50): SaveData {
     '0': { heroId: TEAM[0], relicId: relics[0].uid },
     '1': { heroId: TEAM[1], relicId: relics[1].uid },
   }
-  save.idle.target = { kind: 'campaign' }
+  // ⚠ 挂机改版 v11：主线通道**跟随最新通关关卡**（`stageId = null`）。
+  save.idle.channels.main.target = { kind: 'main', stageId: null }
   return save
+}
+
+/**
+ * 把所有副本关卡的**战力门槛**临时压到 1（标定无关）。
+ *
+ * ⚠ 为什么需要它：副本关卡的门槛是**标定值**（`DUNGEON.POWER_ANCHORS`），
+ *   每次重标定都会变 ⇒ 用「关卡是否可选」当断言会随标定漂移。
+ *   这里把门槛压到 1，让「选中哪一关」只取决于**通关记录**，
+ *   断言才稳定。测完立刻还原（`afterEach`）。
+ */
+const touchedStages: DungeonStageDef[] = []
+function makeAllStagesWinnable(): void {
+  for (const stage of DUNGEON_STAGES) {
+    touchedStages.push(stage)
+    stage.powerRequired = 1
+  }
+}
+afterEach(() => {
+  for (const stage of touchedStages) {
+    stage.powerRequired = DUNGEON_STAGES.length > 0 ? stage.powerRequired : stage.powerRequired
+  }
+  touchedStages.length = 0
+})
+
+/** 把指定关卡标记为已通关（挂机目标必须是已通关内容） */
+function markCleared(save: SaveData, stageId: string): void {
+  save.dungeons.cleared[stageId] = true
 }
 
 describe('副本口径：需求侧', () => {
@@ -105,77 +146,98 @@ describe('副本口径：需求侧', () => {
   })
 })
 
-describe('副本口径：去向策略', () => {
-  it('材料不缺 → 回主线（副本不写 campaign，进度不能停）', () => {
+describe('副本口径：三通道并行（不再分配一份时间）', () => {
+  it('主线通道默认是「跟随最新通关关卡」', () => {
     const save = makeSave(50)
-    // 技能已满、遗物已到初阶石档的上限 ⇒ 没有值得刷的材料
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    expect(decision.plans.main).toEqual({ kind: 'main', stageId: null })
+  })
+
+  it('技能已满 ⇒ 技能通道关闭（没有值得刷的缺口）', () => {
+    const save = makeSave(50)
     save.heroes.xiangyu.skillLevels = [20, 20, 20]
     save.heroes.hannibal.skillLevels = [20, 20, 20]
-    for (const relic of save.relics) relic.level = 60
     save.player.silver = 1_000_000
-    const plan = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES).plan
-    expect(plan.kind).toBe('campaign')
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    expect(decision.plans.skill).toBeNull()
   })
 
-  it('技能材料是瓶颈且银两够 → 去技能副本（缺口最大的那一行）', () => {
-    const save = makeSave(50)
-    save.player.silver = 1_000_000
-    save.items[ITEM_BY_ELEMENT.土] = 0
-    const decision = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES)
-    expect(decision.plan.kind).toBe('skill')
-    expect(decision.plan.element).toBe('土')
-  })
-
-  it('⚠ 银两不够时不去刷副本（副本只发材料不发银两 ⇒ 会死锁）', () => {
+  it('⚠ 银两不够时不开技能通道（副本只发材料不发银两 ⇒ 会死锁）', () => {
     const save = makeSave(50)
     // 技能差得很多 ⇒ 边际收益高，但银两是 0 ⇒ 材料到了也花不出去
     save.player.silver = 0
     save.items[ITEM_BY_ELEMENT.土] = 0
-    const plan = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES).plan
-    expect(plan.kind).toBe('campaign')
-  })
-
-  it('⚠ 境界门槛上主线是唯一出路（突破要银两，银两只有主线给）', () => {
-    const save = makeSave(60) // 凡阶末尾 ⇒ 卡门槛
-    save.player.silver = 1_000_000
-    save.items[ITEM_BY_ELEMENT.土] = 0
-    const decision = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES)
-    expect(decision.plan.kind).toBe('campaign')
-    expect(decision.gains.campaign).toBe(Number.POSITIVE_INFINITY)
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    expect(decision.plans.skill).toBeNull()
+    expect(decision.gains.skill).toBe(0)
   })
 
   it('未解锁的副本不会被选（不替玩家开挂）', () => {
     const save = createNewSave(NOW, 7)
     // 没有英灵 ⇒ 技能副本全锁；也没有遗物 ⇒ 强化副本全锁
-    const plan = decideIdleTarget(save, makeCtx(), [], 'easy', NIGHT_BATTLES).plan
-    expect(plan.kind).toBe('campaign')
+    const decision = decideChannels(save, makeCtx(), [], NIGHT_ROLLS)
+    expect(decision.plans.skill).toBeNull()
+    expect(decision.plans.enhance).toBeNull()
   })
 
-  it('强化石是瓶颈时去强化副本，石档 = 下一次升级要用的那一档', () => {
+  it('技能通道选中缺口最大的那一行（土系）', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(50)
+    save.player.silver = 1_000_000
+    save.items[ITEM_BY_ELEMENT.土] = 0
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    expect(decision.skillElement).toBe('土')
+    expect(decision.plans.skill).not.toBeNull()
+  })
+
+  it('强化通道：石档 = 下一次升级要用的那一档', () => {
+    makeAllStagesWinnable()
     const save = makeSave(50)
     save.player.silver = 1_000_000
     // 技能已满 ⇒ 技能不是瓶颈
     save.heroes.xiangyu.skillLevels = [20, 20, 20]
     save.heroes.hannibal.skillLevels = [20, 20, 20]
-    // 遗物只有 Lv1 ⇒ 石头是瓶颈
-    const plan = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES).plan
-    expect(plan.kind).toBe('enhance')
-    expect(plan.tier).toBe('relicStoneTier1')
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    expect(decision.enhanceTier).toBe('relicStoneTier1')
+    expect(decision.plans.enhance).not.toBeNull()
   })
 
-  it('三个去向的增益是可比的 ln 口径', () => {
+  it('⚠ 银两不够时不开强化通道', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(50)
+    save.player.silver = 0
+    save.heroes.xiangyu.skillLevels = [20, 20, 20]
+    save.heroes.hannibal.skillLevels = [20, 20, 20]
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    expect(decision.plans.enhance).toBeNull()
+  })
+
+  it('⚠ 境界门槛上主线增益 = ∞（但**不关掉**另外两条通道）', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(60) // 凡阶末尾 ⇒ 卡门槛
+    save.player.silver = 1_000_000
+    save.items[ITEM_BY_ELEMENT.土] = 0
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    expect(decision.gains.campaign).toBe(Number.POSITIVE_INFINITY)
+    // ⚠ 三通道并行 ⇒ 门槛只抬高主线的价值，不夺走副本通道
+    expect(decision.plans.skill).not.toBeNull()
+  })
+
+  it('三条通道的增益都是可比的 ln 口径', () => {
+    makeAllStagesWinnable()
     const save = makeSave(50)
     save.player.silver = 1_000_000
-    const decision = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES)
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
     expect(decision.gains.campaign).toBeGreaterThan(0)
     expect(decision.gains.skill).toBeGreaterThanOrEqual(0)
     expect(decision.gains.enhance).toBeGreaterThanOrEqual(0)
   })
 
   it('⚠ 技能增益按「人均」折算（不是全队合计）', () => {
+    makeAllStagesWinnable()
     const save = makeSave(50)
     save.player.silver = 160_000
-    const decision = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES)
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
     // 两名土系英灵 × 3 技能 × (Lv50 上限 20 − 当前 1) = 114 级 ⇒ 人均 57 级 × 每级 2%
     expect(decision.gains.skill).toBeCloseTo(
       (114 / TEAM.length) * SKILL.PCT_PER_LEVEL,
@@ -184,10 +246,11 @@ describe('副本口径：去向策略', () => {
   })
 
   it('⚠ 银两不够时，技能增益按「买得起的级数」算', () => {
+    makeAllStagesWinnable()
     const save = makeSave(50)
     // 只够买 20 级（16,000 ÷ 800）——材料够也不该虚增
     save.player.silver = 16_000
-    const decision = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES)
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
     expect(decision.gains.skill).toBeCloseTo(
       (20 / TEAM.length) * SKILL.PCT_PER_LEVEL,
       6,
@@ -195,11 +258,12 @@ describe('副本口径：去向策略', () => {
   })
 
   it('⚠ 强化增益按「已装备遗物的英灵占比」折算', () => {
+    makeAllStagesWinnable()
     const save = makeSave(50)
     save.heroes.xiangyu.skillLevels = [20, 20, 20]
     save.heroes.hannibal.skillLevels = [20, 20, 20]
     save.player.silver = 1_000_000
-    const decision = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES)
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
     // 两名英灵都穿遗物 ⇒ 占比 1.0 ⇒ 增益 = ln(倍率比)
     const avg = equippedRelicLevel(save)
     const levels = Math.min(
@@ -210,6 +274,55 @@ describe('副本口径：去向策略', () => {
       Math.log(relicMainMultiplier(avg + levels) / relicMainMultiplier(avg)),
       6,
     )
+  })
+})
+
+describe('副本口径：目标必须是已通关的', () => {
+  it('bestDungeonStage 只看战力门槛（可以还没通关）', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(50)
+    const choice = bestDungeonStage('skillEarth', save, makeCtx())
+    expect(choice).not.toBeNull()
+    // 同一变体里「打得赢的最高一关」= 难度最高的那一关
+    const all = DUNGEON_STAGES.filter((s) => s.variantId === 'skillEarth')
+    expect(choice?.stageId).toBe(all[all.length - 1].id)
+  })
+
+  it('bestIdleDungeonStage 只返回**已通关**的关卡', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(50)
+    expect(bestIdleDungeonStage('skillEarth', save, makeCtx())).toBeNull()
+    const target = DUNGEON_STAGES.filter((s) => s.variantId === 'skillEarth')[0]
+    markCleared(save, target.id)
+    const choice = bestIdleDungeonStage('skillEarth', save, makeCtx())
+    expect(choice?.stageId).toBe(target.id)
+  })
+
+  it('⚠ 打得赢但没通关 ⇒ 进 `challenges`（要先手动挑战才能挂）', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(50)
+    save.player.silver = 1_000_000
+    const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    expect(decision.plans.skill).not.toBeNull()
+    expect(decision.challenges).toContain(decision.plans.skill)
+  })
+
+  it('已通关的那一关不再进 `challenges`（不用重复挑战）', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(50)
+    save.player.silver = 1_000_000
+    // 先跑一次决策拿到目标，再标记通关 ⇒ 第二次决策不该再要求挑战
+    const first = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    markCleared(save, first.plans.skill!)
+    const second = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
+    expect(second.challenges).not.toContain(first.plans.skill)
+  })
+
+  it('副本产量按关卡自己的产量区间算（挂机不跑战斗 ⇒ 与难度无关地取 drop）', () => {
+    const stage = DUNGEON_STAGES[0]
+    const expected = Math.round(((stage.drop.min + stage.drop.max) / 2) * 100)
+    expect(dungeonExpectedYield(stage.id, 100)).toBe(expected)
+    expect(dungeonExpectedYield('不存在的关卡', 100)).toBe(0)
   })
 })
 
@@ -231,38 +344,114 @@ describe('副本口径：参考曲线与当前进度', () => {
   })
 })
 
-describe('副本口径：时间账本（去向是存档状态）', () => {
-  it('切换去向前先按旧去向结清：旧去向的场次先跑掉', () => {
+describe('副本口径：时间账本（三通道各自独立）', () => {
+  it('切换通道前先按旧目标结清：旧通道的次数先跑掉', () => {
+    makeAllStagesWinnable()
     const save = makeSave(50)
     const start = NOW
-    save.idle.measuredAt = start
-    save.lastTickAt = start
+    // ⚠ 主线跟随模式取 `campaign.clearedStage`；**首胜前（=0）没有可挂的目标**，
+    //   那时主线通道不计量、不产出 ⇒ 要测「结清旧目标」必须先打通至少一关。
+    save.campaign.clearedStage = 3
+    save.idle.channels.main.measuredAt = start
     const ctx = makeCtx(start + 2 * 3_600_000)
-    // 先让账本积累 2 小时，再切到副本
+    // 让主线账本积累 2 小时，再把主线通道从「跟随」改成「指定第 3 关」
     const res = applyAction(
       save,
-      { type: 'idle.setTarget', kind: 'skill', element: '土', difficulty: 'easy' },
+      { type: 'idle.setChannel', channel: 'main', stageId: 3 },
       ctx,
     )
     expect(res.ok).toBe(true)
-    // 旧去向（主线）的收益已入账，账本清零
+    if (!res.ok) return
+    // 旧目标（跟随第 3 关）的收益已入账，并随响应回传
+    expect(res.result.settled.length).toBeGreaterThan(0)
+    expect(res.result.settled[0].channel).toBe('main')
     expect(save.player.silver).toBeGreaterThan(0)
-    expect(save.idle.effectiveMs).toBe(0)
-    expect(save.idle.target).toEqual({ kind: 'skill', element: '土', difficulty: 'easy' })
+    expect(save.idle.channels.main.target).toEqual({ kind: 'main', stageId: 3 })
   })
 
-  it('去向没变时不重设（保住主线的回退刷取状态）', () => {
+  it('⚠ 切换一条通道**只结清那一条**（另外两条的预算不受影响）', () => {
+    makeAllStagesWinnable()
     const save = makeSave(50)
-    // 前置：材料不缺 ⇒ 决策本来就该是主线（否则会拿到技能副本，测的就不是「没变」）
-    save.heroes.xiangyu.skillLevels = [20, 20, 20]
-    save.heroes.hannibal.skillLevels = [20, 20, 20]
-    save.relics[0].level = 60
+    save.campaign.clearedStage = 3
+    const start = NOW
+    save.idle.channels.main.measuredAt = start
+    save.idle.channels.main.effectiveMs = 0
+    const stage = DUNGEON_STAGES.filter((s) => s.variantId === 'skillEarth')[0]
+    markCleared(save, stage.id)
+    const ctx = makeCtx(start + 2 * 3_600_000)
+    const res = applyAction(
+      save,
+      { type: 'idle.setChannel', channel: 'skill', dungeonStageId: stage.id },
+      ctx,
+    )
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    // 技能通道原本没有目标 ⇒ 没有可结清的旧产出
+    expect(res.result.settled).toHaveLength(0)
+    // ⚠ 主线通道的账本**原封不动**：水位没推进、预算没被动
+    //   （`settleIdleChannels` 的 `only` 只走被指定的那一条通道）
+    expect(save.idle.channels.main.measuredAt).toBe(start)
+    expect(save.idle.channels.main.effectiveMs).toBe(0)
+  })
+
+  it('目标没变时不重设（不重复结清、不清空预算）', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(50)
     save.player.silver = 1_000_000
-    save.idle.farm = { stage: 3, winsUntilRetry: 2 }
-    const plan = decideIdleTarget(save, makeCtx(), TEAM, 'easy', NIGHT_BATTLES).plan
-    expect(plan.kind).toBe('campaign')
-    // 目标本来就是主线 ⇒ 不该重设（`idle.setTarget` 会清掉 farm 状态）
-    applyIdleTarget(save, makeCtx(), plan)
-    expect(save.idle.farm).toBeTruthy()
+    const stage = DUNGEON_STAGES.filter((s) => s.variantId === 'skillEarth')[0]
+    markCleared(save, stage.id)
+    const ctx = makeCtx()
+    applyChannel(save, ctx, 'skill', { kind: 'skill', dungeonStageId: stage.id })
+    const res = applyAction(
+      save,
+      { type: 'idle.setChannel', channel: 'skill', dungeonStageId: stage.id },
+      ctx,
+    )
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    // 相同目标 = 无操作：没有结清明细
+    expect(res.result.settled).toHaveLength(0)
+  })
+
+  it('开一条通道不影响另外两条的预算', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(50)
+    const stage = DUNGEON_STAGES.filter((s) => s.variantId === 'skillEarth')[0]
+    markCleared(save, stage.id)
+    const ctx = makeCtx()
+    save.idle.channels.main.effectiveMs = 60_000
+    applyChannel(save, ctx, 'skill', { kind: 'skill', dungeonStageId: stage.id })
+    // 主线预算原封不动
+    expect(save.idle.channels.main.effectiveMs).toBe(60_000)
+    // 强化通道没被碰过
+    expect(save.idle.channels.enhance.target).toBeNull()
+  })
+
+  it('三通道目标一次应用成功', () => {
+    makeAllStagesWinnable()
+    const save = makeSave(50)
+    save.player.silver = 1_000_000
+    const skillStage = DUNGEON_STAGES.filter((s) => s.variantId === 'skillEarth')[0]
+    markCleared(save, skillStage.id)
+    const ok = applyChannels(save, makeCtx(), {
+      main: { kind: 'main', stageId: null },
+      skill: skillStage.id,
+      enhance: null,
+    })
+    expect(ok).toBe(true)
+    expect(save.idle.channels.skill.target).toEqual({
+      kind: 'skill',
+      dungeonStageId: skillStage.id,
+    })
+    expect(save.idle.channels.main.target).toEqual({ kind: 'main', stageId: null })
+  })
+})
+
+describe('副本口径：索引函数', () => {
+  it('关卡 id 与登记函数一致', () => {
+    for (const stage of DUNGEON_STAGES) {
+      expect(stage.id).toBe(`dgn_${stage.variantId}_${stage.difficulty}`)
+      expect(dungeonStageById(stage.id)?.id).toBe(stage.id)
+    }
   })
 })

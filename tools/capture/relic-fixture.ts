@@ -1,14 +1,19 @@
 /**
  * 遗物 / 背包截图用的前置存档（造数据 → 走服务端动作层导入）。
  *
- * ## 为什么是「导入前置」而不是「挂机攒遗物」
+ * ## 为什么是「导入前置」而不是「祈愿抽遗物」
  *
- * 遗物只从推征（挂机）与离线结算产出，而挂机一场要**真实等时间**
- * （`BATTLE.SECONDS_PER_BATTLE` = 6 秒/场）。截图脚本原来点 3 次「推征 10 场」
- * 就等遗物出现，但按钮上的「10 场」只是**领取上限**，客户端不创造时间：
- * 三次点击累计的时间连一场都不够 → 仓库仍然是空的 → `.relic-cell` 永远等不到
- * （`tests/e2e/relic.spec.ts` 的 `collectRelics()` 为此写了 180 秒重试循环，
- * 截图脚本没有这一层）。
+ * ⚠ **挂机改版 v11**：遗物**已移出掉落表**，唯一来源是独立入口「遗物祈愿」
+ *   （`relic.acquire`，`RELIC_ACQUIRE.SILVER_COST` = 5000 银两 + 权重抽取）。
+ *   一次祈愿只出 1 件 → 要凑齐 12 套 × 5 件 = 60 件，得祈愿 60 次
+ *   （30 万银两 + 60 次请求，且抽出的是**随机稀有度**，不是 12 套各 5 件）。
+ *   截图要验的是「图标齐不齐 / 套装档位显不显眼」，不是抽卡运气 ⇒ 只能造数据。
+ *
+ *   （旧版靠挂机攒遗物：挂机一次要**真实等时间**（`IDLE.SECONDS_PER_ROLL`），
+ *   「推征 10 场」的 10 只是**领取上限**，客户端不创造时间——
+ *   三次点击累计的时间连一次都不够 → 仓库仍然是空的 → `.relic-cell` 永远等不到。
+ *   `tests/e2e/relic.spec.ts` 的 `collectRelics()` 为此写了 180 秒重试循环，
+ *   截图脚本没有这一层。）
  *
  * 现在改用**玩家可用的 `save.import` 动作**导入前置存档——
  * 与 `tests/e2e/authority.spec.ts` 造前置同一口径（走服务端动作层，不碰数据库）：
@@ -24,7 +29,6 @@ import { createHeroState } from '../../src/core/systems/growth.ts'
 import { RELIC_INDEX } from '../../src/core/config/relics.ts'
 import { RELIC_STONE_ITEM_BY_TIER, ITEM_BY_ELEMENT } from '../../src/core/config/items.ts'
 import { RELIC } from '../../src/core/config/economy.ts'
-import { STAGES } from '../../src/core/config/stages.ts'
 import type { RelicInstance, SaveData } from '../../src/core/model/types.ts'
 
 /**
@@ -76,8 +80,10 @@ export function buildRelicFixture(now = Date.now()): SaveData {
 
   save.campaign.clearedStage = 0
   save.campaign.chapterProgress = 1
-  save.idle.currentStage = STAGES[0].id
-  save.idle.autoAdvance = false
+  // ⚠ **挂机改版 v11**：主线通道**跟随最新通关关卡**（`stageId = null`）。
+  //   首胜前（`clearedStage = 0`）没有可挂的目标 ⇒ 通道不计量、不产出，
+  //   但页面要能正常显示「跟随最新通关关卡」的状态。
+  save.idle.channels.main.target = { kind: 'main', stageId: null }
 
   return save
 }

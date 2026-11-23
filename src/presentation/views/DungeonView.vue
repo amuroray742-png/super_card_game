@@ -1,43 +1,45 @@
 <script setup lang="ts">
 /**
- * 材料副本（技能副本 / 强化副本）。
+ * 材料副本（技能副本 / 强化副本）——**24 个独立关卡**（挂机改版 v11）。
  *
- * ## 定位
+ * ## 副本是独立关卡
  *
- * 副本是**两类材料的唯一来源**（设计稿 §3）：
- *   - 技能副本：产出对应五行的技能材料；
- *   - 强化副本：产出对应档位的强化石。
+ * `(变体 × 难度) = 1 关`，共 5 技能变体 × 3 难度 + 3 强化变体 × 3 难度 = **24 关**。
+ * 每关有自己的敌人组合、缩放锚点、战力门槛与产量，**打赢一次即通关**。
+ * 不再借用主线波次（设计稿 D9 / F14）。
  *
- * 副本**共用挂机时间账本**：在首页选一个去向（主线 / 技能 / 强化），
- * 本页负责「选变体 + 选难度 + 设为挂机去向」。
+ * ## 挂机
+ *
+ * 副本是**两条挂机通道之一**（技能 / 强化），与主线**各自独立**计量。
+ * 只有**已通关**的副本关卡才能设为挂机目标（挂机只挂已通关内容）。
  *
  * ⚠ **规则一律取 core**（铁律 #2 / #4）：
- *   - 变体与产出 → `core/config/dungeons.ts`；
- *   - 难度与产量 → `core/config/economy.ts` 的 `DUNGEON_DIFFICULTIES` / `DUNGEON_DROPS`；
+ *   - 关卡定义 → `core/config/dungeons.ts`；
  *   - 解锁判定 → `core/systems/dungeons.ts` 的 `dungeonUnlocked`。
  */
-import { computed, onMounted } from 'vue'
+import { computed, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import {
-  DUNGEON_VARIANTS,
-  dungeonDropAmount,
-  dungeonVariantLabel,
+  DUNGEON_DIFFICULTY_ORDER,
+  DUNGEON_INDEX,
+  DUNGEON_VARIANT_ORDER,
+  dungeonStagesOf,
+  findDungeonVariant,
   type DungeonKind,
-  type DungeonVariant,
+  type DungeonStageDef,
 } from '../../core/config/dungeons.ts'
-import { DUNGEON_DIFFICULTIES, type DungeonDifficultyId } from '../../core/config/economy.ts'
-import { dungeonUnlocked } from '../../core/systems/dungeons.ts'
+import { DUNGEON_DIFFICULTIES, type RelicStoneTierId } from '../../core/config/economy.ts'
+import type { Element } from '../../core/model/types.ts'
+import { dungeonStageUnlocked } from '../../core/systems/dungeons.ts'
 import { ITEM_DEFS } from '../../core/config/items.ts'
 import { resourceIconPath } from '../../core/config/art.ts'
-import { formatNumber } from '../utils/format'
-import type { Element } from '../../core/model/types.ts'
+import { formatNumber, formatPower } from '../utils/format'
+import ChallengeReplay from '../components/ChallengeReplay.vue'
 
 const store = useGameStore()
 const route = useRoute()
 const router = useRouter()
-
-const ELEMENTS: Element[] = ['金', '木', '水', '火', '土']
 
 function queryValue(key: string): string | undefined {
   const raw = route.query[key]
@@ -45,28 +47,43 @@ function queryValue(key: string): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
-/** 副本种类 */
+/** 副本种类（tab） */
 const kind = computed<DungeonKind>(() => (queryValue('kind') === 'enhance' ? 'enhance' : 'skill'))
 
-/** 难度 */
-const difficulty = computed<DungeonDifficultyId>(() => {
-  const raw = queryValue('difficulty')
-  return DUNGEON_DIFFICULTIES.some((d) => d.id === raw) ? (raw as DungeonDifficultyId) : 'easy'
+/**
+ * **深链指定的变体**（背包页「去副本」会带 `?element=…` / `?tier=…`）。
+ *
+ * ⚠ 解析走 core 的 `findDungeonVariant`（唯一出处，铁律 #3 / #8）——
+ *   表现层不得自己拼变体 id。
+ *
+ * 命中时该变体的关卡**高亮并滚到视野内**：点「去副本」要真的看到对应关卡，
+ * 否则「入口可达」只是 URL 变了（铁律 #27 的反面）。
+ */
+const focusVariant = computed(() => {
+  const variant = findDungeonVariant(
+    kind.value,
+    queryValue('element') as Element | undefined,
+    queryValue('tier') as RelicStoneTierId | undefined,
+  )
+  return variant?.id ?? null
 })
 
-/** 当前种类下的变体清单 */
-const variants = computed(() => DUNGEON_VARIANTS.filter((v) => v.kind === kind.value))
+/** 当前种类下的全部关卡（按难度段 × 变体排列） */
+const stages = computed(() => dungeonStagesOf(kind.value))
 
-/** 当前选中的变体（由 URL 的 element / tier 决定） */
-const selectedVariant = computed<DungeonVariant | null>(() => {
-  const list = variants.value
-  if (kind.value === 'skill') {
-    const el = queryValue('element')
-    return list.find((v) => v.element === el) ?? list[0] ?? null
-  }
-  const tier = queryValue('tier')
-  return list.find((v) => v.tier === tier) ?? list[0] ?? null
-})
+/** 按难度段分组（简易 / 普通 / 困难） */
+const groups = computed(() =>
+  DUNGEON_DIFFICULTY_ORDER.map((difficulty) => ({
+    difficulty,
+    name: DUNGEON_DIFFICULTIES.find((d) => d.id === difficulty)?.name ?? difficulty,
+    stages: stages.value.filter((s) => s.difficulty === difficulty),
+  })),
+)
+
+/** 该副本关卡是否已通关 */
+function isCleared(stage: DungeonStageDef): boolean {
+  return store.save.dungeons.cleared[stage.id] === true
+}
 
 /**
  * 解锁判定（core 独家口径）。
@@ -75,39 +92,26 @@ const selectedVariant = computed<DungeonVariant | null>(() => {
  *   客户端镜像里 `save.relics` 只有**已装备**件（存档分包），
  *   仓库里那件 Lv60 的客户端看不见 → 直接用 `save.relics` 会把
  *   「已解锁」误判成「未解锁」（玩家明明有 Lv60 却点不了按钮）。
- *   服务端的存档里有全仓库遗物，core 会自行从 `save.relics` 取，
- *   客户端则显式传 `relicStats.maxLevel`。
  */
-const unlock = computed(() => {
-  const v = selectedVariant.value
-  if (!v) return null
-  if (v.kind === 'enhance' && !store.relicStatsLoaded) {
-    // 还没读到仓库统计 → 不能给结论（否则会误判成「未解锁」）
+function unlockOf(stage: DungeonStageDef) {
+  const variant = DUNGEON_INDEX.get(stage.variantId)
+  if (!variant) return { unlocked: false, reason: '副本配置异常', hintRoute: 'dungeon' }
+  if (variant.kind === 'enhance' && !store.relicStatsLoaded) {
     return {
       unlocked: false,
       reason: store.offline ? '离线状态下读不到仓库信息' : '正在读取仓库信息…',
       hintRoute: 'forge',
     }
   }
-  return dungeonUnlocked(store.save, v, { maxRelicLevel: store.relicStats.maxLevel })
-})
+  return dungeonStageUnlocked(store.save, stage, { maxRelicLevel: store.relicStats.maxLevel })
+}
 
-/** 各难度的每胜产量 */
-const yields = computed(() => {
-  const v = selectedVariant.value
-  if (!v) return []
-  return DUNGEON_DIFFICULTIES.map((d) => ({
-    id: d.id,
-    name: d.name,
-    chapter: d.chapter,
-    amount: dungeonDropAmount(v, d.id),
-  }))
-})
-
-/** 当前变体的持有量 */
-const owned = computed(() =>
-  selectedVariant.value ? store.save.items[selectedVariant.value.itemId] ?? 0 : 0,
-)
+/** 某条通道当前挂的是不是这一关 */
+function isIdleTarget(stage: DungeonStageDef): boolean {
+  const t = store.save.idle.channels[stage.variantId.startsWith('skill') ? 'skill' : 'enhance'].target
+  if (!t) return false
+  return (t.kind === 'skill' || t.kind === 'enhance') && t.dungeonStageId === stage.id
+}
 
 /**
  * 进页面先拉一次仓库统计。
@@ -117,57 +121,59 @@ const owned = computed(() =>
  */
 onMounted(() => {
   void store.loadRelicStats()
+  void scrollToFocus()
 })
 
-function switchKind(next: DungeonKind) {
-  void router.replace({
-    path: route.path,
-    query: next === 'skill' ? { kind: 'skill', element: '金', difficulty: difficulty.value } : { kind: 'enhance', tier: 'relicStoneTier1', difficulty: difficulty.value },
-  })
-}
-
-function selectVariant(v: DungeonVariant) {
-  void router.replace({
-    path: route.path,
-    query: {
-      kind: v.kind,
-      ...(v.kind === 'skill' ? { element: v.element } : { tier: v.tier }),
-      difficulty: difficulty.value,
-    },
-  })
-}
-
-function selectDifficulty(next: DungeonDifficultyId) {
-  void router.replace({
-    path: route.path,
-    query: {
-      kind: kind.value,
-      ...(selectedVariant.value?.kind === 'skill'
-        ? { element: selectedVariant.value.element }
-        : { tier: selectedVariant.value?.tier }),
-      difficulty: next,
-    },
-  })
-}
-
-/** 设为挂机去向（服务端会先结清旧去向） */
-async function setAsIdleTarget() {
-  const v = selectedVariant.value
-  if (!v) return
-  const res = await store.setIdleTarget(
-    v.kind === 'skill'
-      ? { kind: 'skill', element: v.element as Element, difficulty: difficulty.value }
-      : { kind: 'enhance', tier: v.tier as never, difficulty: difficulty.value },
-  )
-  if (res) {
-    store.notify('挂机去向已切换到本副本', 'ok')
+/** 深链命中变体时，把它的关卡滚到视野内（找不到就什么都不做） */
+async function scrollToFocus(): Promise<void> {
+  if (!focusVariant.value) return
+  await nextTick()
+  const el = document.querySelector<HTMLElement>(`[data-variant="${focusVariant.value}"]`)
+  try {
+    el?.scrollIntoView({ block: 'center' })
+  } catch {
+    // 滚动失败不影响功能（高亮已经标出来了）
   }
+}
+
+function switchKind(next: DungeonKind) {
+  void router.replace({ path: route.path, query: { kind: next } })
+}
+
+/** **手动挑战**一个副本关卡（打赢一次即通关） */
+async function challenge(stage: DungeonStageDef) {
+  if (store.teamEmpty) {
+    store.notify('请先在阵位中编队', 'warn')
+    return
+  }
+  const res = await store.challengeDungeon(stage.id)
+  if (!res) return
+  const itemName = ITEM_DEFS[stage.drop.itemId].name
+  if (res.win) {
+    const amount = res.rewards.items?.[stage.drop.itemId] ?? 0
+    store.notify(
+      res.firstClear ? `首次通关 ${stage.name} · ${itemName} ×${amount}` : `${stage.name} 胜利 · ${itemName} ×${amount}`,
+      'ok',
+    )
+  } else {
+    store.notify(`${stage.name} 挑战失败`, 'warn')
+  }
+}
+
+/** **设为挂机通道**（仅已通关可设；同一通道重复设置 = 无操作，不报错） */
+async function setAsIdleChannel(stage: DungeonStageDef) {
+  const channel = stage.variantId.startsWith('skill') ? 'skill' : 'enhance'
+  const res = await store.setIdleChannel({ channel, dungeonStageId: stage.id })
+  if (res) store.notify(`${channel === 'skill' ? '技能' : '强化'}通道已设为 ${stage.name}`, 'ok')
 }
 </script>
 
 <template>
   <div class="page">
     <div class="page-title">材料副本</div>
+
+    <!-- 手动挑战的战斗回放（服务端执行 → 回放一次性回传 → 这里演出来） -->
+    <ChallengeReplay />
 
     <!-- 种类切换 -->
     <div class="tabs">
@@ -179,100 +185,89 @@ async function setAsIdleTarget() {
       </button>
     </div>
 
-    <!-- 变体清单 -->
-    <section class="panel">
+    <p class="tiny muted" style="margin: 0 0 10px">
+      共 {{ stages.length }} 个独立关卡（难度段 × 变体）。打赢一次即通关；已通关的关卡才能设为挂机通道。
+    </p>
+
+    <!-- 按难度段展示 -->
+    <section v-for="g in groups" :key="g.difficulty" class="panel">
       <div class="panel-title">
-        <span>{{ kind === 'skill' ? '五行技能副本' : '强化石副本' }}</span>
-        <span class="tiny muted">共用同一份挂机时间</span>
+        <span>{{ g.name }}</span>
+        <span class="tiny muted">{{ g.stages.length }} 关</span>
       </div>
-      <div class="chips">
-        <button
-          v-for="v in variants"
-          :key="v.id"
-          class="chip"
-          :class="{ on: selectedVariant?.id === v.id }"
-          :data-testid="`dungeon-variant-${v.id}`"
-          @click="selectVariant(v)"
-        >
-          {{ dungeonVariantLabel(v) }}
-        </button>
-      </div>
-      <p class="tiny muted" style="margin: 6px 0 0">
-        {{ kind === 'skill' ? '五行常驻开放' : '三档定向选择' }}：选好变体后在下方设定难度。
-      </p>
-    </section>
 
-    <!-- 当前副本 -->
-    <section v-if="selectedVariant" class="panel">
-      <div class="row-between">
-        <div class="row" style="gap: 8px">
-          <img
-            class="item-icon"
-            :src="resourceIconPath(ITEM_DEFS[selectedVariant.itemId].iconKey)"
-            :alt="ITEM_DEFS[selectedVariant.itemId].name"
-            width="36"
-            height="36"
-            loading="lazy"
-          />
-          <div>
-            <div style="font-weight: 700">{{ selectedVariant.name }}</div>
-            <div class="tiny muted">产出 {{ ITEM_DEFS[selectedVariant.itemId].name }} · 持有 {{ formatNumber(owned) }}</div>
-          </div>
+      <div
+        v-for="stage in g.stages"
+        :key="stage.id"
+        class="dgn-row"
+        :class="{ hl: focusVariant === stage.variantId }"
+        :data-variant="stage.variantId"
+        :data-testid="`dungeon-stage-${stage.id}`"
+      >
+        <div class="row-between">
+          <b class="tiny">{{ stage.name }}</b>
+          <span class="tag" :class="isCleared(stage) ? 'tag-sr' : ''">
+            {{ isCleared(stage) ? '已通关' : '未通关' }}
+          </span>
         </div>
-        <span class="tag" :class="unlock?.unlocked ? 'tag-sr' : ''">
-          {{ unlock?.unlocked ? '已解锁' : '未解锁' }}
-        </span>
-      </div>
-      <p v-if="unlock && !unlock.unlocked" class="tiny warn-text" style="margin: 8px 0 0">
-        {{ unlock.reason }}
-      </p>
 
-      <!-- 难度 -->
-      <div class="chips" style="margin-top: 10px">
-        <button
-          v-for="d in yields"
-          :key="d.id"
-          class="chip"
-          :class="{ on: difficulty === d.id }"
-          :data-testid="`dungeon-difficulty-${d.id}`"
-          @click="selectDifficulty(d.id)"
-        >
-          {{ d.name }} · 每胜 {{ d.amount.min === d.amount.max ? d.amount.min : `${d.amount.min}~${d.amount.max}` }}
-        </button>
-      </div>
-      <p class="tiny muted" style="margin: 0">
-        难度取材第 {{ DUNGEON_DIFFICULTIES.find((d) => d.id === difficulty)?.chapter }} 章主线关卡，
-        难度越高单场产量越多，但战力门槛也越高。
-      </p>
+        <div class="tiny muted" style="margin-top: 3px">
+          门槛 {{ formatPower(stage.powerRequired) }} · 缩放 ×{{ stage.enemyScale.toFixed(2) }}
+        </div>
 
-      <!-- 设为挂机去向 -->
-      <div class="row" style="gap: 6px; margin-top: 10px">
-        <button
-          class="btn btn-primary btn-sm"
-          style="flex: 1"
-          data-testid="dungeon-set-target"
-          :disabled="!unlock?.unlocked"
-          @click="setAsIdleTarget"
-        >
-          设为挂机去向
-        </button>
-        <button class="btn btn-sm btn-ghost" style="flex: 1" @click="router.push('/expedition')">
-          返回主线
-        </button>
+        <div class="row-between tiny" style="margin-top: 3px">
+          <span class="muted res-label">
+            <img
+              class="item-icon-sm"
+              :src="resourceIconPath(ITEM_DEFS[stage.drop.itemId].iconKey)"
+              :alt="ITEM_DEFS[stage.drop.itemId].name"
+              width="16"
+              height="16"
+            />
+            {{ ITEM_DEFS[stage.drop.itemId].name }}
+          </span>
+          <span class="muted">每胜 {{ stage.drop.min === stage.drop.max ? stage.drop.min : `${stage.drop.min}~${stage.drop.max}` }}</span>
+        </div>
+
+        <div class="tiny muted" style="margin-top: 3px">
+          持有 {{ formatNumber(store.save.items[stage.drop.itemId] ?? 0) }}
+        </div>
+
+        <p v-if="!unlockOf(stage).unlocked" class="tiny warn-text" style="margin: 4px 0 0">
+          {{ unlockOf(stage).reason }}
+        </p>
+
+        <div class="row" style="gap: 6px; margin-top: 6px">
+          <button
+            class="btn btn-sm btn-primary"
+            style="flex: 1"
+            :data-testid="`dungeon-challenge-${stage.id}`"
+            :disabled="!unlockOf(stage).unlocked"
+            @click="challenge(stage)"
+          >
+            {{ isCleared(stage) ? '再次挑战' : '挑战' }}
+          </button>
+          <button
+            class="btn btn-sm btn-ghost"
+            style="flex: 1"
+            :data-testid="`dungeon-set-channel-${stage.id}`"
+            :disabled="!isCleared(stage)"
+            @click="setAsIdleChannel(stage)"
+          >
+            {{ isIdleTarget(stage) ? '已挂机' : '设为挂机通道' }}
+          </button>
+        </div>
       </div>
-      <p class="tiny muted" style="margin: 6px 0 0">
-        切换去向时，服务端会先按<b>旧去向</b>结清这段时间的收益，再开始新的去向。
-      </p>
     </section>
 
     <!-- 说明 -->
     <section class="panel">
       <div class="panel-title"><span>规则</span></div>
       <ul class="rules">
-        <li>副本胜利<b>只</b>发所选的五行材料或石档，不发银两、经验、遗物。</li>
+        <li>副本胜利<b>只</b>发所选的五行材料或石档，不发银两、经验书、遗物。</li>
         <li>副本进度与主线记录<b>分开记账</b>，不会推进主线首通。</li>
-        <li>战败即停本次结算，并给出「降一档难度」的建议。</li>
-        <li>技能材料只用于对应五行的技能升级；强化石只用于对应等级区间的遗物强化。</li>
+        <li>技能通道与强化通道<b>各自独立</b>计量，可与主线同时挂机。</li>
+        <li>只有<b>已通关</b>的关卡才能设为挂机通道（挂机永不卡关）。</li>
       </ul>
     </section>
   </div>
@@ -302,36 +297,27 @@ async function setAsIdleTarget() {
   background: #2a2419;
 }
 
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0;
-}
-
-.chip {
-  padding: 4px 11px;
-  border-radius: 999px;
-  border: 1px solid var(--c-line);
+.dgn-row {
+  margin-top: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
   background: var(--c-bg-2);
-  font-size: 12px;
-  color: var(--c-text-dim);
-  min-height: 28px;
+  border: 1px solid var(--c-line);
 }
 
-.chip.on {
+/* 深链命中的变体（背包页「去副本」跳过来时标出来） */
+.dgn-row.hl {
   border-color: var(--c-gold);
-  color: var(--c-gold-2);
-  background: #2a2419;
+  box-shadow: 0 0 0 1px var(--c-gold) inset;
 }
 
-.item-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
+.item-icon-sm {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
   object-fit: cover;
-  background: #0d0d14;
-  flex: 0 0 auto;
+  vertical-align: -3px;
+  margin-right: 3px;
 }
 
 .rules {

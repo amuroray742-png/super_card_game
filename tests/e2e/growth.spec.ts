@@ -11,13 +11,15 @@ import { HERO_INDEX } from '../../src/core/config/heroes/index.ts'
 import {
   accessTokenOf,
   cachedSaveOf,
+  claimIdleThroughUi,
+  dismissOfflineReport,
   loginAccount,
   postAction,
   registerAccount,
   seedSession,
-  settleIdleThroughUi,
   skipGachaReveal,
   uniqueUsername,
+  waitForAction,
   type CachedSave,
 } from './helpers'
 
@@ -48,10 +50,13 @@ test.setTimeout(180_000)
 
 test.beforeEach(async ({ page }) => {
   // 普通动作也会结算已累积的挂机收益，继续操作前先收下弹窗里的结算。
-  const offlineReport = page.locator('.dialog').filter({ hasText: '离线推征结算' })
-  await page.addLocatorHandler(offlineReport, async (report) => {
-    await report.getByRole('button', { name: '收下', exact: true }).click()
-  })
+  // ⚠ 挂机改版 v11：标题改成「离线挂机结算」（三通道分段）。
+  await page.addLocatorHandler(
+    page.getByTestId('offline-settlement'),
+    async (report) => {
+      await report.getByRole('button', { name: '收下', exact: true }).click()
+    },
+  )
 })
 
 /**
@@ -176,8 +181,11 @@ async function openFirstHeroDetail(page: Page): Promise<void> {
 /**
  * 推征刷经验书，直到背包里的小经验书达到 target。
  *
- * ⚠ 经验书是**主线掉落**进背包的，玩家必须先打过一场才有书可喂。
- *   推征遇到战败会中断（runIdle 遇败即停），所以这里允许「这一轮没涨」再重试。
+ * ⚠ 挂机改版 v11 的两个关键差异：
+ *   1. **主线推进只走手动挑战** ⇒ 首胜前主线通道**没有目标**（跟随模式取
+ *      `campaign.clearedStage`，=0 时不产出）⇒ 必须先手动挑战通关第 1 关。
+ *   2. **挂机不跑战斗**，只是按掉落表掷奖 ⇒ 产出速度由**时间**决定，
+ *      不是由「推征 N 场」决定 ⇒ 这里必须真实等一个掷奖节奏。
  */
 async function farmBooks(
   page: Page,
@@ -187,14 +195,30 @@ async function farmBooks(
 ): Promise<number> {
   await page.goto('/#/expedition')
   await page.waitForLoadState('networkidle')
+  await ensureFirstClear(page)
   let owned = await itemCountOf(page, accountId, EXP_BOOK.small.id)
   const deadline = Date.now() + timeout
   while (owned < target && Date.now() < deadline) {
-    await settleIdleThroughUi(page, accountId)
+    await claimIdleThroughUi(page, { minRolls: 1 })
     owned = await itemCountOf(page, accountId, EXP_BOOK.small.id)
   }
   expect(owned, `真实挂机经验书未达到 ${target}（实际 ${owned}）`).toBeGreaterThanOrEqual(target)
   return owned
+}
+
+/**
+ * 手动挑战通关第 1 关（挂机改版 v11：主线推进的唯一路径）。
+ *
+ * ⚠ 已经通关过就不重复挑战（`campaign-challenge` 按钮在通关后会变成「再次挑战」）。
+ */
+async function ensureFirstClear(page: Page): Promise<void> {
+  const challenge = page.getByTestId('campaign-challenge')
+  if (!(await challenge.isVisible().catch(() => false))) return
+  await waitForAction(page, 'campaign.challenge', {
+    trigger: async () => {
+      await challenge.click()
+    },
+  })
 }
 
 /** 读取本次喂书的权威响应，核对实际扣费与变更后的存档。 */

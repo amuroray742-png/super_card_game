@@ -13,7 +13,8 @@ describe('旧档导入边界', () => {
     ['不安全整数', (s: any) => { s.player.silver = 1e100 }],
     ['未知英灵', (s: any) => { s.heroes.fake = { id: 'fake' } }],
     ['悬空编队', (s: any) => { s.team.slots[0] = 'xiangyu' }],
-    ['未知关卡', (s: any) => { s.idle.currentStage = 99999 }],
+    ['未知关卡', (s: any) => { s.idle.channels.main.target = { kind: 'main', stageId: 99999 } }],
+    ['未知副本关卡', (s: any) => { s.idle.channels.skill.target = { kind: 'skill', dungeonStageId: 'dgn_fake_easy' } }],
     ['错误集合', (s: any) => { s.relics = {} }],
   ])('%s被拒绝且不改存档', (_name, patch) => {
     const save = createNewSave(1000, 7)
@@ -34,7 +35,7 @@ describe('旧档导入边界', () => {
     raw.arena.weeklyMedals = 0
     const outcome = applyAction(save, { type: 'save.import', payload: exportSave(raw) }, { now: 5000, rng: new Rng(7), randomSeed: () => 123 })
     expect(outcome.ok).toBe(true)
-    expect(save.rng).toEqual({ seed: 123, counter: 0 })
+    expect(save.rng).toMatchObject({ seed: 123, counter: 0 })
     expect(save.lastTickAt).toBe(5000)
     expect(save.createdAt).toBe(5000)
     expect(save.daily.lastSignInDay).not.toBe(999999)

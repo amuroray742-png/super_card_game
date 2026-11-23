@@ -13,7 +13,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { BATTLE, GACHA, REBIRTH, START_RESOURCES } from '../../src/core/config/economy.ts'
+import { GACHA, IDLE, REBIRTH, START_RESOURCES } from '../../src/core/config/economy.ts'
 import { getStage } from '../../src/core/config/stages.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
 import { startServerHarness, type ServerHarness } from './helpers/server-harness.ts'
@@ -124,7 +124,7 @@ describe('服务端权威：本地缓存不是权威', () => {
 })
 
 describe('编队战力', () => {
-  it('永久加成让页面战力与挂机一起达到下一关门槛，竞技快照保持一致', async () => {
+  it('挂机**不推进关卡**（改版 v11）：战力达标只影响手动挑战，产出入账照旧', async () => {
     let now = Date.now()
     vi.spyOn(Date, 'now').mockImplementation(() => now)
     const store = await registerAndLoad('team_power')
@@ -132,22 +132,34 @@ describe('编队战力', () => {
     //   门槛随难度锚点重标定而变（roadmap P1-2），窗口也随之移动。
     const hero = { ...createHeroState('xiangyu', now), level: 4 }
     const nextStage = getStage(2)
-    await seedSave((save) => { save.heroes[hero.id] = hero })
+    await seedSave((save) => {
+      save.heroes[hero.id] = hero
+      // ⚠ 挂机改版 v11：主线通道跟随最新通关关卡 ⇒ 先「已通关第 1 关」
+      save.campaign.clearedStage = 1
+    })
 
     expect(store.teamPower).toBeLessThan(nextStage.powerRequired)
     const arenaHash = store.arenaHash
-    now += BATTLE.SECONDS_PER_BATTLE * 1000
-    expect(await store.tickIdle(1)).toMatchObject({ lastClearedStage: 1, nextTargetStage: 1 })
+    now += IDLE.SECONDS_PER_ROLL * 1000 * 3
+    const tick = await store.tickIdle()
+    expect(tick).not.toBeNull()
+    // ⚠ 挂机**只按掉落表掷奖**，不跑战斗 ⇒ 关卡进度**不会**自己往前走
+    expect(store.save.campaign.clearedStage).toBe(1)
+    // 挂机产出照常入账（银两 / 经验书）
+    expect(store.save.player.silver).toBeGreaterThan(0)
 
     await seedSave((save) => {
       save.heroes[hero.id] = hero
+      save.campaign.clearedStage = 1
       save.player.permBoost = REBIRTH.PERM_BOOST_CAP
     })
 
     expect(store.teamPower).toBeGreaterThanOrEqual(nextStage.powerRequired)
     expect(store.arenaHash).toBe(arenaHash)
-    now += BATTLE.SECONDS_PER_BATTLE * 1000
-    expect(await store.tickIdle(1)).toMatchObject({ lastClearedStage: 1, nextTargetStage: nextStage.id })
+    // ⚠ 战力够了也**只能靠手动挑战**推进 ⇒ 挂机后关卡号仍然是 1
+    now += IDLE.SECONDS_PER_ROLL * 1000 * 3
+    await store.tickIdle()
+    expect(store.save.campaign.clearedStage).toBe(1)
   })
 })
 

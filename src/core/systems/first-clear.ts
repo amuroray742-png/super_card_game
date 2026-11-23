@@ -38,24 +38,28 @@ export function firstClearCrystalsForRange(from: number, to: number): number {
 }
 
 /**
- * 结算首通结晶（**原地改存档**）。
+ * 结算首通结晶（**原地改存档的水位**，**不改钱包**）。
  *
  * @returns 本次发放的结晶数（0 = 没有新的首通）
  *
- * ⚠ 发放与「记水位」必须**一起做**：先加结晶再改 `creditedStages`，
- *   中途抛异常会重复发；先改水位再加结晶会永久少发。
+ * ⚠ **本函数只记账，不入账**：结晶必须由调用方放进 `rewards.crystals`，
+ *   走 `applyRewardBundle` 这**唯一入库入口**（铁律 #26）。
+ *   历史 bug：这里曾经直接 `save.player.crystals += crystals`，
+ *   调用方又把它加进奖励包 → **同一笔结晶发两次**
+ *   （E2E「挑战类动作重放同一 actionId」实测：首通给了 20 而不是 10）。
+ *
+ * ⚠ 发放与「记水位」必须**一起做**：先记水位再返回金额，
+ *   中途抛异常会重复发；先返回金额再记水位会永久少发。
  *   这里两步都不抛异常（纯数值运算），所以顺序不敏感——
  *   但**幂等性**由 `creditedStages` 保证：同一个水位区间不会发第二次。
  */
 export function grantFirstClearCrystals(save: {
   campaign: { clearedStage: number; creditedStages: number }
-  player: { crystals: number }
 }): number {
   const before = save.campaign.creditedStages
   const after = save.campaign.clearedStage
   if (after <= before) return 0
   const crystals = firstClearCrystalsForRange(before + 1, after)
   save.campaign.creditedStages = after
-  if (crystals > 0) save.player.crystals += crystals
   return crystals
 }
