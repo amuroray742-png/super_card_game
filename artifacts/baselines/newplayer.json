@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-23T06:46:44.381Z",
+  "generatedAt": "2026-11-23T06:48:12.221Z",
   "seedBase": 20260105,
   "seedCount": 3,
   "dayHours": 24,
@@ -294,7 +294,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 42679,
-            "relicStones": 35375,
+            "relicStones": 54488,
             "shards": 6
           },
           "relics": 24,
@@ -317,7 +317,7 @@
             "silver": 358069,
             "exp": 1156000,
             "skillMats": 2156,
-            "relicStones": 1831,
+            "relicStones": 2745,
             "shards": 0,
             "relics": 1
           },
@@ -599,7 +599,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 42679,
-            "relicStones": 35375,
+            "relicStones": 54488,
             "shards": 6
           },
           "relics": 24,
@@ -622,7 +622,7 @@
             "silver": 358069,
             "exp": 1156000,
             "skillMats": 2156,
-            "relicStones": 1831,
+            "relicStones": 2745,
             "shards": 0,
             "relics": 1
           },
@@ -904,7 +904,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 42679,
-            "relicStones": 35375,
+            "relicStones": 54488,
             "shards": 6
           },
           "relics": 24,
@@ -927,7 +927,7 @@
             "silver": 358069,
             "exp": 1156000,
             "skillMats": 2156,
-            "relicStones": 1831,
+            "relicStones": 2745,
             "shards": 0,
             "relics": 1
           },
@@ -1209,7 +1209,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 42677,
-            "relicStones": 26220,
+            "relicStones": 40754,
             "shards": 6
           },
           "relics": 24,
@@ -1232,7 +1232,7 @@
             "silver": 357359,
             "exp": 1156000,
             "skillMats": 2156,
-            "relicStones": 1849,
+            "relicStones": 2767,
             "shards": 0,
             "relics": 1
           },
@@ -1536,7 +1536,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 44803,
-            "relicStones": 35345,
+            "relicStones": 54481,
             "shards": 6
           },
           "relics": 24,
@@ -1559,7 +1559,7 @@
             "silver": 354585,
             "exp": 1264000,
             "skillMats": 2146,
-            "relicStones": 1827,
+            "relicStones": 2740,
             "shards": 0,
             "relics": 1
           },
@@ -1841,7 +1841,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 44803,
-            "relicStones": 35345,
+            "relicStones": 54481,
             "shards": 6
           },
           "relics": 24,
@@ -1864,7 +1864,7 @@
             "silver": 354585,
             "exp": 1264000,
             "skillMats": 2146,
-            "relicStones": 1827,
+            "relicStones": 2740,
             "shards": 0,
             "relics": 1
           },
@@ -2146,7 +2146,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 44803,
-            "relicStones": 35345,
+            "relicStones": 54481,
             "shards": 6
           },
           "relics": 24,
@@ -2169,7 +2169,7 @@
             "silver": 354585,
             "exp": 1264000,
             "skillMats": 2146,
-            "relicStones": 1827,
+            "relicStones": 2740,
             "shards": 0,
             "relics": 1
           },
@@ -2451,7 +2451,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 44800,
-            "relicStones": 26277,
+            "relicStones": 40882,
             "shards": 6
           },
           "relics": 24,
@@ -2474,7 +2474,7 @@
             "silver": 354522,
             "exp": 1264000,
             "skillMats": 2146,
-            "relicStones": 1821,
+            "relicStones": 2723,
             "shards": 0,
             "relics": 1
           },
@@ -2778,7 +2778,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 42767,
-            "relicStones": 19019,
+            "relicStones": 29928,
             "shards": 6
           },
           "relics": 24,
@@ -2800,7 +2800,7 @@
             "silver": 357552,
             "exp": 1174000,
             "skillMats": 2121,
-            "relicStones": 1832,
+            "relicStones": 2758,
             "shards": 0,
             "relics": 1
           },
@@ -3082,7 +3082,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 42767,
-            "relicStones": 19019,
+            "relicStones": 29928,
             "shards": 6
           },
           "relics": 24,
@@ -3104,7 +3104,7 @@
             "silver": 357552,
             "exp": 1174000,
             "skillMats": 2121,
-            "relicStones": 1832,
+            "relicStones": 2758,
             "shards": 0,
             "relics": 1
           },
@@ -3386,7 +3386,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 42767,
-            "relicStones": 19019,
+            "relicStones": 29928,
             "shards": 6
           },
           "relics": 24,
@@ -3408,7 +3408,7 @@
             "silver": 357552,
             "exp": 1174000,
             "skillMats": 2121,
-            "relicStones": 1832,
+            "relicStones": 2758,
             "shards": 0,
             "relics": 1
           },
@@ -3690,7 +3690,7 @@
             "exp": 0,
             "expBooks": 0,
             "skillMats": 42767,
-            "relicStones": 19019,
+            "relicStones": 29928,
             "shards": 6
           },
           "relics": 24,
@@ -3712,7 +3712,7 @@
             "silver": 357552,
             "exp": 1174000,
             "skillMats": 2121,
-            "relicStones": 1832,
+            "relicStones": 2758,
             "shards": 0,
             "relics": 1
           },

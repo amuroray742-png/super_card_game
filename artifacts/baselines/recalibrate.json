@@ -96,7 +96,7 @@
         "silver": 342314,
         "exp": 929000,
         "skillMats": 16535,
-        "relicStones": 4690,
+        "relicStones": 7018,
         "shards": 6,
         "relics": 0,
         "items": {
@@ -107,7 +107,7 @@
           "skillMatWater": 5492,
           "skillMatFire": 0,
           "skillMatEarth": 11043,
-          "relicStoneTier1": 4690,
+          "relicStoneTier1": 7018,
           "relicStoneTier2": 0,
           "relicStoneTier3": 0
         }
@@ -128,14 +128,14 @@
         "exp": 18030,
         "silver": 14,
         "skillMats": 14483,
-        "relicStones": 4508,
+        "relicStones": 6836,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
         "silver": 138404,
         "skillMats": 5571,
-        "relicStones": 4690,
+        "relicStones": 7018,
         "shards": 20
       }
     },
@@ -146,13 +146,13 @@
         "silver": 788120,
         "exp": 2485000,
         "skillMats": 21895,
-        "relicStones": 18715,
+        "relicStones": 28113,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 2485,
           "skillMatWater": 21895,
-          "relicStoneTier1": 18715
+          "relicStoneTier1": 28113
         }
       },
       "spent": {
@@ -171,14 +171,14 @@
         "exp": 12801,
         "silver": 230434,
         "skillMats": 35010,
-        "relicStones": 21517,
+        "relicStones": 33243,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
         "silver": 373983,
         "skillMats": 5571,
-        "relicStones": 4712,
+        "relicStones": 7072,
         "shards": 20
       }
     },
@@ -189,13 +189,13 @@
         "silver": 2127191,
         "exp": 6579000,
         "skillMats": 21817,
-        "relicStones": 18910,
+        "relicStones": 28384,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 5969,
           "skillMatFire": 21817,
-          "relicStoneTier1": 18910,
+          "relicStoneTier1": 28384,
           "expBookLarge": 61
         }
       },
@@ -215,14 +215,14 @@
         "exp": 7803,
         "silver": 2036025,
         "skillMats": 56143,
-        "relicStones": 39483,
+        "relicStones": 60683,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
         "silver": 1004263,
         "skillMats": 5571,
-        "relicStones": 4744,
+        "relicStones": 7115,
         "shards": 20
       }
     },
@@ -233,14 +233,14 @@
         "silver": 5753978,
         "exp": 17792000,
         "skillMats": 22026,
-        "relicStones": 18877,
+        "relicStones": 37740,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 487,
           "expBookSmall": 12922,
           "skillMatFire": 22026,
-          "relicStoneTier2": 18877
+          "relicStoneTier2": 37740
         }
       },
       "spent": {
@@ -259,14 +259,14 @@
         "exp": 200766,
         "silver": 4861,
         "skillMats": 78169,
-        "relicStones": 47403,
+        "relicStones": 87466,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
         "silver": 2733018,
         "skillMats": 5571,
-        "relicStones": 4781,
+        "relicStones": 9538,
         "shards": 20
       }
     },
@@ -277,14 +277,14 @@
         "silver": 15526330,
         "exp": 48162000,
         "skillMats": 22011,
-        "relicStones": 18812,
+        "relicStones": 37586,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 30732,
           "expBookLarge": 1743,
           "skillMatFire": 22011,
-          "relicStoneTier2": 18812
+          "relicStoneTier2": 37586
         }
       },
       "spent": {
@@ -303,14 +303,14 @@
         "exp": 144728,
         "silver": 32125,
         "skillMats": 100180,
-        "relicStones": 52630,
+        "relicStones": 111467,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
         "silver": 7388628,
         "skillMats": 5571,
-        "relicStones": 4781,
+        "relicStones": 9538,
         "shards": 20
       }
     },
@@ -321,14 +321,14 @@
         "silver": 42046888,
         "exp": 128898000,
         "skillMats": 21943,
-        "relicStones": 18853,
+        "relicStones": 37776,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 5410,
           "expBookSmall": 74798,
           "skillMatFire": 21943,
-          "relicStoneTier2": 18853
+          "relicStoneTier2": 37776
         }
       },
       "spent": {
@@ -347,14 +347,14 @@
         "exp": 164899,
         "silver": 126036,
         "skillMats": 122123,
-        "relicStones": 48600,
+        "relicStones": 126360,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
         "silver": 19901425,
         "skillMats": 5571,
-        "relicStones": 4781,
+        "relicStones": 9538,
         "shards": 20
       }
     },
@@ -365,40 +365,40 @@
         "silver": 113565807,
         "exp": 347054000,
         "skillMats": 22028,
-        "relicStones": 18775,
+        "relicStones": 37570,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 17317,
           "expBookSmall": 173884,
           "skillMatFire": 22028,
-          "relicStoneTier2": 18775
+          "relicStoneTier2": 37570
         }
       },
       "spent": {
-        "silver": 81976574,
+        "silver": 102653570,
         "exp": 347054000,
         "skillMats": 0,
-        "relicStones": 30460,
+        "relicStones": 36706,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier2": 30224,
+          "relicStoneTier2": 36470,
           "relicStoneTier1": 236
         }
       },
       "cumNet": {
         "exp": 3474610,
-        "silver": 31715269,
+        "silver": 11038273,
         "skillMats": 144151,
-        "relicStones": 36915,
+        "relicStones": 127224,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
         "silver": 53705075,
         "skillMats": 5595,
-        "relicStones": 4781,
+        "relicStones": 9538,
         "shards": 20
       }
     },
@@ -406,43 +406,45 @@
       "chapter": 8,
       "days": 4,
       "produced": {
-        "silver": 307673438,
+        "silver": 307766691,
         "exp": 942731000,
         "skillMats": 22115,
-        "relicStones": 18753,
+        "relicStones": 39845,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 47217,
           "expBookSmall": 470561,
           "skillMatFire": 22115,
-          "relicStoneTier2": 18753
+          "relicStoneTier2": 9452,
+          "relicStoneTier3": 30393
         }
       },
       "spent": {
-        "silver": 43262864,
+        "silver": 135986025,
         "exp": 942731000,
         "skillMats": 0,
-        "relicStones": 16862,
+        "relicStones": 39988,
         "shards": 0,
         "relics": 0,
         "items": {
           "relicStoneTier1": 472,
-          "relicStoneTier2": 16390
+          "relicStoneTier2": 9262,
+          "relicStoneTier3": 30254
         }
       },
       "cumNet": {
         "exp": 7058154,
-        "silver": 296125843,
+        "silver": 182818939,
         "skillMats": 166266,
-        "relicStones": 38806,
+        "relicStones": 127081,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
-        "silver": 145838961,
+        "silver": 145924316,
         "skillMats": 5595,
-        "relicStones": 4781,
+        "relicStones": 10249,
         "shards": 20
       }
     },
@@ -450,44 +452,44 @@
       "chapter": 9,
       "days": 3,
       "produced": {
-        "silver": 1138175277,
-        "exp": 3642226000,
+        "silver": 1138161541,
+        "exp": 3642376000,
         "skillMats": 16471,
-        "relicStones": 25621,
+        "relicStones": 30249,
         "shards": 0,
         "relics": 0,
         "items": {
-          "expBookLarge": 181873,
+          "expBookLarge": 181888,
           "expBookSmall": 1823496,
           "skillMatFire": 16471,
-          "relicStoneTier3": 25621
+          "relicStoneTier3": 30249
         }
       },
       "spent": {
-        "silver": 100139232,
+        "silver": 144461799,
         "exp": 1151136000,
         "skillMats": 0,
-        "relicStones": 27686,
+        "relicStones": 34574,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier1": 118,
-          "relicStoneTier2": 2052,
-          "relicStoneTier3": 25516
+          "relicStoneTier1": 236,
+          "relicStoneTier2": 4104,
+          "relicStoneTier3": 30234
         }
       },
       "cumNet": {
-        "exp": 2491112278,
-        "silver": 1334161888,
+        "exp": 2491262278,
+        "silver": 1176518681,
         "skillMats": 182737,
-        "relicStones": 36741,
+        "relicStones": 122756,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
         "silver": 847903802,
         "skillMats": 5595,
-        "relicStones": 8594,
+        "relicStones": 10249,
         "shards": 20
       }
     },
@@ -498,41 +500,41 @@
         "silver": 1953968526,
         "exp": 6010518000,
         "skillMats": 27468,
-        "relicStones": 43330,
+        "relicStones": 51204,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 300456,
           "expBookSmall": 3005958,
           "skillMatFire": 27468,
-          "relicStoneTier3": 43330
+          "relicStoneTier3": 51204
         }
       },
       "spent": {
-        "silver": 36915344,
+        "silver": 282517107,
         "exp": 0,
         "skillMats": 0,
-        "relicStones": 9144,
+        "relicStones": 55695,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier3": 8698,
-          "relicStoneTier1": 118,
-          "relicStoneTier2": 328
+          "relicStoneTier3": 51355,
+          "relicStoneTier1": 236,
+          "relicStoneTier2": 4104
         }
       },
       "cumNet": {
-        "exp": 8501630278,
-        "silver": 3251215070,
+        "exp": 8501780278,
+        "silver": 2847970100,
         "skillMats": 210205,
-        "relicStones": 70927,
+        "relicStones": 118265,
         "shards": 6
       },
       "steps": {
         "exp": 1000,
         "silver": 847903802,
         "skillMats": 5595,
-        "relicStones": 8771,
+        "relicStones": 10386,
         "shards": 20
       }
     }
@@ -711,13 +713,13 @@
         "silver": 138404,
         "exp": 438000,
         "skillMats": 5492,
-        "relicStones": 4690,
+        "relicStones": 7018,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 438,
           "skillMatWater": 5492,
-          "relicStoneTier1": 4690
+          "relicStoneTier1": 7018
         }
       },
       "spent": {
@@ -760,13 +762,13 @@
         "silver": 137605,
         "exp": 445000,
         "skillMats": 5481,
-        "relicStones": 4677,
+        "relicStones": 7020,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 445,
           "skillMatWater": 5481,
-          "relicStoneTier1": 4677
+          "relicStoneTier1": 7020
         }
       },
       "spent": {
@@ -809,13 +811,13 @@
         "silver": 138633,
         "exp": 432000,
         "skillMats": 5398,
-        "relicStones": 4712,
+        "relicStones": 7072,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 432,
           "skillMatWater": 5398,
-          "relicStoneTier1": 4712
+          "relicStoneTier1": 7072
         }
       },
       "spent": {
@@ -858,13 +860,13 @@
         "silver": 137899,
         "exp": 465000,
         "skillMats": 5538,
-        "relicStones": 4665,
+        "relicStones": 7017,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 465,
           "skillMatWater": 5538,
-          "relicStoneTier1": 4665
+          "relicStoneTier1": 7017
         }
       },
       "spent": {
@@ -908,13 +910,13 @@
         "silver": 373983,
         "exp": 1143000,
         "skillMats": 5478,
-        "relicStones": 4661,
+        "relicStones": 7004,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 1143,
           "skillMatWater": 5478,
-          "relicStoneTier1": 4661
+          "relicStoneTier1": 7004
         }
       },
       "spent": {
@@ -958,13 +960,13 @@
         "silver": 372143,
         "exp": 1140000,
         "skillMats": 5485,
-        "relicStones": 4738,
+        "relicStones": 7090,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 1140,
           "skillMatFire": 5485,
-          "relicStoneTier1": 4738
+          "relicStoneTier1": 7090
         }
       },
       "spent": {
@@ -1008,13 +1010,13 @@
         "silver": 375158,
         "exp": 1153000,
         "skillMats": 5495,
-        "relicStones": 4718,
+        "relicStones": 7085,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 1153,
           "skillMatFire": 5495,
-          "relicStoneTier1": 4718
+          "relicStoneTier1": 7085
         }
       },
       "spent": {
@@ -1057,13 +1059,13 @@
         "silver": 375627,
         "exp": 1151000,
         "skillMats": 5408,
-        "relicStones": 4744,
+        "relicStones": 7115,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 1151,
           "skillMatFire": 5408,
-          "relicStoneTier1": 4744
+          "relicStoneTier1": 7115
         }
       },
       "spent": {
@@ -1106,14 +1108,14 @@
         "silver": 1004263,
         "exp": 3135000,
         "skillMats": 5429,
-        "relicStones": 4710,
+        "relicStones": 7094,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 2525,
           "expBookLarge": 61,
           "skillMatFire": 5429,
-          "relicStoneTier1": 4710
+          "relicStoneTier1": 7094
         }
       },
       "spent": {
@@ -1141,11 +1143,11 @@
       "chapter": 4,
       "chapterAtStart": 4,
       "level": 113,
-      "power": 208000.35734542485,
+      "power": 208126.7154682202,
       "exp": 0,
-      "silver": 335896,
+      "silver": 181,
       "relics": 26,
-      "relicLevel": 91.1,
+      "relicLevel": 92.3,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
@@ -1156,32 +1158,32 @@
         "silver": 1002336,
         "exp": 3076000,
         "skillMats": 5469,
-        "relicStones": 4719,
+        "relicStones": 9461,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 62,
           "expBookSmall": 2456,
           "skillMatFire": 5469,
-          "relicStoneTier2": 4719
+          "relicStoneTier2": 9461
         }
       },
       "spent": {
-        "silver": 2702465,
+        "silver": 3038180,
         "exp": 3076000,
         "skillMats": 0,
-        "relicStones": 4955,
+        "relicStones": 5366,
         "shards": 0,
         "relics": 0,
         "items": {
           "relicStoneTier1": 236,
-          "relicStoneTier2": 4719
+          "relicStoneTier2": 5130
         }
       },
       "expInFlight": 20490,
       "maxAction": {
-        "silver": 10557,
-        "relicStones": 13,
+        "silver": 11613,
+        "relicStones": 14,
         "skillMats": 0,
         "shards": 0
       }
@@ -1202,31 +1204,31 @@
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线 / 强化 · 中阶强化石 · 简易 · 霜前哨",
+      "target": "主线",
       "produced": {
         "silver": 1013153,
         "exp": 3076000,
         "skillMats": 5518,
-        "relicStones": 4781,
+        "relicStones": 9538,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 2496,
           "expBookLarge": 58,
           "skillMatFire": 5518,
-          "relicStoneTier2": 4781
+          "relicStoneTier2": 9538
         }
       },
       "spent": {
-        "silver": 1342358,
+        "silver": 1006643,
         "exp": 3076000,
         "skillMats": 0,
-        "relicStones": 1868,
+        "relicStones": 1457,
         "shards": 0,
         "relics": 0,
         "items": {
           "relicStoneTier1": 236,
-          "relicStoneTier2": 1632
+          "relicStoneTier2": 1221
         }
       },
       "expInFlight": 37802,
@@ -1258,14 +1260,14 @@
         "silver": 1005471,
         "exp": 3130000,
         "skillMats": 5484,
-        "relicStones": 4676,
+        "relicStones": 9350,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 2530,
           "expBookLarge": 60,
           "skillMatFire": 5484,
-          "relicStoneTier2": 4676
+          "relicStoneTier2": 9350
         }
       },
       "spent": {
@@ -1309,14 +1311,14 @@
         "silver": 2733018,
         "exp": 8510000,
         "skillMats": 5555,
-        "relicStones": 4701,
+        "relicStones": 9391,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 5440,
           "expBookLarge": 307,
           "skillMatFire": 5555,
-          "relicStoneTier2": 4701
+          "relicStoneTier2": 9391
         }
       },
       "spent": {
@@ -1360,14 +1362,14 @@
         "silver": 2712888,
         "exp": 8711000,
         "skillMats": 5534,
-        "relicStones": 4669,
+        "relicStones": 9325,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 5401,
           "expBookLarge": 331,
           "skillMatFire": 5534,
-          "relicStoneTier2": 4669
+          "relicStoneTier2": 9325
         }
       },
       "spent": {
@@ -1411,14 +1413,14 @@
         "silver": 2709502,
         "exp": 8395000,
         "skillMats": 5475,
-        "relicStones": 4708,
+        "relicStones": 9414,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 5405,
           "expBookLarge": 299,
           "skillMatFire": 5475,
-          "relicStoneTier2": 4708
+          "relicStoneTier2": 9414
         }
       },
       "spent": {
@@ -1462,14 +1464,14 @@
         "silver": 2715312,
         "exp": 8386000,
         "skillMats": 5474,
-        "relicStones": 4730,
+        "relicStones": 9439,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 302,
           "expBookSmall": 5366,
           "skillMatFire": 5474,
-          "relicStoneTier2": 4730
+          "relicStoneTier2": 9439
         }
       },
       "spent": {
@@ -1513,14 +1515,14 @@
         "silver": 7388628,
         "exp": 22670000,
         "skillMats": 5528,
-        "relicStones": 4705,
+        "relicStones": 9408,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 14560,
           "expBookLarge": 811,
           "skillMatFire": 5528,
-          "relicStoneTier2": 4705
+          "relicStoneTier2": 9408
         }
       },
       "spent": {
@@ -1564,14 +1566,14 @@
         "silver": 7380657,
         "exp": 22980000,
         "skillMats": 5463,
-        "relicStones": 4719,
+        "relicStones": 9477,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 832,
           "expBookSmall": 14660,
           "skillMatFire": 5463,
-          "relicStoneTier2": 4719
+          "relicStoneTier2": 9477
         }
       },
       "spent": {
@@ -1615,14 +1617,14 @@
         "silver": 7336088,
         "exp": 22460000,
         "skillMats": 5543,
-        "relicStones": 4751,
+        "relicStones": 9498,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 14730,
           "expBookLarge": 773,
           "skillMatFire": 5543,
-          "relicStoneTier2": 4751
+          "relicStoneTier2": 9498
         }
       },
       "spent": {
@@ -1666,14 +1668,14 @@
         "silver": 7428718,
         "exp": 22110000,
         "skillMats": 5394,
-        "relicStones": 4699,
+        "relicStones": 9415,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookSmall": 14680,
           "expBookLarge": 743,
           "skillMatFire": 5394,
-          "relicStoneTier2": 4699
+          "relicStoneTier2": 9415
         }
       },
       "spent": {
@@ -1717,14 +1719,14 @@
         "silver": 19901425,
         "exp": 61348000,
         "skillMats": 5543,
-        "relicStones": 4684,
+        "relicStones": 9386,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 3062,
           "expBookSmall": 30728,
           "skillMatFire": 5543,
-          "relicStoneTier2": 4684
+          "relicStoneTier2": 9386
         }
       },
       "spent": {
@@ -1768,14 +1770,14 @@
         "silver": 20102511,
         "exp": 60880000,
         "skillMats": 5595,
-        "relicStones": 4687,
+        "relicStones": 9387,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 3058,
           "expBookSmall": 30300,
           "skillMatFire": 5595,
-          "relicStoneTier2": 4687
+          "relicStoneTier2": 9387
         }
       },
       "spent": {
@@ -1818,14 +1820,14 @@
         "silver": 19904413,
         "exp": 61220000,
         "skillMats": 5548,
-        "relicStones": 4712,
+        "relicStones": 9388,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 3060,
           "expBookSmall": 30620,
           "skillMatFire": 5548,
-          "relicStoneTier2": 4712
+          "relicStoneTier2": 9388
         }
       },
       "spent": {
@@ -1869,14 +1871,14 @@
         "silver": 19853808,
         "exp": 61200000,
         "skillMats": 5427,
-        "relicStones": 4705,
+        "relicStones": 9410,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 3056,
           "expBookSmall": 30640,
           "skillMatFire": 5427,
-          "relicStoneTier2": 4705
+          "relicStoneTier2": 9410
         }
       },
       "spent": {
@@ -1905,11 +1907,11 @@
       "chapter": 8,
       "chapterAtStart": 7,
       "level": 196,
-      "power": 3966826.842958435,
+      "power": 3969788.5500625405,
       "exp": 0,
-      "silver": 31715269,
+      "silver": 11038273,
       "relics": 56,
-      "relicLevel": 128.5,
+      "relicLevel": 130,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
@@ -1920,31 +1922,31 @@
         "silver": 53705075,
         "exp": 163754000,
         "skillMats": 5458,
-        "relicStones": 4671,
+        "relicStones": 9385,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 8143,
           "expBookSmall": 82324,
           "skillMatFire": 5458,
-          "relicStoneTier2": 4671
+          "relicStoneTier2": 9385
         }
       },
       "spent": {
-        "silver": 22076642,
+        "silver": 42753638,
         "exp": 163754000,
         "skillMats": 0,
-        "relicStones": 7065,
+        "relicStones": 13311,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier2": 7065
+          "relicStoneTier2": 13311
         }
       },
       "expInFlight": 3474610,
       "maxAction": {
-        "silver": 358976,
-        "relicStones": 111,
+        "silver": 394873,
+        "relicStones": 118,
         "skillMats": 0,
         "shards": 0
       }
@@ -1955,41 +1957,41 @@
       "chapter": 8,
       "chapterAtStart": 8,
       "level": 202,
-      "power": 4756589.194474921,
+      "power": 4758242.697749304,
       "exp": 0,
-      "silver": 72832573,
+      "silver": 60627407,
       "relics": 58,
-      "relicLevel": 129.2,
+      "relicLevel": 130,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线 / 强化 · 中阶强化石 · 简易 · 霜前哨",
+      "target": "主线",
       "produced": {
         "silver": 53966744,
         "exp": 166122000,
         "skillMats": 5543,
-        "relicStones": 4708,
+        "relicStones": 9452,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 8376,
           "expBookSmall": 82362,
           "skillMatFire": 5543,
-          "relicStoneTier2": 4708
+          "relicStoneTier2": 9452
         }
       },
       "spent": {
-        "silver": 12849440,
+        "silver": 4377610,
         "exp": 166122000,
         "skillMats": 0,
-        "relicStones": 4765,
+        "relicStones": 2170,
         "shards": 0,
         "relics": 0,
         "items": {
           "relicStoneTier1": 118,
-          "relicStoneTier2": 4647
+          "relicStoneTier2": 2052
         }
       },
       "expInFlight": 90462,
@@ -2006,47 +2008,48 @@
       "chapter": 8,
       "chapterAtStart": 8,
       "level": 207,
-      "power": 5554104.302285736,
+      "power": 5556013.7772597335,
       "exp": 0,
-      "silver": 113439130,
+      "silver": 71229536,
       "relics": 60,
-      "relicLevel": 129.8,
+      "relicLevel": 132.1,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线 / 强化 · 中阶强化石 · 简易 · 霜前哨",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
         "silver": 53738450,
         "exp": 165494000,
         "skillMats": 5458,
-        "relicStones": 4645,
+        "relicStones": 10056,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 8292,
           "expBookSmall": 82574,
           "skillMatFire": 5458,
-          "relicStoneTier2": 4645
+          "relicStoneTier3": 10056
         }
       },
       "spent": {
-        "silver": 13131893,
+        "silver": 43136321,
         "exp": 165494000,
         "skillMats": 0,
-        "relicStones": 4821,
+        "relicStones": 13217,
         "shards": 0,
         "relics": 0,
         "items": {
           "relicStoneTier1": 118,
-          "relicStoneTier2": 4703
+          "relicStoneTier2": 3106,
+          "relicStoneTier3": 9993
         }
       },
       "expInFlight": 3827072,
       "maxAction": {
-        "silver": 394873,
-        "relicStones": 118,
+        "silver": 525577,
+        "relicStones": 141,
         "skillMats": 0,
         "shards": 0
       }
@@ -2057,47 +2060,48 @@
       "chapter": 8,
       "chapterAtStart": 8,
       "level": 212,
-      "power": 6401748.8571485635,
+      "power": 6390921.83861359,
       "exp": 0,
-      "silver": 156817648,
+      "silver": 81699342,
       "relics": 62,
-      "relicLevel": 129.8,
+      "relicLevel": 134.1,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": 248,
       "manualWins": 7,
-      "target": "主线 / 强化 · 中阶强化石 · 简易 · 霜前哨",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
-        "silver": 54129283,
+        "silver": 54137181,
         "exp": 165046000,
         "skillMats": 5539,
-        "relicStones": 4737,
+        "relicStones": 10249,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 8226,
           "expBookSmall": 82786,
           "skillMatFire": 5539,
-          "relicStoneTier2": 4737
+          "relicStoneTier3": 10249
         }
       },
       "spent": {
-        "silver": 10750765,
+        "silver": 43667375,
         "exp": 165046000,
         "skillMats": 0,
-        "relicStones": 4978,
+        "relicStones": 12479,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier1": 236,
-          "relicStoneTier2": 4742
+          "relicStoneTier1": 118,
+          "relicStoneTier2": 2052,
+          "relicStoneTier3": 10309
         }
       },
       "expInFlight": 5154016,
       "maxAction": {
-        "silver": 394873,
-        "relicStones": 118,
+        "silver": 635948,
+        "relicStones": 158,
         "skillMats": 0,
         "shards": 0
       }
@@ -2108,46 +2112,48 @@
       "chapter": 9,
       "chapterAtStart": 8,
       "level": 222,
-      "power": 8654610.285560606,
+      "power": 8688644.936047995,
       "exp": 0,
-      "silver": 296125843,
+      "silver": 182818939,
       "relics": 64,
-      "relicLevel": 130,
+      "relicLevel": 135.7,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线 / 强化 · 中阶强化石 · 简易 · 霜前哨",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
-        "silver": 145838961,
+        "silver": 145924316,
         "exp": 446069000,
         "skillMats": 5575,
-        "relicStones": 4663,
+        "relicStones": 10088,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 22323,
           "expBookSmall": 222839,
           "skillMatFire": 5575,
-          "relicStoneTier2": 4663
+          "relicStoneTier3": 10088
         }
       },
       "spent": {
-        "silver": 6530766,
+        "silver": 44804719,
         "exp": 446069000,
         "skillMats": 0,
-        "relicStones": 2298,
+        "relicStones": 12122,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier2": 2298
+          "relicStoneTier1": 118,
+          "relicStoneTier2": 2052,
+          "relicStoneTier3": 9952
         }
       },
       "expInFlight": 7058154,
       "maxAction": {
-        "silver": 394873,
-        "relicStones": 118,
+        "silver": 699542,
+        "relicStones": 168,
         "skillMats": 0,
         "shards": 0
       }
@@ -2158,48 +2164,48 @@
       "chapter": 9,
       "chapterAtStart": 9,
       "level": 230,
-      "power": 11122797.813455034,
+      "power": 11225257.178193787,
       "exp": 0,
-      "silver": 407122074,
+      "silver": 276977896,
       "relics": 66,
-      "relicLevel": 131.8,
+      "relicLevel": 136.9,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线 / 强化 · 高阶强化石 · 困难 · 星陨幻象顶",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
-        "silver": 145344747,
-        "exp": 444608000,
+        "silver": 145417030,
+        "exp": 444758000,
         "skillMats": 5491,
-        "relicStones": 8550,
+        "relicStones": 10084,
         "shards": 0,
         "relics": 0,
         "items": {
-          "expBookLarge": 22110,
+          "expBookLarge": 22125,
           "expBookSmall": 223508,
           "skillMatFire": 5491,
-          "relicStoneTier3": 8550
+          "relicStoneTier3": 10084
         }
       },
       "spent": {
-        "silver": 34348516,
-        "exp": 444608000,
+        "silver": 51258073,
+        "exp": 444758000,
         "skillMats": 0,
-        "relicStones": 10660,
+        "relicStones": 14526,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier1": 118,
-          "relicStoneTier2": 2052,
-          "relicStoneTier3": 8490
+          "relicStoneTier1": 236,
+          "relicStoneTier2": 4104,
+          "relicStoneTier3": 10186
         }
       },
-      "expInFlight": 4699468,
+      "expInFlight": 4849468,
       "maxAction": {
-        "silver": 477797,
-        "relicStones": 133,
+        "silver": 769497,
+        "relicStones": 178,
         "skillMats": 0,
         "shards": 0
       }
@@ -2210,46 +2216,46 @@
       "chapter": 9,
       "chapterAtStart": 9,
       "level": 237,
-      "power": 13662231.225227773,
+      "power": 13769162.104049565,
       "exp": 0,
-      "silver": 520088946,
+      "silver": 375831190,
       "relics": 68,
-      "relicLevel": 133.4,
+      "relicLevel": 138.4,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线 / 强化 · 高阶强化石 · 困难 · 星陨幻象顶",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
-        "silver": 144926728,
+        "silver": 144840709,
         "exp": 445698000,
         "skillMats": 5526,
-        "relicStones": 8594,
+        "relicStones": 10158,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 22290,
           "expBookSmall": 222798,
           "skillMatFire": 5526,
-          "relicStoneTier3": 8594
+          "relicStoneTier3": 10158
         }
       },
       "spent": {
-        "silver": 31959856,
+        "silver": 45987415,
         "exp": 445698000,
         "skillMats": 0,
-        "relicStones": 8516,
+        "relicStones": 10124,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier3": 8516
+          "relicStoneTier3": 10124
         }
       },
-      "expInFlight": 501167,
+      "expInFlight": 651167,
       "maxAction": {
-        "silver": 578134,
-        "relicStones": 149,
+        "silver": 931091,
+        "relicStones": 200,
         "skillMats": 0,
         "shards": 0
       }
@@ -2260,46 +2266,46 @@
       "chapter": 9,
       "chapterAtStart": 9,
       "level": 240,
-      "power": 15124148.724835644,
-      "exp": 2491090000,
-      "silver": 1334161888,
+      "power": 15242236.924367635,
+      "exp": 2491240000,
+      "silver": 1176518681,
       "relics": 70,
-      "relicLevel": 135,
+      "relicLevel": 139.8,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线 / 强化 · 高阶强化石 · 困难 · 星陨幻象顶",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
         "silver": 847903802,
         "exp": 2751920000,
         "skillMats": 5454,
-        "relicStones": 8477,
+        "relicStones": 10007,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 137473,
           "expBookSmall": 1377190,
           "skillMatFire": 5454,
-          "relicStoneTier3": 8477
+          "relicStoneTier3": 10007
         }
       },
       "spent": {
-        "silver": 33830860,
-        "exp": 260830000,
+        "silver": 47216311,
+        "exp": 260680000,
         "skillMats": 0,
-        "relicStones": 8510,
+        "relicStones": 9924,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier3": 8510
+          "relicStoneTier3": 9924
         }
       },
       "expInFlight": 22278,
       "maxAction": {
-        "silver": 635948,
-        "relicStones": 158,
+        "silver": 1024200,
+        "relicStones": 212,
         "skillMats": 0,
         "shards": 0
       }
@@ -2310,46 +2316,46 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 15139130.428002128,
-      "exp": 3694510000,
-      "silver": 1692353819,
+      "power": 15254608.384654779,
+      "exp": 3694660000,
+      "silver": 1520287628,
       "relics": 72,
-      "relicLevel": 136.4,
+      "relicLevel": 141,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线 / 强化 · 高阶强化石 · 困难 · 星陨幻象顶",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
         "silver": 394794349,
         "exp": 1203420000,
         "skillMats": 5548,
-        "relicStones": 8625,
+        "relicStones": 10171,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 60177,
           "expBookSmall": 601650,
           "skillMatFire": 5548,
-          "relicStoneTier3": 8625
+          "relicStoneTier3": 10171
         }
       },
       "spent": {
-        "silver": 36602418,
+        "silver": 51025402,
         "exp": 0,
         "skillMats": 0,
-        "relicStones": 8698,
+        "relicStones": 10210,
         "shards": 0,
         "relics": 0,
         "items": {
-          "relicStoneTier3": 8698
+          "relicStoneTier3": 10210
         }
       },
       "expInFlight": 22278,
       "maxAction": {
-        "silver": 769497,
-        "relicStones": 178,
+        "silver": 1239282,
+        "relicStones": 238,
         "skillMats": 0,
         "shards": 0
       }
@@ -2360,47 +2366,48 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 15297459.542752398,
-      "exp": 4895582000,
-      "silver": 2083170107,
+      "power": 15445363.048516886,
+      "exp": 4895732000,
+      "silver": 1855585149,
       "relics": 74,
-      "relicLevel": 135.4,
+      "relicLevel": 142,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线 / 强化 · 高阶强化石 · 困难 · 星陨幻象顶",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
         "silver": 391099214,
         "exp": 1201072000,
         "skillMats": 5411,
-        "relicStones": 8638,
+        "relicStones": 10219,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 59904,
           "expBookSmall": 602032,
           "skillMatFire": 5411,
-          "relicStoneTier3": 8638
+          "relicStoneTier3": 10219
         }
       },
       "spent": {
-        "silver": 282926,
+        "silver": 55801693,
         "exp": 0,
         "skillMats": 0,
-        "relicStones": 446,
+        "relicStones": 12376,
         "shards": 0,
         "relics": 0,
         "items": {
           "relicStoneTier1": 118,
-          "relicStoneTier2": 328
+          "relicStoneTier2": 2052,
+          "relicStoneTier3": 10206
         }
       },
       "expInFlight": 22278,
       "maxAction": {
-        "silver": 22630,
-        "relicStones": 21,
+        "silver": 1239282,
+        "relicStones": 238,
         "skillMats": 0,
         "shards": 0
       }
@@ -2411,44 +2418,46 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 15297459.542752398,
-      "exp": 6101708000,
-      "silver": 2472488308,
+      "power": 15457786.443661852,
+      "exp": 6101858000,
+      "silver": 2188330135,
       "relics": 76,
-      "relicLevel": 135.4,
+      "relicLevel": 143.1,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": null,
       "manualWins": 8,
-      "target": "主线",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
         "silver": 389328201,
         "exp": 1206126000,
         "skillMats": 5469,
-        "relicStones": 8702,
+        "relicStones": 10289,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 60333,
           "expBookSmall": 602796,
           "skillMatFire": 5469,
-          "relicStoneTier3": 8702
+          "relicStoneTier3": 10289
         }
       },
       "spent": {
-        "silver": 10000,
+        "silver": 56583215,
         "exp": 0,
         "skillMats": 0,
-        "relicStones": 0,
+        "relicStones": 10407,
         "shards": 0,
         "relics": 0,
-        "items": {}
+        "items": {
+          "relicStoneTier3": 10407
+        }
       },
       "expInFlight": 22278,
       "maxAction": {
-        "silver": 5000,
-        "relicStones": 0,
+        "silver": 1499531,
+        "relicStones": 267,
         "skillMats": 0,
         "shards": 0
       }
@@ -2459,44 +2468,46 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 15297459.542752398,
-      "exp": 7302804000,
-      "silver": 2865079268,
+      "power": 15468120.129224129,
+      "exp": 7302954000,
+      "silver": 2524538724,
       "relics": 78,
-      "relicLevel": 135.4,
+      "relicLevel": 144.2,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": 310,
       "manualWins": 6,
-      "target": "主线",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
         "silver": 392600960,
         "exp": 1201096000,
         "skillMats": 5502,
-        "relicStones": 8594,
+        "relicStones": 10139,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 60021,
           "expBookSmall": 600886,
           "skillMatFire": 5502,
-          "relicStoneTier3": 8594
+          "relicStoneTier3": 10139
         }
       },
       "spent": {
-        "silver": 10000,
+        "silver": 56392371,
         "exp": 0,
         "skillMats": 0,
-        "relicStones": 0,
+        "relicStones": 9975,
         "shards": 0,
         "relics": 0,
-        "items": {}
+        "items": {
+          "relicStoneTier3": 9975
+        }
       },
       "expInFlight": 22278,
       "maxAction": {
-        "silver": 5000,
-        "relicStones": 0,
+        "silver": 1649485,
+        "relicStones": 283,
         "skillMats": 0,
         "shards": 0
       }
@@ -2507,44 +2518,48 @@
       "chapter": 10,
       "chapterAtStart": 10,
       "level": 240,
-      "power": 15297459.542752398,
-      "exp": 8501608000,
-      "silver": 3251215070,
+      "power": 15582848.128075596,
+      "exp": 8501758000,
+      "silver": 2847970100,
       "relics": 80,
-      "relicLevel": 135.4,
+      "relicLevel": 144.9,
       "skillLevel": 20,
       "starLevel": 1,
       "rolls": 4710,
       "blockedAtStage": 310,
       "manualWins": 0,
-      "target": "主线",
+      "target": "主线 / 强化 · 高阶强化石 · 普通 · 沉渊环廊",
       "produced": {
         "silver": 386145802,
         "exp": 1198804000,
         "skillMats": 5538,
-        "relicStones": 8771,
+        "relicStones": 10386,
         "shards": 0,
         "relics": 0,
         "items": {
           "expBookLarge": 60021,
           "expBookSmall": 598594,
           "skillMatFire": 5538,
-          "relicStoneTier3": 8771
+          "relicStoneTier3": 10386
         }
       },
       "spent": {
-        "silver": 10000,
+        "silver": 62714426,
         "exp": 0,
         "skillMats": 0,
-        "relicStones": 0,
+        "relicStones": 12727,
         "shards": 0,
         "relics": 0,
-        "items": {}
+        "items": {
+          "relicStoneTier1": 118,
+          "relicStoneTier2": 2052,
+          "relicStoneTier3": 10557
+        }
       },
       "expInFlight": 22278,
       "maxAction": {
-        "silver": 5000,
-        "relicStones": 0,
+        "silver": 1649485,
+        "relicStones": 283,
         "skillMats": 0,
         "shards": 0
       }

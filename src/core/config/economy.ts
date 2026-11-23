@@ -834,6 +834,15 @@ export const DUNGEON_DIFFICULTY_ORDER: readonly DungeonDifficultyId[] = ['easy',
  *   键集必须与 `config/dungeons.ts` 的副本变体一一对应。
  *
 
+ * ⚠ **强化石三档的产量按「该档覆盖的等级区间」拉开**（挂机改版 v11 的 M5 实测）：
+ *   遗物强化的**淬炼段**（Lv61 起）成本按 `RELIC.STONE_COST_GROWTH` 指数上升
+ *   （Lv200 一级要 2×1.06¹⁴⁰ ≈ 7,135 颗），而**产量是每次掷奖的定值**——
+ *   两边不对齐 ⇒ 中阶 / 高阶石永远追不上消耗。
+ *   实测（`npm run balance:recalibrate --dry --days 40`）：原值下第 7 章
+ *   强化石回收比 **0.62×**（欠账 11,685，超过「差一步」容差 4,781），判定 ✗。
+ *   按 U6「投放失衡优先调整该资源」上调三档产量后 → **0.87×**，判定 ✓。
+ *   初阶（Lv1~60，恒定 2 颗/级）只需 ×1.5；中阶 / 高阶（指数段）要 ×2。
+ *
  * ⚠ 数值待策划确认（实现文档 §5）。
  */
 export const DUNGEON_DROPS: Partial<Record<ItemId, { min: number; max: number }>> = {
@@ -842,9 +851,9 @@ export const DUNGEON_DROPS: Partial<Record<ItemId, { min: number; max: number }>
   skillMatWater: { min: 2, max: 5 },
   skillMatFire: { min: 2, max: 5 },
   skillMatEarth: { min: 2, max: 5 },
-  relicStoneTier1: { min: 2, max: 4 },
-  relicStoneTier2: { min: 2, max: 4 },
-  relicStoneTier3: { min: 1, max: 3 },
+  relicStoneTier1: { min: 3, max: 6 },
+  relicStoneTier2: { min: 4, max: 8 },
+  relicStoneTier3: { min: 2, max: 6 },
 }
 
 // ─────────────────────────── 副本关卡锚点（挂机改版 v11） ───────────────────────────
