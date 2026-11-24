@@ -29,7 +29,7 @@
  * npx tsx tools/capture/screenshot.ts --battle --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/battle.png
  *
- * # 英灵详情场景（注册账号 → 十连 → 圣殿点开第一个英灵）
+ * # 英灵详情场景（注册账号 → 十连 → 编队 → 手动通关解锁挂机 → 真实挂机领取 → 喂经验书 → 圣殿英灵页）
  * npx tsx tools/capture/screenshot.ts --hero --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/hero.png
  *
@@ -315,6 +315,48 @@ async function runGachaTicketScenario(
  *   截出来的图看不到真实可用状态。
  * ⚠ 至少编 3 人：实测 2 人队在第 1 关每轮只打 3 场就卡关，攒不到经验。
  */
+/**
+ * 等「全部领取」攒出可领次数。
+ *
+ * ⚠ **验收脚本不得假设「点一下就有结果」**（AGENTS.md 铁律 #13）：
+ *   挂机不创造时间，一次掷奖 = `IDLE.SECONDS_PER_ROLL` 秒，
+ *   而在线时长按 3 倍倍率计量 ⇒ 实际要等几个心跳周期。
+ *
+ * ⚠ 按钮上的次数是**服务端账本的真值**（心跳回执带回），
+ *   所以这里直接读它 —— 读不到非 0 就说明还没攒够，继续等。
+ */
+async function waitForClaimable(page: Page, timeoutMs = 90_000): Promise<number> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const text = await page.getByTestId('idle-claim-all').innerText().catch(() => '')
+    const matched = /(\d+)\s*次/.exec(text)
+    const rolls = matched ? Number(matched[1]) : 0
+    if (rolls > 0) return rolls
+    await page.waitForTimeout(1000)
+  }
+  return 0
+}
+
+/**
+ * 英灵详情场景：注册账号 → 十连 → 编队 → **手动通关解锁主线通道** →
+ * **真实挂机 + 全部领取**拿经验书 → 圣殿点开第一个英灵 → 喂经验书 → 截图。
+ *
+ * ## 为什么必须走真实挂机链路
+ *
+ * ⚠ 历史教训：旧版这里点的是「**推征 10 场**」——那个按钮在**挂机改版 v11**
+ *   里已经被「**全部领取**」取代了，脚本却还在点它
+ *   ⇒ Playwright 一直等那个不存在的按钮 ⇒ 场景直接卡死超时。
+ *   （AGENTS.md 铁律 #13 记的就是这一类「脚本流程陈旧」：
+ *   后端日志全是 200，看着像后端坏了，实际是脚本在点一个不存在的按钮。）
+ *
+ * v11 的真实链路是：
+ *   ① **手动挑战**第 1 关（主线推进的唯一路径）⇒ 主线通道才有可挂的目标；
+ *   ② 挂机按掉落表逐次掷奖（不跑战斗）；
+ *   ③ **「全部领取」**把三通道的待结算收益一次入库（经验书 / 银两）。
+ *
+ * ⚠ 玩家经验池在 v10 已退役，经验改由「经验书 → 直接进英灵」产出 ⇒
+ *   攒到书之后还要**喂一次**，英灵详情页的经验条与等级才有内容可截。
+ */
 async function runHeroScenario(
   context: BrowserContext,
   page: Page,
@@ -338,15 +380,53 @@ async function runHeroScenario(
     await page.waitForTimeout(120)
   }
 
-  // 推征攒经验进池子
+  // ① 手动挑战第 1 关（v11：主线推进的唯一路径）⇒ 主线通道解锁（跟随模式 → 目标 = 第 1 关）
   await page.goto(`${base}/#/expedition`, { waitUntil: 'networkidle' })
-  for (let i = 0; i < 3; i++) {
-    await page.locator('button', { hasText: '推征 10 场' }).click()
-    await page.waitForTimeout(700)
+  await page.getByTestId('campaign-challenge').click()
+  // 战斗回放由服务端执行后一次性回传 ⇒ 面板会晚一点出现（等服务端往返）
+  const replay = page.getByTestId('challenge-replay')
+  await replay.waitFor({ state: 'visible', timeout: 30_000 })
+  // 收起回放：它会把下面的挂机面板顶下去，截图只需要最终页面
+  await page.getByTestId('challenge-replay-close').click()
+
+  // ② 等真实挂机攒够（**不创造时间**：读按钮上的服务端真值）
+  const rolls = await waitForClaimable(page)
+  if (rolls <= 0) {
+    throw new Error('挂机没攒出可领取的次数（60 秒内按钮一直是 0 次）')
   }
 
+  // ③ 「全部领取」：经验书 / 银两入账
+  //    ⚠ 顺带核对「按钮上写的次数 ≤ 服务端实发次数」——
+  //      那是挂机次数显示的硬不变量（AGENTS.md 铁律 #62）：
+  //      按钮**只可能少写**（读的是上一次心跳的快照），**绝不能多写**。
+  const [claimResponse] = await Promise.all([
+    page.waitForResponse((r) => {
+      if (r.request().method() !== 'POST') return false
+      if (new URL(r.url()).pathname !== '/api/action') return false
+      const body = r.request().postDataJSON() as { action?: { type?: string } } | null
+      return body?.action?.type === 'idle.tick'
+    }),
+    page.getByTestId('idle-claim-all').click(),
+  ])
+  const claimed = (await claimResponse.json()) as { result?: { rolls?: number } }
+  const granted = claimed.result?.rolls ?? 0
+  if (granted <= 0) {
+    throw new Error('「全部领取」没有发下任何产出（服务端回包 rolls = 0）')
+  }
+  if (granted < rolls) {
+    throw new Error(`按钮上写的次数（${rolls}）比服务端实发（${granted}）还多 —— 界面在多报`)
+  }
+  await page.waitForTimeout(800)
+
+  // ④ 喂经验书：经验池已退役，英灵的经验只能靠书喂进去
   await page.goto(`${base}/#/temple`, { waitUntil: 'networkidle' })
   await page.locator('.hero-cell').first().click()
+  const feed = page.getByTestId('feed-books')
+  await feed.waitFor({ state: 'visible', timeout: 10_000 })
+  if (await feed.isEnabled()) {
+    await feed.click()
+    await page.waitForTimeout(600)
+  }
   // 等提示条（toast 2.2s 自动消失）淡出，否则会盖住「经验不足」这类行内提示
   await page.waitForTimeout(2600)
   await page.screenshot({ path: outPath, fullPage: opts.fullPage })
