@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  ACCOUNT,
   ACCOUNT_ERROR_CODES,
   ACCOUNT_ERROR_MESSAGES,
   ACCOUNT_STORAGE_KEYS,
@@ -21,6 +22,7 @@ import {
   readApiBaseOverride,
   readStoredSession,
   resolveApiBase,
+  selectApiBase,
   writeApiBaseOverride,
   writeStoredSession,
 } from '../../src/platform/account.ts'
@@ -59,6 +61,7 @@ beforeEach(() => {
 afterEach(() => {
   delete (globalThis as { localStorage?: Storage }).localStorage
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
 })
 
 describe('账号规则', () => {
@@ -92,21 +95,59 @@ describe('账号规则', () => {
 })
 
 describe('后端地址解析', () => {
-  it('默认走 core 配置里的地址', () => {
-    expect(resolveApiBase()).toBe('http://127.0.0.1:8787')
+  it('默认同源（core 默认值是空串，不是 localhost）', () => {
+    // ⚠ 必须先把环境变量钉死：本地 `.env` 里若写了 VITE_API_BASE，
+    //   断言会随开发机环境飘（这类「跟着环境变」的断言等于没有断言）。
+    vi.stubEnv('VITE_API_BASE', undefined)
+    expect(resolveApiBase()).toBe('')
+    expect(resolveApiBase()).toBe(ACCOUNT.DEFAULT_API_BASE)
   })
 
   it('localStorage 覆盖优先，并去掉末尾斜杠', () => {
+    vi.stubEnv('VITE_API_BASE', undefined)
     writeApiBaseOverride('https://api.example.com/')
     expect(resolveApiBase()).toBe('https://api.example.com')
     expect(readApiBaseOverride()).toBe('https://api.example.com')
   })
 
-  it('写空串表示清除覆盖', () => {
+  it('写空串表示清除覆盖（回到默认 = 同源）', () => {
+    vi.stubEnv('VITE_API_BASE', undefined)
     writeApiBaseOverride('https://api.example.com')
     writeApiBaseOverride('')
     expect(readApiBaseOverride()).toBe('')
-    expect(resolveApiBase()).toBe('http://127.0.0.1:8787')
+    expect(resolveApiBase()).toBe('')
+  })
+
+  it('环境变量也能改地址（构建期指定的后端）', () => {
+    vi.stubEnv('VITE_API_BASE', 'https://api.example.com')
+    expect(resolveApiBase()).toBe('https://api.example.com')
+  })
+})
+
+describe('后端地址口径（纯函数）', () => {
+  it('base 只放后端 origin，不会自动补 /api', () => {
+    expect(selectApiBase(null, 'https://api.example.com')).toBe('https://api.example.com')
+  })
+
+  it('空串 = 同源（不是「没配置」）', () => {
+    expect(selectApiBase(null, '')).toBe('')
+    expect(selectApiBase('', undefined)).toBe('')
+  })
+
+  it('本地覆盖优先于环境变量', () => {
+    expect(selectApiBase('https://a.example.com', 'https://b.example.com')).toBe(
+      'https://a.example.com',
+    )
+  })
+
+  it('都缺省 ⇒ core 默认值（同源）', () => {
+    expect(selectApiBase(null, undefined)).toBe(ACCOUNT.DEFAULT_API_BASE)
+    expect(ACCOUNT.DEFAULT_API_BASE).toBe('')
+  })
+
+  it('末尾斜杠统一去掉', () => {
+    expect(selectApiBase('https://api.example.com///', undefined)).toBe('https://api.example.com')
+    expect(selectApiBase(null, 'https://api.example.com/')).toBe('https://api.example.com')
   })
 })
 
@@ -163,6 +204,24 @@ describe('后端客户端', () => {
       username: 'tester',
       password: 'correct-horse-1',
     })
+  })
+
+  it('同源（base 为空）时请求路径不重复 /api 前缀', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse(200, {
+        user: { id: 1, username: 'tester' },
+        accessToken: 'at',
+        refreshToken: 'rt',
+        expiresIn: 900,
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const sameOrigin = new AccountClient('')
+    await sameOrigin.login('tester', 'correct-horse-1')
+    // ⚠ 回归：base 若写成 `/api`，这里会变成 `/api/api/auth/login` ⇒ 404。
+    //   历史上 Dockerfile 正是这么写的（生产构建每个接口都 404，只有真部署才暴露）。
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/login')
   })
 
   it('凭据错误 → AccountError(INVALID_CREDENTIALS)', async () => {

@@ -999,6 +999,35 @@
     > `tests/unit/server/idle-authority.test.ts`（心跳带 pending 且不回传存档主体）
     > 与 `tests/e2e/idle.spec.ts`（按钮上的次数非 0、且与通道卡一致）守护。
 
+63. **后端地址默认同源，base 只放后端 origin，绝不带 `/api`**：
+    - **唯一口径**在 `src/platform/account.ts` 的 `selectApiBase()`（纯函数，可单测）：
+      优先级 = `localStorage['sgw.apiBase']`（玩家改的）> `VITE_API_BASE`（构建期）
+      > core 默认 `ACCOUNT.DEFAULT_API_BASE`（空串 = 同源）。
+      表现层只读 account store 的 `apiBase` / `apiBaseLabel`，**不得**自己拼地址。
+    - **base 只放 origin，绝不能带 `/api`**：客户端请求路径**本身以 `/api/` 开头**
+      （`/api/auth/register` …），base 只做前缀 ⇒ 写成 `/api` 会拼成
+      `/api/api/auth/register` ⇒ 404。
+    - **空串 = 同源**（不是「没配置」）：请求走当前域名，由反代转发到后端
+      ⇒ 开发期是 Vite dev server 的 `/api` 代理，生产期是 nginx 的 `/api` 反代。
+    - **默认必须是同源**，不能是 `http://127.0.0.1:8787`：
+      手机 / 局域网设备上 `127.0.0.1` 指的是**设备自己**；
+      开发期后端默认只绑 `127.0.0.1`，手机也连不到 `:8787`；
+      就算把 base 改成 LAN 地址，浏览器的 **CORS 预检**也会被白名单拦掉 ⇒ 死路。
+      ⇒ 「手机打开 `http://<本机IP>:5173` 就能注册」**只能靠同源代理**实现，
+      不能靠让玩家手改地址。
+    - **登录页必须能就地改地址**：设置页在路由守卫后面 ⇒ 连不上后端时玩家进不去
+      设置页、也就改不了地址（错误提示让他「检查后端地址」却不给地方改）⇒ 死路。
+      地址显示统一取 `apiBaseLabel`（空串显示「同源（当前域名）」，别显示成空白）。
+    - ⚠ **`.env` 也会被 `vite build` 读到**（`.env` 优先级低于 `.env.production`）：
+      往 `.env` 里写死 `http://127.0.0.1:8787` 会把本地地址**烤进生产产物** ⇒
+      线上接口全挂。`.env.example` 的 `VITE_API_BASE` 必须留空并写明原因。
+    > 教训：`Dockerfile` 里写的是 `ARG VITE_API_BASE=/api`，与客户端路径口径冲突
+    > ⇒ **生产构建的每个接口都 404**。单测与 E2E 全绿（E2E 一直往 localStorage 写
+    > 绝对地址覆盖，从不走构建产物里的 base）⇒ 只有**真部署一次**才暴露。
+    > 同类死路还有「设置页在守卫后面」：玩家被要求检查地址，却打不开能改地址的页面。
+    > 由 `tests/unit/account-client.test.ts`（默认同源 / 空串语义 /
+    > ★ 同源时请求路径不重复 `/api`）守护。
+
 ## 数值调参的既定流程
 
 数值改动**只改** `src/core/config/economy.ts`（以及对应的配置表），然后按序执行：
@@ -1140,11 +1169,16 @@ npm run db:restore       # 整库恢复（必须停服，见铁律 #35）
 > **后端**：默认 `127.0.0.1:8787`，DB 落在 `server/data/app.db`（已被 .gitignore 忽略）。
 > 配置优先级：命令行参数 > 环境变量 > 默认值，完整清单见 `.env.example`。
 > **生产环境必须设置 `SGW_JWT_SECRET`**，否则进程启动即退出（重置密钥会让所有会话失效）。
-> 前端默认连 `http://127.0.0.1:8787`；可用环境变量 `VITE_API_BASE` 或
-> 设置页里的「服务地址」覆盖（写入 `localStorage['sgw.apiBase']`，优先级最高）。
+> 前端默认**同源**（请求 `/api/...`，由反代转发到后端）；要指向别的后端，用环境变量
+> `VITE_API_BASE`（只写 origin，**不带 `/api`**）或登录页 / 设置页里的「服务地址」
+> （写入 `localStorage['sgw.apiBase']`，优先级最高）——完整口径见铁律 #63。
 >
 > **开发要两个进程**：只跑 `npm run dev`（前端）时，登录页会报「无法连接服务器」——
 > 这是登录系统引入真实后端后最容易踩的坑。用 `npm run dev:all` 一次拉起前后端。
+>
+> **手机 / 局域网访问**：dev server 监听所有网卡，并把 `/api` **同源代理**到后端 ⇒
+> 手机打开 `http://<本机IP>:5173` 就能直接注册（不碰 CORS、不用手改地址）。
+> 前提：后端在跑（`npm run dev:all`）+ 防火墙放行 5173。
 >
 > **端到端**：`npm run test:e2e` 会自动起两个服务——真实后端（临时 SQLite 库，
 > 端口 8790）与静态预览（端口 4173），用例走完整注册 → 登录 → 云存档链路。

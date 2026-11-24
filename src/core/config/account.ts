@@ -42,8 +42,19 @@ export const ACCOUNT = {
   ACTION_WINDOW_MS: 60 * 1000,
   /** 成功动作的结果保留 24 小时，过期后仍保留动作 ID 防止重复执行。 */
   ACTION_REPLAY_WINDOW_MS: 24 * 60 * 60 * 1000,
-  /** 默认后端地址（前端在未配置时使用） */
-  DEFAULT_API_BASE: 'http://127.0.0.1:8787',
+  /**
+   * 默认后端地址（前端在未配置时使用）—— **空串 = 同源**。
+   *
+   * ⚠ 口径（前后端共用，改动前先读 `src/platform/account.ts` 的 `selectApiBase`）：
+   *   - base 只放「**后端 origin**」，**绝不能带 `/api`**：
+   *     客户端请求路径本身以 `/api/` 开头（`/api/auth/register` …），
+   *     base 只负责前缀 ⇒ 写成 `/api` 会拼出 `/api/api/auth/register` ⇒ 404。
+   *   - **空串 = 同源**：请求走当前域名，由反代转发到后端。
+   *     开发期是 Vite dev server 的 `/api` 代理，生产期是 nginx 的 `/api` 反代。
+   *   - 默认取同源而不是 `http://127.0.0.1:8787`：手机 / 局域网设备上
+   *     `127.0.0.1` 指的是**设备自己**，写死必然连不上（铁律 #14 的同源口径）。
+   */
+  DEFAULT_API_BASE: '',
 } as const
 
 /**

@@ -2363,8 +2363,9 @@ export interface AdAdapter {
 | `api` | `node:24-alpine` | Fastify + `node:sqlite`（Node 内置，零原生依赖） |
 | `web` | `nginx:1.27-alpine` | 托管 SPA 静态资源 + 把 `/api` 反代到 api |
 
-- **厂商中立的关键**：前端 API 地址用**相对路径 `/api`**（同源）→ 换域名 / 换托管**不必重新构建**；
-  部署件只依赖 Docker + nginx 标准模块 + 一份 `.env`。
+- **厂商中立的关键**：前端默认**同源**（base 留空，请求路径本身是 `/api/...`）
+  → 换域名 / 换托管**不必重新构建**；部署件只依赖 Docker + nginx 标准模块 + 一份 `.env`。
+  ⚠ base **绝不能写 `/api`**（会拼成 `/api/api/...`）——口径见 §12.8.6。
 - **镜像不携带数据**（库与备份都在命名卷 `sgw-data`）→ 代码回滚与数据回滚互相独立。
 - **生产密钥强制**：`SGW_JWT_SECRET` 没设时 compose 直接拒绝启动（`${SGW_JWT_SECRET:?}`），
   服务端在 `NODE_ENV=production` 且密钥为默认值时也拒绝启动。
@@ -2415,6 +2416,42 @@ export interface AdAdapter {
 2. **不支持多实例**：SQLite 不支持多进程并发写；扩容前必须先换数据库 + 换分布式锁
    （`server/src/db.ts` / `server/src/game/lock.ts`）。
 3. **真机未实测**（见 12.8.3）。
+
+### 12.8.6 后端地址口径与局域网访问（2026-11 实施修正）
+
+> 起因：玩家用手机打开 `http://<本机IP>:5173` **注册不了账户**
+> （提示「无法连接服务器，请检查网络或后端地址」）。
+
+**三个阻塞点**（缺一不可）：
+
+| # | 阻塞点 | 事实 |
+|---|---|---|
+| 1 | 后端只绑 `127.0.0.1` | 开发期默认 `SGW_HOST=127.0.0.1` ⇒ 手机连不到 `:8787` |
+| 2 | 前端默认地址写死 `127.0.0.1` | 在**手机**上 `127.0.0.1` 指的是手机自己 ⇒ 必然连不上 |
+| 3 | CORS 白名单没有 LAN 来源 | 白名单只有 localhost / 127.0.0.1 ⇒ 预检被拦 |
+
+**定案：同源代理**（而不是把后端绑 `0.0.0.0` + 维护 CORS 白名单 + 让玩家手改地址）：
+
+| 环境 | 前端请求 | 谁转发 | 依据 |
+|---|---|---|---|
+| 开发（5173） | `/api/...` | **Vite dev server** `server.proxy` → `127.0.0.1:8787` | `vite.config.ts` |
+| 本地验收（preview） | `/api/...` | Vite preview 代理 | `vite.config.ts` 的 `preview.proxy` |
+| 生产 | `/api/...` | **nginx** `location /api/` → api 容器 | `deploy/nginx.conf` |
+
+- 手机 / 局域网设备打开 `http://<本机IP>:5173` 即可注册：
+  **只跟 5173 说话** ⇒ 同源 ⇒ 不触发 CORS 预检 ⇒ 不用知道 LAN IP、换网络也不失效。
+- **后端地址口径**（唯一一份：`src/platform/account.ts` 的 `selectApiBase()`）：
+  优先级 = `localStorage['sgw.apiBase']` > `VITE_API_BASE` > core 默认（空串 = 同源）。
+  - base **只放后端 origin**，**绝不能带 `/api`**（客户端路径本身以 `/api/` 开头）。
+  - **空串 = 同源**（不是「没配置」）；默认值因此从 `http://127.0.0.1:8787` 改为 `''`。
+- **登录页必须能就地改地址**：设置页在路由守卫后面 ⇒ 连不上时玩家进不去设置页就改不了地址
+  ⇒ 死路（提示让他「检查后端地址」却不给地方改）。
+- ⚠ **`.env` 也会被 `vite build` 读到** ⇒ `.env` 里写死本地地址会把本地地址烤进生产产物。
+
+> 教训：`Dockerfile` 原写 `ARG VITE_API_BASE=/api`，与客户端路径口径冲突
+> ⇒ **生产构建的每个接口都 404**，而单测与 E2E 全绿（E2E 一直写 localStorage 绝对地址覆盖，
+> 从不走构建产物里的 base）⇒ 只有真部署一次才暴露。
+> 由 `tests/unit/account-client.test.ts`（默认同源 / 空串语义 / ★ 同源时路径不重复 `/api`）守护。
 
 ---
 

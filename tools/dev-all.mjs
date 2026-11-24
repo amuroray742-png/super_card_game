@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { networkInterfaces } from 'node:os'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const IS_WINDOWS = process.platform === 'win32'
@@ -61,8 +62,23 @@ function start(name, command) {
 process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
-console.log('[dev-all] 后端 → http://127.0.0.1:8787')
-console.log('[dev-all] 前端 → http://localhost:5173')
+/** 本机的局域网 IPv4（手机 / 其它设备能访问到的那些） */
+function lanAddresses() {
+  const out = []
+  for (const list of Object.values(networkInterfaces())) {
+    for (const ni of list ?? []) {
+      if (ni.family === 'IPv4' && !ni.internal) out.push(ni.address)
+    }
+  }
+  return out
+}
+
+console.log('[dev-all] 前端 → http://localhost:5173（dev server 把 /api 同源代理到后端）')
+console.log('[dev-all] 后端 → http://127.0.0.1:8787（只监听本机，手机不直连它）')
+console.log('[dev-all] 手机 / 局域网设备：打开 http://<本机IP>:5173 即可注册（走同源代理，不碰 CORS）')
+for (const ip of lanAddresses()) {
+  console.log(`[dev-all]   → http://${ip}:5173`)
+}
 console.log('[dev-all] Ctrl+C 一起停止')
 
 start('后端', 'npm run server:dev')

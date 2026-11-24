@@ -52,8 +52,10 @@ services:
       context: .
       target: web
       args:
-        # 同源相对地址 → 换域名不必重新构建
-        VITE_API_BASE: /api
+        # 同源（留空）→ 前端请求 `/api/xxx`，由 web 容器的 nginx 反代到 api 容器。
+        # 换域名不必重新构建（厂商中立）。**绝不能填 `/api`**：
+        # 客户端路径本身以 `/api/` 开头，base 再带 `/api` 会拼成 `/api/api/...` ⇒ 404。
+        VITE_API_BASE: ""
     restart: unless-stopped
     depends_on:
       api:

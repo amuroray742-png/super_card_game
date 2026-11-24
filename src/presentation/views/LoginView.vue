@@ -15,7 +15,6 @@ import {
   validatePassword,
   validateUsername,
 } from '../../core/config/account.ts'
-import { resolveApiBase } from '../../platform/account.ts'
 
 const account = useAccountStore()
 const router = useRouter()
@@ -28,10 +27,32 @@ const username = ref('')
 const password = ref('')
 const localError = ref<string | null>(null)
 
-const apiBase = computed(() => resolveApiBase())
-
 const busy = computed(() => account.busy)
 const errorText = computed(() => localError.value ?? account.error)
+
+/**
+ * **服务地址就地修改**（登录前就能改）。
+ *
+ * ⚠ 为什么必须在登录页：设置页在路由守卫后面 ⇒ 连不上后端时玩家
+ *   **进不去设置页**，也就改不了地址 ⇒ 死路（错误提示让玩家「检查后端地址」，
+ *   却不给地方改）。
+ */
+const addrEditing = ref(false)
+const apiBaseInput = ref(account.apiBaseOverride || account.apiBase)
+
+function toggleAddrEditing(): void {
+  addrEditing.value = !addrEditing.value
+  if (addrEditing.value) apiBaseInput.value = account.apiBaseOverride || account.apiBase
+}
+
+/** 保存服务地址（空串 = 清除覆盖） */
+function saveApiBase(): void {
+  account.saveApiBase(apiBaseInput.value)
+  addrEditing.value = false
+  apiBaseInput.value = account.apiBaseOverride || account.apiBase
+  localError.value = null
+  account.error = null
+}
 
 function switchMode(next: Mode) {
   mode.value = next
@@ -121,7 +142,20 @@ async function submit() {
 
       <div class="login-foot">
         <button class="link tiny" @click="router.push('/compliance')">合规与概率公示</button>
-        <span class="tiny muted addr">{{ apiBase }}</span>
+        <button class="link tiny addr addr-edit-toggle" @click="toggleAddrEditing">
+          服务地址 {{ account.apiBaseLabel }}{{ addrEditing ? '（收起）' : '（修改）' }}
+        </button>
+      </div>
+
+      <div v-if="addrEditing" class="addr-edit">
+        <input v-model="apiBaseInput" class="addr-input" placeholder="留空 = 同源；或填后端地址（不带 /api）" />
+        <button class="btn btn-sm btn-block" style="margin-top: 6px" @click="saveApiBase">
+          保存服务地址
+        </button>
+        <p class="tiny muted" style="margin: 6px 0 0; line-height: 1.6">
+          连不上后端时改这里。留空 = 同源（开发服与正式服的 <code>/api</code> 都会自动转发）；
+          独立部署的后端填完整 origin，例如 <code>http://192.168.1.10:8787</code>（不要带 <code>/api</code>）。
+        </p>
       </div>
     </div>
 
@@ -233,6 +267,7 @@ async function submit() {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .link {
@@ -240,14 +275,38 @@ async function submit() {
   text-decoration: underline;
 }
 
-.addr {
+/* 服务地址：默认只显示一行，改的时候才展开输入框 */
+.addr,
+.addr-edit-toggle {
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 10px;
   opacity: 0.7;
+  text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 55%;
+  max-width: 62%;
+}
+
+.addr-edit {
+  margin-top: 8px;
+}
+
+.addr-input {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--c-line);
+  background: var(--c-bg-2);
+  color: var(--c-text-dim);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  outline: none;
+}
+
+.addr-input:focus {
+  border-color: var(--c-line-2);
 }
 
 .age {

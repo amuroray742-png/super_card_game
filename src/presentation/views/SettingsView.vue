@@ -9,11 +9,6 @@ import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import { useAccountStore } from '../stores/account'
 import { storage } from '../../platform/storage.ts'
-import {
-  readApiBaseOverride,
-  resolveApiBase,
-  writeApiBaseOverride,
-} from '../../platform/account.ts'
 import { BATTLE } from '../../core/config/economy.ts'
 import pkg from '../../../package.json'
 
@@ -40,13 +35,12 @@ function toggleSkipAnim() {
 
 // ─────────────────────────── 账号 ───────────────────────────
 
-/** 当前后端地址（localStorage 覆盖优先，其次环境变量，最后默认值） */
-const apiBase = computed(() => resolveApiBase())
+/** 当前后端地址（唯一来源：账号 store；改完立刻生效并刷新显示） */
+const apiBase = computed(() => account.apiBase)
 /** 可编辑的服务地址（静态托管时指向自建后端） */
-const apiBaseInput = ref(readApiBaseOverride() || apiBase.value)
-
+const apiBaseInput = ref(account.apiBaseOverride || account.apiBase)
 function saveApiBase() {
-  writeApiBaseOverride(apiBaseInput.value)
+  account.saveApiBase(apiBaseInput.value)
   store.notify('服务地址已保存', 'ok')
 }
 
@@ -139,9 +133,9 @@ async function doReset() {
       </div>
       <div class="row-between tiny" style="margin-bottom: 6px">
         <span class="muted">服务地址</span>
-        <b class="addr">{{ apiBase }}</b>
+        <b class="addr">{{ account.apiBaseLabel }}</b>
       </div>
-      <input v-model="apiBaseInput" class="addr-input" placeholder="http://127.0.0.1:8787" />
+      <input v-model="apiBaseInput" class="addr-input" placeholder="留空 = 同源；或填后端地址（不带 /api）" />
       <button class="btn btn-sm btn-block" style="margin-top: 6px" @click="saveApiBase">
         保存服务地址
       </button>

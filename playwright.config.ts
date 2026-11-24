@@ -50,6 +50,9 @@ export default defineConfig({
     {
       command: `npm run build && npm run preview -- --port ${PREVIEW_PORT} --host 127.0.0.1`,
       url: `http://127.0.0.1:${PREVIEW_PORT}`,
+      // preview 的同源代理指向**本轮 E2E 的后端**（不是开发后端 8787）：
+      // 否则「忘了注入后端地址」的用例会悄悄打到开发后端上（串台 + 假绿）。
+      env: { SGW_PREVIEW_API_TARGET: E2E_API_BASE },
       reuseExistingServer: true,
       timeout: 180_000,
     },

@@ -21,3 +21,7 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
+# 开发期的**共用**环境变量要入库（`.env.development` 把前端指向同源 `/api`，
+# 让手机 / 局域网设备打开 dev server 就能注册）；
+# 个人覆盖写 `.env.local`（被上面的 `.env.*` 忽略，不入库）。
+!.env.development

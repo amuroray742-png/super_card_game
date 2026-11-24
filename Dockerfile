@@ -26,9 +26,16 @@ RUN npm ci
 
 COPY . .
 
-# 前端用**相对**的 API 地址（/api）：同一份构建在任何域名下都指向同源，
+# 前端默认走**同源** `/api`（base 留空 = 同源）：同一份构建在任何域名下都指向同源，
 # 由 nginx 反向代理到 api 容器 —— 换域名 / 换托管不必重新构建（厂商中立的关键）。
-ARG VITE_API_BASE=/api
+#
+# ⚠ base 只放「**后端 origin**」，**绝不能写 `/api`**：
+#   客户端的请求路径本身以 `/api/` 开头（`/api/auth/register` …），
+#   base 只负责前缀 ⇒ 写 `/api` 会拼成 `/api/api/auth/register` ⇒ 404，
+#   生产环境会**所有接口都挂**（且只在真部署时才暴露）。
+#   只有「前端与后端不同源」（静态托管 + 独立 API 域名）才需要填绝对地址，
+#   例如 `https://api.example.com`。
+ARG VITE_API_BASE=""
 ENV VITE_API_BASE=${VITE_API_BASE}
 RUN npm run build
 

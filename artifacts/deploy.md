@@ -107,8 +107,18 @@ docker compose logs -f api
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `VITE_API_BASE` | `http://127.0.0.1:8787` | **部署时设为 `/api`**（同源相对地址） |
+| `VITE_API_BASE` | 空（**同源**） | 后端 origin；**绝不能带 `/api`**（会拼成 `/api/api/...` ⇒ 404）。只有「前端与后端不同源」才填绝对地址 |
 | `VITE_CONTACT_EMAIL` | 空 | 客服邮箱；未配置时合规页显式提示「尚未配置」 |
+
+> **为什么是「同源」而不是 `/api`**：客户端的请求路径**本身以 `/api/` 开头**
+> （`/api/auth/register` …），base 只做前缀 ⇒ base 写 `/api` 会拼成
+> `/api/api/auth/register` ⇒ 404（且只在真部署时暴露：单测与 E2E 都往
+> `localStorage['sgw.apiBase']` 写绝对地址覆盖，从不走构建产物里的 base）。
+> 留空 ⇒ 请求就是 `/api/xxx`，由 nginx 的 `location /api/` 原样转发
+> （`proxy_pass` 不剥前缀，与后端路由 `/api/...` 对得上）。
+>
+> ⚠ `.env` **也会被 `vite build` 读到**：往里面写死 `http://127.0.0.1:8787`
+> 会把本地地址烤进生产产物 ⇒ 线上接口全挂。`.env.example` 里该变量留空。
 
 > `.env` 由 Node 24 原生 `--env-file-if-exists` 加载（见 `package.json` 的
 > `server:dev` / `server:start`），**不引入 dotenv**。容器内不走 `.env`，

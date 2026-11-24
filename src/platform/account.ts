@@ -103,17 +103,48 @@ function store(): Storage | null {
 }
 
 /**
- * 解析后端地址。
+ * 选出后端地址（**纯函数**，不碰 localStorage / import.meta.env）。
  *
- * 优先级：`localStorage['sgw.apiBase']` → `VITE_API_BASE` → 默认值。
+ * ⚠ 口径（唯一一份，改这里就够）：
+ *   - base 只放「**后端 origin**」，**绝不能带 `/api`**：
+ *     客户端的请求路径**本身就以 `/api/` 开头**（`/api/auth/register` …），
+ *     base 只负责前缀 ⇒ 写成 `/api` 会拼出 `/api/api/auth/register` ⇒ 404。
+ *   - **空串 = 同源**（不是「没配置」）：
+ *     开发期由 Vite dev server 反代 `/api`，生产由 nginx 反代 `/api`
+ *     ⇒ base 为空时请求就是 `/api/xxx`，与反代规则严丝合缝。
+ *   - 优先级：`localStorage` 覆盖 > 环境变量 > core 默认值。
+ *
+ * ⚠ 为什么拆成纯函数：环境变量在测试环境里**不一定存在**（本地 `.env` 一变
+ *   断言就飘）⇒ 纯函数才能把「覆盖 / 环境变量 / 默认」三条分支**逐条**测到，
+ *   不依赖运行环境。
+ */
+export function selectApiBase(
+  override: string | null | undefined,
+  fromEnv: string | null | undefined,
+): string {
+  const ov = override?.trim()
+  if (ov) return ov.replace(/\/+$/, '')
+  // ⚠ 用 `!== undefined` 而不是真值判断：空串是**有意义的**（同源）。
+  if (fromEnv !== undefined && fromEnv !== null) {
+    return String(fromEnv).trim().replace(/\/+$/, '')
+  }
+  return ACCOUNT.DEFAULT_API_BASE.replace(/\/+$/, '')
+}
+
+/**
+ * 解析后端地址（运行时入口）。
+ *
+ * 优先级：`localStorage['sgw.apiBase']` → `VITE_API_BASE` → core 默认值（同源）。
  * 放在 localStorage 是为了让**静态托管**的同一份构建指向不同后端，
  * 也让 E2E 不必跨平台设置环境变量。
+ *
+ * 口径细则见 `selectApiBase`（那是唯一一份定义）。
  */
 export function resolveApiBase(): string {
-  const override = store()?.getItem(ACCOUNT_STORAGE_KEYS.API_BASE)?.trim()
-  const fromEnv = import.meta.env?.VITE_API_BASE ? String(import.meta.env.VITE_API_BASE) : ''
-  const raw = override || fromEnv || ACCOUNT.DEFAULT_API_BASE
-  return raw.replace(/\/+$/, '')
+  return selectApiBase(
+    store()?.getItem(ACCOUNT_STORAGE_KEYS.API_BASE),
+    import.meta.env?.VITE_API_BASE,
+  )
 }
 
 /** 读取本地会话；损坏的存档按「没有会话」处理 */
@@ -381,5 +412,10 @@ export class AccountClient {
   }
 }
 
-/** 默认客户端实例（后端地址在构造时解析一次） */
+/**
+ * 默认客户端实例。
+ *
+ * ⚠ **地址在每次请求时解析**（`baseUrl` 是 getter，不是构造时定下的）——
+ *   玩家在登录页 / 设置页改了「服务地址」后，下一个请求就生效，不用刷新。
+ */
 export const accountClient = new AccountClient()

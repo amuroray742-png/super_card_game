@@ -39,7 +39,24 @@ npm run server:start    # 启动后端（部署入口）
 
 后端优先读取命令行参数，其次是环境变量和默认值。配置项见 `.env.example`。
 部署时设置 `NODE_ENV=production`，并为 `SGW_JWT_SECRET` 配置独立密钥。
-前端默认连 `http://127.0.0.1:8787`，可用 `VITE_API_BASE` 或设置页里的「服务地址」覆盖。
+
+前端默认**同源**：请求打 `/api/...`，由反向代理转发到后端——开发期是 Vite dev server
+的 `/api` 代理，生产期是 nginx 的 `/api` 反代。要指向别的后端，用环境变量
+`VITE_API_BASE`（**只写 origin，不要带 `/api`**）或登录页 / 设置页里的「服务地址」
+（`localStorage['sgw.apiBase']`，优先级最高）。口径详见 [`AGENTS.md` 铁律 #63](AGENTS.md)。
+
+## 手机 / 局域网访问
+
+`npm run dev:all` 会让 dev server 监听所有网卡，并把 `/api` **同源代理**到本机后端：
+
+```bash
+npm run dev:all
+# 电脑浏览器：http://localhost:5173
+# 手机浏览器：http://<本机IP>:5173   ← 直接就能注册
+```
+
+不需要改后端地址、也不需要动 CORS 白名单（同源请求不触发预检）。
+前提是后端在跑，且电脑防火墙放行 5173 端口。
 
 ## 目录
 

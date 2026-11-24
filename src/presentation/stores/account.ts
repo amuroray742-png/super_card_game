@@ -19,7 +19,10 @@ import {
   AccountError,
   accountClient,
   clearStoredSession,
+  readApiBaseOverride,
   readStoredSession,
+  resolveApiBase,
+  writeApiBaseOverride,
   writeStoredSession,
   type AccountUser,
   type AuthResult,
@@ -61,6 +64,38 @@ export const useAccountStore = defineStore('account', () => {
   const accessToken = ref<string | null>(null)
 
   const isAuthenticated = computed(() => status.value === 'authenticated' && user.value !== null)
+
+  /**
+   * **后端地址覆盖**（`localStorage['sgw.apiBase']`）。
+   *
+   * ⚠ 必须放在 **ref** 里，不能让界面直接读 `localStorage`：
+   *   `computed(() => resolveApiBase())` 没有任何响应式依赖 ⇒ 只算一次、
+   *   **之后再也不会更新** ⇒ 改完地址，界面显示的还是旧值。
+   */
+  const apiBaseOverride = ref(readApiBaseOverride())
+
+  /** 当前生效的后端地址（登录页与设置页的唯一显示来源） */
+  const apiBase = computed(() => apiBaseOverride.value || resolveApiBase())
+
+  /**
+   * 后端地址的**显示文案**。
+   *
+   * ⚠ 空串 = 同源（请求走当前域名，由反代转发）⇒ 直接显示会是一片空白，
+   *   玩家会以为「地址没配好」。写清楚。
+   */
+  const apiBaseLabel = computed(() => apiBase.value || '同源（当前域名）')
+
+  /**
+   * 保存后端地址（传空串 = 清除覆盖，回到环境变量 / 默认值）。
+   *
+   * ⚠ **登录前也要能改**：设置页在路由守卫后面 ⇒ 连不上后端时玩家
+   *   进不去设置页，就没法改地址 ⇒ 死路。所以登录页也提供同一个入口。
+   */
+  function saveApiBase(value: string): void {
+    writeApiBaseOverride(value)
+    // ⚠ 与落盘口径保持一致（去掉末尾斜杠）：显示的地址与实际请求地址不能两套。
+    apiBaseOverride.value = value.trim().replace(/\/+$/, '')
+  }
 
   let restoreTask: Promise<void> | null = null
 
@@ -305,6 +340,10 @@ export const useAccountStore = defineStore('account', () => {
     busy,
     accessToken,
     isAuthenticated,
+    apiBase,
+    apiBaseLabel,
+    apiBaseOverride,
+    saveApiBase,
     ensureRestored,
     restore,
     login,
