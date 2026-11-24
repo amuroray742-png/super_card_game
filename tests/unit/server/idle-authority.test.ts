@@ -98,3 +98,49 @@ it('三通道的预算各自独立：结算一条通道不动另外两条', asyn
   // 结算上限按每通道 2000 次（IDLE.MAX_ROLLS_PER_SETTLEMENT）
   expect(IDLE.MAX_ROLLS_PER_SETTLEMENT).toBe(2000)
 })
+
+/**
+ * ⚠ **回归**：心跳回执必须带**各通道待结算次数**。
+ *
+ * 推征页「全部领取（N 次）」原来读**客户端镜像**里的 `effectiveMs`，
+ * 而服务端**回包前必先结算** ⇒ 镜像里的余额恒是「不足一次」的余数
+ * ⇒ 界面永远显示「0 次」，点下去服务端照发（数字自相矛盾）。
+ *
+ * 心跳是唯一会持续累积时间账本的通道 ⇒ **真相只能从心跳回执出**。
+ * 同时守住铁律 #33：心跳**不回传存档主体**（只多带三个数字）。
+ */
+it('心跳回执带各通道待结算次数，且仍不回传存档主体', async () => {
+  let now = 1700000000000
+  vi.spyOn(Date, 'now').mockImplementation(() => now)
+  bundle = buildApp({ dbPath: ':memory:', jwtSecret: 'idle-test-secret', accessTokenTtlSec: 900, refreshTokenTtlSec: 3600, corsOrigins: [] })
+  const register = await bundle.app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'idle_pending', password: 'correct-horse-1' } })
+  const id = register.json().user.id as number
+  const save = createNewSave(now, 555)
+  save.heroes.xiangyu = { ...createHeroState('xiangyu', now), level: 240, star: 6 }
+  save.team.slots[0] = 'xiangyu'
+  save.campaign.clearedStage = 1
+  save.idle.channels.main.target = { kind: 'main', stageId: null }
+  writeSave(bundle.db, id, serialize(save), now, now)
+  const service = new GameService(bundle.db, new UserLock())
+
+  // 挂 60 秒（够 10 次掷奖）后发一次心跳
+  now += 60_000
+  const hb = await service.execute(id, { actionId: 'hb-pending', action: { type: 'idle.heartbeat' } })
+  expect(hb.ok).toBe(true)
+
+  // ① 回执带各通道待结算次数
+  const pending = (hb.result as { pending: Record<string, number> }).pending
+  expect(pending).toEqual({ main: 10, skill: 0, enhance: 0 })
+
+  // ② ⚠ 铁律 #33：心跳**不回传存档主体**（只多带三个数字，不能整包回传）
+  expect(hb.save).toBeUndefined()
+
+  // ③ ★ 按钮上写的次数 == 点「全部领取」实际拿到的次数
+  const tick = await service.execute(id, { actionId: 'idle-pending-tick', action: { type: 'idle.tick' } })
+  expect(tick.ok).toBe(true)
+  const result = tick.result as { rolls: number; channels: { channel: string; rolls: number }[] }
+  expect(result.rolls).toBe(pending.main + pending.skill + pending.enhance)
+  expect(result.channels.find((c) => c.channel === 'main')?.rolls).toBe(pending.main)
+  // 产出真的入账了（服务端读到的银两 > 0）
+  expect(readServerSave(bundle.db, id).player.silver).toBeGreaterThan(0)
+})

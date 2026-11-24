@@ -152,8 +152,11 @@ describe('在线租约心跳', () => {
     const b = store.heartbeat()
     await started
     release()
-    expect(await a).toBe(true)
-    expect(await b).toBe(true)
+    // ⚠ 心跳回执带**各通道待结算次数**（服务端账本的真相，几十字节）。
+    //   客户端镜像拿不到它（心跳不回传存档主体），界面「全部领取（N 次）」只能靠这个数。
+    const pending = await a
+    expect(pending?.pending).toEqual({ main: 0, skill: 0, enhance: 0 })
+    expect((await b)?.pending).toEqual({ main: 0, skill: 0, enhance: 0 })
     expect(heartbeats).toBe(1)
     // ⚠ 心跳是「轻量心跳」：只续约租约，**不回传存档主体**
     //   → 客户端镜像不刷新（镜像里的 activeUntil 是旧值，属正常）。
@@ -161,6 +164,8 @@ describe('在线租约心跳', () => {
     const serverSave = readServerSave(harness.bundle.db, useAccountStore().user!.id)
     expect(serverSave.idle.activeUntil).toBeGreaterThan(Date.now())
     expect(store.save.player.silver).toBe(before)
+    // ⚠ 心跳回执里的次数被 store 收下 ⇒ 界面显示的是服务端真相
+    expect(store.idlePending).toEqual({ main: 0, skill: 0, enhance: 0 })
     store.invalidate()
     expect(await store.heartbeat()).toBeNull()
   })

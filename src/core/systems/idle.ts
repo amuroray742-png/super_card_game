@@ -418,10 +418,7 @@ export function settleIdleChannels(
     }
     if (!payout) continue
 
-    const rolls = Math.min(
-      Math.floor((ch.effectiveMs + 0.000001) / ROLL_MS),
-      maxRolls,
-    )
+    const rolls = Math.min(rollsFromEffectiveMs(ch.effectiveMs), maxRolls)
     if (rolls <= 0) continue
 
     // ⚠ **挂机改版 v11**：掷奖走**这条通道自己的随机序列**（不是全局序列）——
@@ -482,10 +479,41 @@ export function measureIdleChannels(save: SaveData, now: number): boolean {
 }
 
 /**
+ * 有效毫秒 → 可结算次数（**展示与结算的唯一一份换算**，铁律 #4）。
+ *
+ * ⚠ 两处必须调用**同一个函数**：结算发多少，界面就得写多少。
+ *   差一个 `+0.000001` 的浮点余数 ⇒ 界面写「0 次」、点下去发 1 次
+ *   （玩家看到 0 却拿到东西，第一反应是「这按钮坏了」）。
+ */
+export function rollsFromEffectiveMs(effectiveMs: number): number {
+  if (!Number.isFinite(effectiveMs) || effectiveMs <= 0) return 0
+  return Math.floor((effectiveMs + 0.000001) / ROLL_MS)
+}
+
+/**
  * 某条通道当前**可结算的次数**（界面显示用；与结算口径同一份换算）。
  */
 export function idleChannelRolls(ch: IdleChannelState): number {
-  return Math.max(0, Math.floor(ch.effectiveMs / ROLL_MS))
+  return rollsFromEffectiveMs(ch.effectiveMs)
+}
+
+/**
+ * 三条通道的**待结算次数**（服务端账本口径）。
+ *
+ * ⚠ 界面显示的「可结算 N 次」**必须取这里**（服务端真相），
+ *   **不能**读客户端镜像里的 `effectiveMs`：
+ *   客户端镜像只在服务端回包时刷新，而服务端**回包前必先结算**
+ *   ⇒ 镜像里的余额恒是「不足一次」的余数（< `IDLE.SECONDS_PER_ROLL`）
+ *   ⇒ 界面永远显示「0 次」，而点下去服务端照发（数字自相矛盾）。
+ *
+ *   服务端的真相只有两处能拿到：**心跳回执**（实时）与**结算回执**（结算后）。
+ */
+export function idlePendingRolls(save: SaveData): Record<IdleChannelKind, number> {
+  const out = {} as Record<IdleChannelKind, number>
+  for (const kind of IDLE_CHANNEL_KINDS) {
+    out[kind] = idleChannelRolls(save.idle.channels[kind])
+  }
+  return out
 }
 
 /**

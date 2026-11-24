@@ -24,7 +24,6 @@ import {
   dungeonStagesOf,
   type DungeonKind,
 } from '../../core/config/dungeons.ts'
-import { idleChannelRolls } from '../../core/systems/idle.ts'
 import { formatNumber, formatPower } from '../utils/format'
 import { rewardLines } from '../utils/reward-text'
 import StageDetailModal from '../components/StageDetailModal.vue'
@@ -95,7 +94,7 @@ function dungeonTargetName(kind: IdleChannelKind): string | null {
   return DUNGEON_STAGE_INDEX.get(id)?.name ?? null
 }
 
-/** 三张通道卡（口径与 core 同一份换算） */
+/** 三张通道卡（次数取**服务端口径**：心跳回执的 `idlePending`） */
 const channels = computed<ChannelCard[]>(() => {
   const main = store.save.idle.channels.main
   const skill = store.save.idle.channels.skill
@@ -107,7 +106,7 @@ const channels = computed<ChannelCard[]>(() => {
       kind: 'main',
       name: '主线',
       targetName: mainTargetName(),
-      rolls: idleChannelRolls(main),
+      rolls: store.idlePending.main,
       perRoll: '经验书 / 银两',
       hint: store.clearedStage <= 0 ? '首次手动通关后开始计量' : null,
       enabled: main.target !== null,
@@ -116,7 +115,7 @@ const channels = computed<ChannelCard[]>(() => {
       kind: 'skill',
       name: '技能副本',
       targetName: skillName,
-      rolls: idleChannelRolls(skill),
+      rolls: store.idlePending.skill,
       perRoll: '对应五行的技能材料',
       hint: skillName ? null : '通关一个技能副本关卡后即可开启',
       enabled: skill.target !== null,
@@ -125,7 +124,7 @@ const channels = computed<ChannelCard[]>(() => {
       kind: 'enhance',
       name: '强化副本',
       targetName: enhanceName,
-      rolls: idleChannelRolls(enhance),
+      rolls: store.idlePending.enhance,
       perRoll: '对应档位的强化石',
       hint: enhanceName ? null : '通关一个强化副本关卡后即可开启',
       enabled: enhance.target !== null,

@@ -122,6 +122,7 @@ import {
 } from './gacha.ts'
 import {
   IDLE_CHANNEL_KINDS,
+  idlePendingRolls,
   measureIdleChannels,
   mergeRewardBundles,
   resolveChannelTarget,
@@ -378,10 +379,28 @@ export interface LadderReturnResult {
   days: number
 }
 
+/**
+ * **心跳回执**（轻量：只有三个数字，**不回传存档主体**）。
+ *
+ * ⚠ 为什么心跳必须带「待结算次数」：
+ *   客户端镜像只在服务端回包时刷新，而服务端**回包前必先结算**
+ *   ⇒ 镜像里的挂机余额恒是「不足一次」的余数
+ *   ⇒ 界面若只读镜像，「全部领取（N 次）」会**永远显示 0 次**，
+ *     而点下去服务端照发（数字自相矛盾，玩家以为按钮坏了）。
+ *   心跳是唯一会持续累积时间账本的通道 ⇒ 真相只能从这里出。
+ *
+ * ⚠ 心跳**仍然不回传存档主体**（铁律 #33）：三个数字几十字节，
+ *   整包回传才是每 5 秒一次的带宽成本。
+ */
+export interface HeartbeatResult {
+  /** 各通道当前**可结算次数**（服务端账本口径；点击领取实际会拿到这么多） */
+  pending: Record<IdleChannelKind, number>
+}
+
 export interface ActionResultMap {
   'gacha.pull': PullActionResult
   'idle.tick': IdleActionResult
-  'idle.heartbeat': true
+  'idle.heartbeat': HeartbeatResult
   'idle.claimOffline': IdleActionResult
   'idle.setChannel': IdleChannelResult
   'campaign.challenge': CampaignChallengeResult
@@ -2037,7 +2056,10 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
     if (measurable) {
       save.idle.activeUntil = ctx.now + IDLE.ACTIVE_LEASE_MS
     }
-    return ok(true)
+    // ⚠ 回执带**各通道待结算次数**（服务端账本的真相，几十字节）。
+    //   计量在前面 ⇒ 这里算出来的就是「此刻点领取会拿到多少次」。
+    //   仍**不回传存档主体**（铁律 #33）。
+    return ok<HeartbeatResult>({ pending: idlePendingRolls(save) })
   },
   'idle.claimOffline': actionIdleClaimOffline,
   'idle.setChannel': actionIdleSetChannel,

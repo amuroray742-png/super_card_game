@@ -40,8 +40,8 @@ import { systemClock } from '../../core/time.ts'
 import { HEROES, HERO_INDEX } from '../../core/config/heroes/index.ts'
 import { STAGES } from '../../core/config/stages.ts'
 import { computeBondState, isTeamEmpty } from '../../core/systems/team.ts'
-import { type IdleActionResult } from '../../core/systems/actions.ts'
-import { idleChannelRolls, type ChannelSettlement } from '../../core/systems/idle.ts'
+import { type HeartbeatResult, type IdleActionResult } from '../../core/systems/actions.ts'
+import { idlePendingRolls, type ChannelSettlement } from '../../core/systems/idle.ts'
 import { getEquippedRelics, equippedOwnerMap, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { getPool } from '../../core/config/pools.ts'
 import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, RELIC_SETS } from '../../core/systems/relic.ts'
@@ -155,6 +155,19 @@ export const useGameStore = defineStore('game', () => {
   }
   /** 离线结算结果（三通道明细） */
   const offlineReport = shallowRef<IdleActionResult | null>(null)
+  /**
+   * 三条挂机通道的**待结算次数**（界面显示「可结算 N 次」的唯一来源）。
+   *
+   * ⚠ **不能读客户端镜像里的 `effectiveMs`**：
+   *   镜像只在服务端回包时刷新，而服务端**回包前必先结算**
+   *   ⇒ 镜像里的余额恒是「不足一次」的余数 ⇒ 界面会永远显示「0 次」，
+   *     而点下去服务端照发（数字自相矛盾）。
+   *
+   * ⚠ 真相有两个来源，**都取服务端口径**：
+   *   ① **心跳回执**（`idle.heartbeat` 的 `pending`）——实时；
+   *   ② **收到存档快照时按同一份换算重算**（服务端刚结算过 ⇒ 与服务端一致）。
+   */
+  const idlePending = ref<Record<IdleChannelKind, number>>({ main: 0, skill: 0, enhance: 0 })
   /** 全局提示 */
   const toast = ref<{ text: string; kind: 'info' | 'ok' | 'warn' } | null>(null)
   /** 新手引导步骤（-1 = 结束） */
@@ -255,6 +268,9 @@ export const useGameStore = defineStore('game', () => {
     const next = deserializePublicSave(snapshot.payload)
     next.savedAt = snapshot.savedAt
     save.value = next
+    // ⚠ 收到存档快照 = 服务端**刚结算过**（回包前必先结算）⇒ 此刻的待结算次数
+    //   按**同一份换算**重算即可与服务端对齐（心跳回包是另一条实时来源）。
+    idlePending.value = idlePendingRolls(next)
     // 回放倍速跟随服务端设置（设置本身也是服务端权威的）
     battleSpeed.value = next.settings.speed ?? 1
     // 缓存同步写完再返回：界面与自动化脚本读缓存时拿到的就是最新版本
@@ -551,6 +567,8 @@ export const useGameStore = defineStore('game', () => {
     save.value = createNewSave(clock.now())
     // 上一个账号的离线结算报告不能带到新账号上
     offlineReport.value = null
+    // 同理：上一个账号的挂机待结算次数不能带到新账号上（会显示成「有 N 次可领」）
+    idlePending.value = { main: 0, skill: 0, enhance: 0 }
     // 同理：上一场战斗的回放不能带到新账号
     challengeReplay.value = null
   }
@@ -607,13 +625,16 @@ export const useGameStore = defineStore('game', () => {
   })
 
   /**
-   * 三条挂机通道的**可结算次数**（界面显示用；口径与 core 同一份换算）。
+   * 三条挂机通道的**可结算次数**（界面显示用）。
+   *
+   * ⚠ 取 `idlePending`（服务端口径），**不是**客户端镜像里的 `effectiveMs`——
+   *   镜像里的余额恒是「不足一次」的余数 ⇒ 永远显示 0 次（见 `idlePending` 注释）。
    */
   const idleChannels = computed(() =>
     (['main', 'skill', 'enhance'] as const).map((kind) => ({
       kind,
       state: save.value.idle.channels[kind],
-      rolls: idleChannelRolls(save.value.idle.channels[kind]),
+      rolls: idlePending.value[kind],
     })),
   )
 
@@ -632,12 +653,17 @@ export const useGameStore = defineStore('game', () => {
 
   // ─────────────────────────── 挂机 ───────────────────────────
 
-  let heartbeatTask: Promise<true | null> | null = null
+  let heartbeatTask: Promise<HeartbeatResult | null> | null = null
   /** 可见性由App传达；store不读DOM。复用动作队列与账号世代检查。 */
-  function heartbeat(): Promise<true | null> {
+  function heartbeat(): Promise<HeartbeatResult | null> {
     if (!loaded.value || offline.value || !useAccountStore().isAuthenticated) return Promise.resolve(null)
     if (heartbeatTask) return heartbeatTask
-    const task = runAction({ type: 'idle.heartbeat' })
+    const task = runAction({ type: 'idle.heartbeat' }).then((res) => {
+      // ⚠ 心跳回执带**各通道待结算次数**（服务端账本的真相）——
+      //   客户端镜像拿不到（心跳不回传存档主体），界面只能靠这个数显示。
+      if (res) idlePending.value = res.pending
+      return res
+    })
     heartbeatTask = task
     void task.finally(() => { if (heartbeatTask === task) heartbeatTask = null })
     return task
@@ -1217,6 +1243,7 @@ export const useGameStore = defineStore('game', () => {
     busy,
     challengeReplay,
     offlineReport,
+    idlePending,
     toast,
     guideStep,
     guideSeen,
