@@ -191,6 +191,11 @@
 > **实施修正（挂机系统改版 v11）**：挂机**不再推关**——
 > 三条通道（主线 / 技能副本 / 强化副本）**各自独立计量**、并行产出，
 > **推进关卡改成纯手动挑战**。下图是 v11 之后的形态（详见 §5.7 / §12.13）。
+>
+> **实施修正（存档 v12 · 遗物副本）**：通道从 **3 条变 4 条**——
+> 新增**遗物通道**（遗物副本是遗物的唯一来源，也是第 4 条挂机通道，受每日额度约束）；
+> 副本从 **24 关变 42 关**（+6 遗物变体 × 3 难度）。
+> 下图按 v11 的三通道画法保留为设计记录，实际形态以 §5.7 与 §12.13 的 v12 修正为准。
 
 ```
         ┌──────────────────────────────────────────────┐
@@ -290,6 +295,13 @@
 | **遗物** | 遗物本体 + 强化石 + 银两 | 6 槽位，遗物 1–200 级（Lv60 起进入淬炼段，价格指数上升），套装 2/4/6 件效果 | 最大乘区，深度主来源 |
 | **羁绊** | 自动（编队触发） | 标签计数阈值 | 编队策略价值 |
 
+> **实施修正（存档 v12 · 遗物副本）**：遗物本体的**来源**从「花 5000 银两祈愿」
+> 改为**遗物副本**（6 个副本 × 3 难度 = 18 关，12 个套装两两配对），
+> 并成为**第 4 条挂机通道**（受每日额度约束）。
+> ⇒ 遗物本体从「花钱买的随机物」变成「副本产出」，
+>   强化石仍是真正的瓶颈（Lv200 × 216 装备位 ≈ 8.6 万个强化石）。
+> 设计稿见 [`relic-dungeon-plan.md`](relic-dungeon-plan.md)；铁律见 AGENTS.md #59 / #64 / #65。
+
 **境界门槛**：进入下一境界需特定材料（如"名阶"需 1 张指定名阶突破书），制造周期性目标。
 
 **经验曲线**：`expToNext(L) = 60 × 1.025^(L-1) × expScale(境界)`，`expScale` 为**绝对台阶系数**：凡阶 1 / 名阶 5 / 圣阶 15 / 神阶 40。
@@ -379,6 +391,44 @@
 > 回归守护：`tests/unit/store-relic.test.ts`（真实 store 链路 5 例：挂机入库 / 实例结构完整 /
 > 多场累加 / 落盘不丢 / 离线结算）+ `tests/e2e/relic.spec.ts`（玩家操作链路 2 例：
 > 推征 → 仓库有遗物 → 刷新不丢 → 能打开详情并装备；连推两轮逐轮累加）。
+
+> **实施修正（2026-11-24，挂机改版 v11 之后：遗物入口「动作层有、界面没有」）**
+>
+> 玩家反馈「又无法掉落遗物了」。根因**不是**掉落表坏了，而是**入口根本没接线到界面**：
+>
+> | 环节 | v11 之后的状态 |
+> |---|---|
+> | 掉落表 | 遗物**已被移出**（设计如此：只发经验书 / 银两 / 圣杯结晶 / 副本材料） |
+> | core 动作层 | `relic.acquire` **已实现**（`actions.ts` 的 `actionRelicAcquire`）→ **存档 v12 已下线** |
+> | 动作协议 / 服务端 | **已接通**（`action-protocol.ts` 解析 + 服务端动作层落库） |
+> | store | **已实现**（`stores/game.ts` 的 `acquireRelic()`） |
+> | **表现层界面** | **没有任何按钮调用它** ⇒ 玩家在游戏里**一件遗物都拿不到** |
+>
+> 连锁后果（它等于「整条养成链锁死」）：
+> 初阶强化副本要求「持有 Lv1 遗物」才解锁（`dungeons.ts` 的 `dungeonUnlocked`）
+> → 没有遗物 ⇒ 强化副本进不去 → 强化石拿不到 → 遗物强化 / 套装加成整条线走不通。
+>
+> 为什么测试全绿：原有 E2E **直接打 `POST /api/action`** 测动作层，绕开了界面，
+> 于是「动作层通」被误当成「玩家点得到」。
+>
+> 修复：
+> - 背包 → 遗物分类新增「**遗物祈愿**」面板（`RelicWarehouse.vue`，`data-testid="relic-acquire"`）：
+>   价格、稀有度概率、余额不足提示、祈愿结果回显；
+> - 概率公示走 core 的**唯一一份** `relicAcquireRarityRates()`（实际抽签也读它）
+>   ⇒ 公示 = 实际（铁律 #4），表现层不自己换算百分比；
+> - 仓库空态引导文案改掉（原文案「可前往推征获取」在 v11 之后是**错的**——推征早不掉遗物了）；
+> - E2E 补一条**必须点界面按钮**的用例（动作层用例与界面用例各一条）。
+>
+> **结案（存档 v12 · 遗物副本）**：祈愿入口**已整体下线**
+> （动作 / 协议 / 配置 `RELIC_ACQUIRE` / 界面面板 / 模拟口径全部删除）。
+> 遗物改由**遗物副本**产出，入口在副本页**第三个 tab**
+> （`data-testid="dungeon-kind-relic"`）。
+> 新的不变量：**「遗物副本的 easy 档新号打得赢」**（E2E 硬卡）。
+> 祈愿被下线的理由：遗物是**零成本**产出，而仓库溢出会自动分解折算成银两
+> ⇒ 挂机 + 祈愿 = 无限印钞；且「花钱买随机遗物」与「副本产出」是两套投放逻辑。
+>
+> 教训：**动作层有 ≠ 玩家点得到**。「配置齐全 / 动作层通 / E2E 全绿」三者齐备，
+> 整条功能仍可能对玩家完全不可用——凡是核心循环入口，必须有一条**从界面点下去**的 E2E。
 
 > **实施修正（2026-11，遗物图标 / 一键推荐 / 套装可见性）**：玩家提了三件事——
 > ① 遗物没有图标；② 英灵页要能一键推荐装备；③ 遗物要有 2/4/6 件套装加成。
@@ -609,16 +659,17 @@
 >     main:    { target, measuredAt, effectiveMs, offlineElapsedMs, pendingOfflineMs },
 >     skill:   { …同上… },
 >     enhance: { …同上… },
+>     relic:   { …同上… },
 >   },
->   activeUntil,      // 在线租约：三条通道共用同一份时间轴（租约 = 「玩家此刻在线」）
->   totalIdleSeconds, // 已消费有效时长总和（秒）：三条分别累计后相加
+>   activeUntil,      // 在线租约：四条通道共用同一份时间轴（租约 = 「玩家此刻在线」）
+>   totalIdleSeconds, // 已消费有效时长总和（秒）：四条分别累计后相加
 > }
 > ```
 >
-> - 三条通道**各自**计量同一段墙钟时间、**各自记账** ⇒ 全开时三路同时产出，
+> - 四条通道**各自**计量同一段墙钟时间、**各自记账** ⇒ 全开时四路同时产出，
 >   玩家不用再为「今晚刷什么」做三选一。
 > - **一条通道坏了只坏一条**：目标形状非法 → 该通道 `target = null`（关闭，不计量），
->   不连累另外两条。
+>   不连累另外三条。
 > - **切换一条只结清那一条**：换目标前先按旧目标结清完整次数，剩余预算结转；
 >   关闭通道 = 结清 → 清空剩余预算与离线累计 → 重新打开从开启时刻起算。
 >
@@ -630,7 +681,7 @@
 >   也没有「挂机 12h 打不过却照样领满」的割裂感。
 > - 节奏单位由 `BATTLE.SECONDS_PER_BATTLE` 改为 **`IDLE.SECONDS_PER_ROLL` = 6 秒**
 >   （每 6 秒掷一次奖）；单次结算上限 `IDLE.MAX_ROLLS_PER_SETTLEMENT` = 2,000 次。
->   纯离线积满 3 小时 = 每通道 1,560 次，三通道全开 = 4,680 次。
+>   纯离线积满 3 小时 = 每通道 1,560 次，三通道全开 = 4,680 次（v12 起**四通道**全开 = 6,240 次）。
 > - **战斗只在手动挑战时发生**：`campaign.challenge` / `dungeon.challenge`。
 >
 > **③ 主线通道默认「跟随最新通关关卡」**
@@ -653,16 +704,17 @@
 >   `StoredOutcome.result` 只留胜负 / 通关状态 / 奖励。
 >   副作用：24 小时内重放同一 `actionId` 拿不到回放 ⇒ 客户端按「已结算」处理（结果一致）。
 >
-> **⑥ 三条通道各有各的随机序列**
+> **⑥ 各通道各有各的随机序列**
 >
 > - `save.rng.channels[kind] = { seed, counter }`，住在**私有随机块**里
 >   （公开快照 / 缓存 / 导出串一律省略整个 `rng` ⇒ 种子绝不下发客户端）。
 > - 共享一条全局序列会让「开 / 关另一条通道」改变本通道的掉落 ——
 >   「产出互不干扰」与「分批领取 == 一次领取」都不再成立。
 >
-> **⑦ 副本是 24 个独立关卡**（详见 §12.13）
+> **⑦ 副本是 42 个独立关卡**（详见 §12.13）
 >
-> - `(变体 × 难度) = 1 关`：5 技能变体 × 3 难度 + 3 强化变体 × 3 难度。
+> - `(变体 × 难度) = 1 关`：5 技能变体 × 3 难度 + 3 强化变体 × 3 难度
+>   + 6 遗物变体 × 3 难度（存档 v12 新增）。
 >   各自有敌人组合 / 缩放锚点 / 战力门槛 / 产量；**打赢一次即通关**。
 > - 副本进度写 `save.dungeons.cleared`，与主线 `campaign` **分开记账**。
 >
@@ -1897,7 +1949,7 @@ interface HeroDef {
 
 > ⚠ 本节是**示意**（字段会随版本演进）；**唯一权威形状是 `src/core/model/types.ts`**。
 > `player` 的退役字段（`exp` / `emblems` / `tickets` / `skillStones` / `relicStones`）
-> 已在 v10 收敛（详见 §12.12.2）；`idle` 已在 v11 改成**三通道账本**（详见 §12.13.1）。
+> 已在 v10 收敛（详见 §12.12.2）；`idle` 已在 v11 改成**多通道账本**、v12 补上**遗物通道**（详见 §12.13.1）。
 
 ```ts
 interface SaveData {
@@ -1907,8 +1959,8 @@ interface SaveData {
   savedAt: number;                 // 最后一次成功写入存储的时间戳（多上下文冲突检测）
   rng: {
     seed: number; counter: number; // 全局随机序列（抽卡 / 战斗）
-    /** v11：三条挂机通道各自的随机序列（私有，随存档落盘） */
-    channels: Record<'main' | 'skill' | 'enhance', { seed: number; counter: number }>;
+    /** v11：各挂机通道各自的随机序列（私有，随存档落盘；v12 起四条） */
+    channels: Record<'main' | 'skill' | 'enhance' | 'relic', { seed: number; counter: number }>;
   };
   player: {
     silver: number; shards: Record<string, number>;
@@ -1925,11 +1977,12 @@ interface SaveData {
   campaign: { clearedStage: number; creditedStages: number; stageStars: Record<string, number>; chapterProgress: number };
   idle: {
     channels: {
-      main:    IdleChannelState;   // v11：三条通道各自独立计量
+      main:    IdleChannelState;   // v11：各通道各自独立计量（v12 起四条）
       skill:   IdleChannelState;
       enhance: IdleChannelState;
+      relic:   IdleChannelState;   // v12：遗物通道（第 4 条）
     };
-    activeUntil: number;            // 在线租约（三通道共用同一份时间轴）
+    activeUntil: number;            // 在线租约（四通道共用同一份时间轴）
     totalIdleSeconds: number;
   };
   dungeons: { cleared: Record<string, true> };  // v11：副本通关记录（与主线分开记账）
@@ -2302,6 +2355,9 @@ export interface AdAdapter {
 - 三条通道**各自**拿满同一段墙钟时间（不再「分配同一份时间」），
   每条通道每 6 秒掷一次奖（`IDLE.SECONDS_PER_ROLL`），每天 1,560 次。
 - 遗物不再由掉落表产出 ⇒ 模拟改走独立入口「遗物祈愿」（5000 银两 / 次，每天 2 次）。
+  > **实施修正（存档 v12）**：祈愿入口已下线 ⇒ 模拟改走**遗物副本**
+  > （手动挑战 + 挂机通道，每日额度 `RELIC_DROP.DAILY_CAP` 件）。
+  > 挂机通道由 3 条变 4 条（主线 / 技能 / 强化 / **遗物**）。
 
 **新号首日（3 个账号 × 4 档阵容，`npm run balance:newplayer`）**：
 
@@ -2819,7 +2875,12 @@ Phase 11 排得靠后是**有意的**（§6.12）：PvP 的平衡需要**真实�
 
 > 实施方案见 `artifacts/idle-redesign-plan.md`。本节记录**已落地**的结构与口径。
 
-### 12.13.1 存档结构（`SAVE_VERSION = 11`）
+### 12.13.1 存档结构（`SAVE_VERSION = 12`）
+
+> **实施修正（存档 v12 · 遗物副本）**：本章原为 v11 的**三通道**结构。
+> v12 新增**遗物通道**（第 4 条）与其配套的**保底 / 每日额度**两个存档字段；
+> `SAVE_VERSION` 11 → 12，迁移链 `MIGRATIONS[11]` 做「新增通道并关闭 + 清空保底 + 归零额度，
+> 其余三条通道原样保留」。
 
 ```ts
 idle: {
@@ -2827,24 +2888,34 @@ idle: {
     main:    { target: { kind: 'main'; stageId: number | null } | null, measuredAt, effectiveMs, offlineElapsedMs, pendingOfflineMs },
     skill:   { target: { kind: 'skill'; dungeonStageId: string } | null, … },
     enhance: { target: { kind: 'enhance'; dungeonStageId: string } | null, … },
+    relic:   { target: { kind: 'relic'; dungeonStageId: string } | null, … },  // v12 新增
   },
-  activeUntil: number      // 在线租约（三通道共用同一份时间轴）
-  totalIdleSeconds: number // 三条分别累计后相加
+  activeUntil: number      // 在线租约（四通道共用同一份时间轴）
+  totalIdleSeconds: number // 四条分别累计后相加
 }
 
 dungeons: {
   /** 已通关副本关卡：key = `dgn_<变体>_<难度>`，值恒为 true */
   cleared: Record<string, true>
 }
+
+/** v12 新增：遗物副本的 SSR 保底（按「件」计，key = 副本关卡 id） */
+relicPity: Record<string, number>
+
+/** v12 新增：遗物每日额度（按 UTC 日期键） */
+relicDaily: { date: string; count: number }
 ```
 
 - **退场字段**：`idle.currentStage` / `idle.target` / `idle.farm` / `idle.autoAdvance` /
   `idle.measuredAt` / `idle.effectiveMs` / `idle.offlineElapsedMs`。
 - 迁移链 v10 → v11：主线通道恢复「跟随最新通关关卡」，技能 / 强化通道关闭，
   三条通道的预算 / 离线累计 / 待报告时长全部清零。
-- **导入只接受 v11**：导入后三通道的计量水位 = 导入时刻，
-  副本通关记录与副本挂机目标一并清空（导入进度不是可信的通关凭证）。
-- **私有随机块**：`save.rng = { seed, counter, channels: { main, skill, enhance } }`。
+- 迁移链 v11 → v12：**新增遗物通道并关闭**（旧档没有可继承的遗物副本目标），
+  `relicPity` 清空、`relicDaily` 归零；**其余三条通道原样保留**（铁律 #22：不静默丢进度）。
+- **导入只接受当前版本**（v12）：导入后各通道的计量水位 = 导入时刻，
+  副本通关记录与副本挂机目标一并清空（导入进度不是可信的通关凭证）；
+  导入**不继承** `relicPity` / `relicDaily`（否则 `pity: 999` 让保底形同虚设）。
+- **私有随机块**：`save.rng = { seed, counter, channels: { main, skill, enhance, relic } }`。
   整个 `rng` 块在公开快照 / 缓存 / 导出串里一律省略（铁律 #24 / #60）。
 
 ### 12.13.2 动作层
@@ -2852,26 +2923,32 @@ dungeons: {
 | 动作 | 语义 |
 |---|---|
 | `campaign.challenge` | 手动挑战主线关卡。胜利发基础掉落；首胜追加经验书保底 + 首通结晶并推进 `clearedStage`；跟随模式下**推进前先按旧目标结清主线通道** |
-| `dungeon.challenge` | 手动挑战一个副本关卡。胜利发一份材料；首胜写入 `dungeons.cleared` 并解锁该关挂机；**不写 `campaign`** |
+| `dungeon.challenge` | 手动挑战一个副本关卡。胜利发一份材料（**遗物副本发遗物实例**，存档 v12）；首胜写入 `dungeons.cleared` 并解锁该关挂机；**不写 `campaign`** |
 | `idle.setChannel` | 设置 / 关闭一条通道。切换前**只结清被切换的那一条**；目标必须已通关（主线任意已通关关卡，副本该种类且已通关） |
 | `idle.tick` / `idle.claimOffline` | 一次领取所有可结算通道，返回**分通道明细**（`ChannelSettlement[]`） |
 | `idle.heartbeat` | 只计量 + 续约租约，不发奖（铁律 #33） |
-| `relic.acquire` | **遗物祈愿**：5000 银两 → 按 `RARITY_WEIGHTS` 抽一件遗物（遗物已移出掉落表） |
+| `relic.acquire` | ~~**遗物祈愿**：5000 银两 → 按 `RARITY_WEIGHTS` 抽一件遗物~~ → **存档 v12 已下线**：遗物改由 `dungeon.challenge` 的遗物副本公司产出；协议里保留一个返回 `null` 的分支，老客户端打这个动作会被**显式拒绝** |
 
 - **下线** `idle.setTarget`（旧版「三个去向共用一份账本」的入口）。
 - **任务口径**：每日 30 次 / 每周 200 次改为累计**主线挂机结算次数**
   （`advanceTasks(daily, 'battle', mainRolls)`），文案改为「主线挂机结算」。
 
-### 12.13.3 副本独立关卡（24 关）
+### 12.13.3 副本独立关卡（42 关）
+
+> **实施修正（存档 v12 · 遗物副本）**：本章原为 24 关（5 技能 × 3 + 3 强化 × 3）。
+> v12 新增 **6 个遗物变体 × 3 难度 = 18 关** ⇒ 共 **42 关**，
+> 且 `DungeonStageDef.drop` 与 `DungeonVariant.itemId` 改为**可空**（一关只产一种东西：
+> 遗物关的 `drop === null`，产出走 `relicPool`）。
+> 锚点表由 `npm run balance:recalibrate:dungeon` **实测重标定**为 42 项（禁止手填，铁律 #41）。
 
 - `src/core/config/dungeons.ts` 是副本的**唯一出处**：
-  `DUNGEON_STAGES`（24 关定义）+ `DUNGEON_INDEX` / `DUNGEON_STAGE_INDEX` +
+  `DUNGEON_STAGES`（42 关定义）+ `DUNGEON_INDEX` / `DUNGEON_STAGE_INDEX` +
   `dungeonStageId(variant, difficulty)` / `dungeonStageById(id)` / `dungeonStagesOf(kind)`。
 - 每关含 id / 变体 / 难度 / 名称 / 敌人组合 / `enemyScale` / `powerRequired` / `drop`。
 - **不新增敌人**：复用现有 30 只敌人的子集，差异只来自缩放 / 门槛 / 产量
   （元素主题仍落在产出材料上）。
 - **锚点表**（`economy.ts` 的 `DUNGEON` 块，**禁止手填**，铁律 #56）：
-  `SCALE_ANCHORS[24]` / `POWER_ANCHORS[24]` / `DESIGN_LEVELS[24]`。
+  `SCALE_ANCHORS[42]` / `POWER_ANCHORS[42]` / `DESIGN_LEVELS[42]`。
   由 `npm run balance:recalibrate:dungeon` 产出。
 
 **实测的副本 vs 主线门槛对照**（供策划核对两条线的相对难度）：
@@ -2889,9 +2966,10 @@ dungeons: {
 ### 12.13.4 表现层
 
 - **关卡详情改弹窗**（`StageDetailModal.vue`）；`/stage/:id` 深链保留为薄壳。
-- **推征页**四段：主线面板（手动挑战）→ 三通道挂机面板（一个「全部领取」）→
-  副本入口卡（技能 / 强化）→ 本章关卡网格（点击开弹窗）。
-- **副本页**按「难度段 × 变体」平铺 24 关；每行显示通关状态 / 门槛 / 每胜产量 /
+- **推征页**四段：主线面板（手动挑战）→ 四通道挂机面板（一个「全部领取」）→
+  副本入口卡（技能 / 强化 / **遗物**）→ 本章关卡网格（点击开弹窗）。
+- **副本页**按「难度段 × 变体」平铺 42 关（技能 15 / 强化 9 / 遗物 18）；
+  每行显示通关状态 / 门槛 / 每胜产量 /
   「挑战」/「设为挂机通道」。背包页的「去副本」深链（`?kind=…&element=…` / `?tier=…`）
   会**高亮并滚动到**对应变体的关卡。
 - **底部导航保持 5 项**；副本入口走推征页入口卡。
