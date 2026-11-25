@@ -1,10 +1,10 @@
 /**
  * **副本 / 挂机通道刷取口径**的守护（节奏模拟 × 副本产出的唯一出处）。
  *
- * ⚠ 守的是什么（挂机改版 v11 · 三通道并行模型）：
+ * ⚠ 守的是什么（挂机改版 v11 · 多通道并行模型）：
  *   1. **需求侧**：技能材料按五行分列、强化石按档位分列，
  *      数值口径取 core（等级上限 / 每级消耗 / 逐级真实价格）。
- *   2. **通道决策**：三条通道**同时跑**，各自选自己的目标——
+ *   2. **通道决策**：四条通道**同时跑**，各自选自己的目标——
  *      主线跟随最新通关关卡；技能 / 强化各自选「该变体打得赢的最高一关」。
  *      ⚠ 旧模型是「三选一分配一份时间」，新模型**不再分配**——
  *        所以断言也从「只能选一个去向」改成「每条通道各自有目标或为空」。
@@ -146,7 +146,7 @@ describe('副本口径：需求侧', () => {
   })
 })
 
-describe('副本口径：三通道并行（不再分配一份时间）', () => {
+describe('副本口径：多通道并行（不再分配一份时间）', () => {
   it('主线通道默认是「跟随最新通关关卡」', () => {
     const save = makeSave(50)
     const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
@@ -219,11 +219,11 @@ describe('副本口径：三通道并行（不再分配一份时间）', () => {
     save.items[ITEM_BY_ELEMENT.土] = 0
     const decision = decideChannels(save, makeCtx(), TEAM, NIGHT_ROLLS)
     expect(decision.gains.campaign).toBe(Number.POSITIVE_INFINITY)
-    // ⚠ 三通道并行 ⇒ 门槛只抬高主线的价值，不夺走副本通道
+    // ⚠ 多通道并行 ⇒ 门槛只抬高主线的价值，不夺走副本通道
     expect(decision.plans.skill).not.toBeNull()
   })
 
-  it('三条通道的增益都是可比的 ln 口径', () => {
+  it('四条通道的增益都是可比的 ln 口径', () => {
     makeAllStagesWinnable()
     const save = makeSave(50)
     save.player.silver = 1_000_000
@@ -319,8 +319,11 @@ describe('副本口径：目标必须是已通关的', () => {
   })
 
   it('副本产量按关卡自己的产量区间算（挂机不跑战斗 ⇒ 与难度无关地取 drop）', () => {
+    // ⚠ 遗物副本的 `drop` 为 `null`（遗物是实例，不是堆叠物）⇒
+    //   这里取的是**材料副本**的第一关，产量口径只对材料副本成立。
     const stage = DUNGEON_STAGES[0]
-    const expected = Math.round(((stage.drop.min + stage.drop.max) / 2) * 100)
+    expect(stage.drop, '材料副本必须有 drop').toBeTruthy()
+    const expected = Math.round(((stage.drop!.min + stage.drop!.max) / 2) * 100)
     expect(dungeonExpectedYield(stage.id, 100)).toBe(expected)
     expect(dungeonExpectedYield('不存在的关卡', 100)).toBe(0)
   })
@@ -344,7 +347,7 @@ describe('副本口径：参考曲线与当前进度', () => {
   })
 })
 
-describe('副本口径：时间账本（三通道各自独立）', () => {
+describe('副本口径：时间账本（各通道各自独立）', () => {
   it('切换通道前先按旧目标结清：旧通道的次数先跑掉', () => {
     makeAllStagesWinnable()
     const save = makeSave(50)
@@ -427,7 +430,7 @@ describe('副本口径：时间账本（三通道各自独立）', () => {
     expect(save.idle.channels.enhance.target).toBeNull()
   })
 
-  it('三通道目标一次应用成功', () => {
+  it('多条通道目标一次应用成功', () => {
     makeAllStagesWinnable()
     const save = makeSave(50)
     save.player.silver = 1_000_000

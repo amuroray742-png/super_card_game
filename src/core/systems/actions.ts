@@ -50,7 +50,6 @@ import {
   BATTLE,
   IDLE,
   RELIC,
-  RELIC_ACQUIRE,
   LEGACY_CONVERSION,
   EXP_BOOK,
   type RelicStoneTierId,
@@ -72,7 +71,6 @@ import { dungeonStageUnlocked, dungeonUnlocked, runDungeonLevel } from './dungeo
 import { grantFirstClearCrystals } from './first-clear.ts'
 import { STAGE_INDEX } from '../config/stages.ts'
 import { getEnemy } from '../config/enemies.ts'
-import { relicIdsByRarity } from '../config/relics.ts'
 import { runBattle } from './battle.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { getPool } from '../config/pools.ts'
@@ -104,6 +102,7 @@ import {
   type RelicStoneCosts,
   RELIC_DEFS,
   RELIC_SETS,
+  rollRelicDrop,
 } from './relic.ts'
 import {
   RELIC_SLOT_COUNT,
@@ -184,7 +183,6 @@ export type GameAction =
     }
   | { type: 'campaign.challenge'; stageId?: number }
   | { type: 'dungeon.challenge'; stageId: string }
-  | { type: 'relic.acquire' }
   | { type: 'settings.update'; speed?: number; sfx?: boolean; skipAnim?: boolean }
   | { type: 'hero.feedExp'; heroId: string; amount: number }
   | { type: 'hero.feedBooks'; heroId: string; bookId: ItemId; count: number }
@@ -236,10 +234,10 @@ export interface PullActionResult {
 }
 
 /**
- * **挂机领取结果**（三通道并行，挂机改版 v11）。
+ * **挂机领取结果**（四通道并行，挂机改版 v11 + 遗物副本 v12）。
  */
 export interface IdleActionResult {
-  /** 三通道明细（只含本次有产出的通道） */
+  /** 四通道明细（只含本次有产出的通道） */
   channels: ChannelSettlement[]
   /** 本次结算总次数 */
   rolls: number
@@ -291,16 +289,9 @@ export interface DungeonChallengeResult {
 }
 
 /**
- * **遗物祈愿**的结果（遗物的独立获取入口，§1.3 / U3）。
+ * ⚠ **存档 v12 起「遗物祈愿」已下线**：遗物改由**遗物副本**产出
+ *   （`dungeon.challenge` → `rewards.relics`），祈愿动作已从协议移除。
  */
-export interface RelicAcquireResult {
-  /** 遗物定义 id */
-  relicId: string
-  /** 遗物实例 uid */
-  uid: string
-  /** 消耗的银两 */
-  silver: number
-}
 
 /**
  * 喂经验书的结果。
@@ -405,7 +396,6 @@ export interface ActionResultMap {
   'idle.setChannel': IdleChannelResult
   'campaign.challenge': CampaignChallengeResult
   'dungeon.challenge': DungeonChallengeResult
-  'relic.acquire': RelicAcquireResult
   'settings.update': true
   'hero.feedExp': FeedExpResult
   'hero.feedBooks': FeedBooksResult
@@ -508,6 +498,7 @@ export function applyRewardBundle(
   now: number,
 ): InventoryOverflowResult {
   const p = save.player
+  let overflow = emptyOverflow()
   if (rewards.silver) p.silver += rewards.silver
   if (rewards.crystals) p.crystals += rewards.crystals
   if (rewards.items) {
@@ -524,18 +515,18 @@ export function applyRewardBundle(
   if (rewards.relics) {
     for (const defId of rewards.relics) {
       // uid 由**存档内**计数器派生 → 唯一且可复现（不用随机后缀，避免大档碰撞）
-      save.relics.push(generateRelic(defId, rng, 1, nextRelicUid(save)))
+      save.relics.push(generateRelic(defId, rng, RELIC.MIN_LEVEL, nextRelicUid(save)))
     }
     // 库存上限：溢出的最没用遗物自动分解，折算进银两。
     // 锁定件 / 已装备件永不自动分解（宁可突破上限也不销毁玩家标记过的东西）。
-    return enforceInventoryCap(save)
+    overflow = enforceInventoryCap(save)
   }
   if (rewards.heroes) {
     for (const heroId of rewards.heroes) {
       grantHero(save, heroId, now)
     }
   }
-  return emptyOverflow()
+  return overflow
 }
 
 /**
@@ -681,19 +672,11 @@ function actionPull(
 }
 
 /**
- * **结算三条挂机通道并把奖励入库**（动作层入口）。
+ * **结算四条挂机通道并把奖励入库**（动作层入口）。
  *
  * ⚠ 入库只认 `rewards`（铁律 #26）：`settleIdleChannels` 只**产出**奖励包，
  *   入库由本函数统一走 `applyRewardBundle`（唯一入口，铁律 #4）。
- * ⚠ 三条通道**各自独立**：一条通道的目标失效**不影响**另外两条；
- *   无有效目标的通道**只推进计量水位**，不产出（设计稿 §3.6）。
- */
-/**
- * **结算三条挂机通道并把奖励入库**（动作层入口）。
- *
- * ⚠ 入库只认 `rewards`（铁律 #26）：`settleIdleChannels` 只**产出**奖励包，
- *   入库由本函数统一走 `applyRewardBundle`（唯一入口，铁律 #4）。
- * ⚠ 三条通道**各自独立**：一条通道的目标失效**不影响**另外两条；
+ * ⚠ 四条通道**各自独立**：一条通道的目标失效**不影响**另外三条；
  *   无有效目标的通道**只推进计量水位**，不产出（设计稿 §3.6）。
  *
  * @param options.only 只结算指定通道（切换通道时只结清那一条）
@@ -719,7 +702,7 @@ export function settleIdleAndApply(
 /**
  * **一键领取**（`idle.tick` / `idle.claimOffline` 共用同一入口）。
  *
- * ⚠ 挂机**不跑战斗**：结算按掉落表逐次掷奖，三条通道各自独立。
+ * ⚠ 挂机**不跑战斗**：结算按掉落表逐次掷奖，四条通道各自独立。
  * ⚠ 领取次数由服务端按各通道的可用预算决定，客户端**不能**创造时间。
  */
 function actionIdleTick(
@@ -754,7 +737,7 @@ function sameChannelTarget(a: IdleChannelTarget | null, b: IdleChannelTarget | n
 /**
  * **设置挂机通道**（主线 / 技能副本 / 强化副本）。
  *
- * ⚠ **三通道各自独立**：设置某一条通道**不影响**另外两条的时间账本。
+ * ⚠ **四通道各自独立**：设置某一条通道**不影响**另外三条的时间账本。
  * ⚠ **切换或关闭前结清旧目标**（铁律 #49）：先按旧目标把完整次数结清，
  *   再换新目标；剩余不足一次的余数结转（不清零）——否则「切一次通道就多刷几场」。
  * ⚠ **目标必须已通关**：挂机只挂已通关内容，永不卡关。
@@ -942,9 +925,20 @@ function actionDungeonChallenge(
   const firstClear = win && save.dungeons.cleared[stage.id] !== true
   const rewards: RewardBundle = {}
   if (win) {
-    const count = ctx.rng.int(stage.drop.min, stage.drop.max)
-    if (count > 0) {
-      rewards.items = { [stage.drop.itemId]: count } as RewardBundle['items']
+    if (stage.relicPool && stage.relicPool.length > 0) {
+      // ⚠ **遗物副本**：产出**实例**（走 `rewards.relics`，铁律 #26 的单一入库口径）。
+      //   掉落逻辑与挂机通道**共用同一份** `rollRelicDrop`（含保底）——
+      //   两处各写一套必然对不上（铁律 #4）。
+      const pity = save.relicPity[stage.id] ?? 0
+      const rolled = rollRelicDrop(stage.relicPool, stage.difficulty, ctx.rng, pity)
+      save.relicPity[stage.id] = rolled.pity
+      if (rolled.defIds.length > 0) rewards.relics = rolled.defIds
+    } else if (stage.drop) {
+      // 材料副本：只发所选材料
+      const count = ctx.rng.int(stage.drop.min, stage.drop.max)
+      if (count > 0) {
+        rewards.items = { [stage.drop.itemId]: count } as RewardBundle['items']
+      }
     }
     if (firstClear) save.dungeons.cleared[stage.id] = true
     applyRewardBundle(save, rewards, ctx.rng, ctx.now)
@@ -959,67 +953,17 @@ function actionDungeonChallenge(
   })
 }
 
-/** 遗物稀有度档（祈愿抽签用；权重来自 `RELIC_ACQUIRE`） */
-const RELIC_RARITY_ENTRIES: readonly { rarity: Rarity }[] = [
-  { rarity: 'N' },
-  { rarity: 'R' },
-  { rarity: 'SR' },
-  { rarity: 'SSR' },
-]
-
 /**
- * **遗物祈愿**（遗物的**独立获取入口**，§1.3 / U3）。
+ * ⚠ **存档 v12 起「遗物祈愿」已下线**（遗物唯一来源 = 遗物副本）。
  *
- * ⚠ 遗物不再由挂机 / 手动挑战产出——三条通道与手动挑战的奖励范围是
- *   「经验书 / 银两 / 圣杯结晶 / 副本材料」（设计稿 §3.1）。
- *   遗物走这个**独立入口**，保证「首件遗物在初阶强化副本解锁前可达」。
- *
- * ⚠ 扣费前先校验余额（铁律 #10 / #22）：不足直接拒绝，不产生负数。
+ * 历史说明（保留以免后人重新引入同一条死路）：
+ *   祈愿是挂机改版 v11 的「遗物独立获取入口」（5000 银两 / 件）。
+ *   它保证了「首件遗物在初阶强化副本解锁前可达」，
+ *   但**遗物零成本 ⇒ 仓库溢出会自动分解折算成银两 ⇒ 无限印钞**；
+ *   且「花钱买随机遗物」与「遗物是副本产出」是两套投放逻辑。
+ *   现在遗物副本**第 1 号 easy 档在主线第 1 关即可进入**，
+ *   首件遗物的可达性由**副本解锁线**保证（`RELIC_DROP.UNLOCK_STAGE`）。
  */
-function actionRelicAcquire(
-  save: SaveData,
-  _payload: Extract<GameAction, { type: 'relic.acquire' }>,
-  ctx: ActionContext,
-): ActionOutcome<RelicAcquireResult> {
-  const cost = RELIC_ACQUIRE.SILVER_COST
-  if (save.player.silver < cost) {
-    return fail(
-      GAME_ERROR_CODES.INSUFFICIENT_FUNDS,
-      `银两不足（${save.player.silver}/${cost}），无法祈愿遗物`,
-    )
-  }
-  // ⚠ 先校验通过再取种子（失败不消耗随机序列）
-  const defId = rollRelicDefId(ctx.rng)
-  if (!defId) {
-    return fail(GAME_ERROR_CODES.NOT_FOUND, '遗物配置异常')
-  }
-  save.player.silver -= cost
-  const uid = nextRelicUid(save)
-  save.relics.push(generateRelic(defId, ctx.rng, RELIC.MIN_LEVEL, uid))
-  enforceInventoryCap(save)
-  return ok<RelicAcquireResult>(
-    { relicId: defId, uid, silver: cost },
-    '祈愿成功',
-  )
-}
-
-/** 按稀有度权重抽一件遗物定义 id（权重来自 `RELIC_ACQUIRE`，唯一出处） */
-function rollRelicDefId(rng: Rng): string | null {
-  const weights = RELIC_ACQUIRE.RARITY_WEIGHTS
-  const entries = RELIC_RARITY_ENTRIES
-  const total = entries.reduce((sum, e) => sum + (weights[e.rarity] ?? 0), 0)
-  if (total <= 0) return null
-  let roll = rng.next() * total
-  for (const entry of entries) {
-    roll -= weights[entry.rarity] ?? 0
-    if (roll < 0) {
-      const pool = relicIdsByRarity(entry.rarity)
-      if (pool.length === 0) continue
-      return rng.pick(pool)
-    }
-  }
-  return null
-}
 
 /**
  * 更新播放设置（倍速 / 音效 / 跳过演出）。
@@ -1637,7 +1581,7 @@ function actionRebirth(
     return fail(GAME_ERROR_CODES.REBIRTH_LOCKED, preview.reason || '暂不可重启')
   }
   const result = performRebirth(save)
-  // 挂机改版 v11：重启后**三条通道**的计量水位与预算一并归零
+  // 挂机改版 v11 / 遗物副本 v12：重启后**四条通道**的计量水位与预算一并归零
   for (const kind of IDLE_CHANNEL_KINDS) {
     const ch = save.idle.channels[kind]
     ch.measuredAt = _ctx.now
@@ -2018,7 +1962,7 @@ function actionImport(
     return fail(GAME_ERROR_CODES.IMPORT_INVALID, '存档数据无效')
   }
   Object.assign(save, imported)
-  // 导入路径重置挂机账本：三条通道从导入时刻起算，不继承导入前的离线收益
+  // 导入路径重置挂机账本：四条通道从导入时刻起算，不继承导入前的离线收益
   for (const kind of IDLE_CHANNEL_KINDS) {
     const ch = save.idle.channels[kind]
     ch.measuredAt = ctx.now
@@ -2059,13 +2003,12 @@ const HANDLERS: { [K in GameActionType]: ActionHandler<K> } = {
     // ⚠ 回执带**各通道待结算次数**（服务端账本的真相，几十字节）。
     //   计量在前面 ⇒ 这里算出来的就是「此刻点领取会拿到多少次」。
     //   仍**不回传存档主体**（铁律 #33）。
-    return ok<HeartbeatResult>({ pending: idlePendingRolls(save) })
+    return ok<HeartbeatResult>({ pending: idlePendingRolls(save, ctx.now) })
   },
   'idle.claimOffline': actionIdleClaimOffline,
   'idle.setChannel': actionIdleSetChannel,
   'campaign.challenge': actionCampaignChallenge,
   'dungeon.challenge': actionDungeonChallenge,
-  'relic.acquire': actionRelicAcquire,
   'settings.update': actionSettingsUpdate,
   'hero.feedExp': actionFeedExp,
   'hero.feedBooks': actionFeedBooks,

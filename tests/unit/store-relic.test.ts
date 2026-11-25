@@ -6,12 +6,13 @@
  *   → 挂机 / 离线结算产出的遗物 100% 被丢弃，玩家一个遗物都拿不到
  *   （整条遗物养成线是死的：强化石能掉但没东西可强化、套装效果永不触发）。
  *
- * ⚠ **挂机改版 v11**：遗物**彻底移出掉落表**，改走**独立获取入口**「遗物祈愿」
- *   （`relic.acquire`，花 `RELIC_ACQUIRE.SILVER_COST` 银两换一件）。
- *   ⇒ 本文件守的不再是「挂机掉遗物」，而是：
- *     ① 挂机**确实不再**产出遗物（防止哪天又混回掉落表）；
- *     ② 祈愿这条**唯一入口**真的能拿到遗物；
- *     ③ 祈愿的扣费守铁律 #10（余额不足直接拒绝、不产生负数）。
+ * ⚠ **遗物副本 v12**：遗物的**唯一来源**是**遗物副本**
+ *   （`dungeon.challenge` → `rewards.relics`）；「花银两祈愿」（`relic.acquire`）已下线。
+ *   ⇒ 本文件守的是：
+ *     ① **主线**通道仍然**不**产出遗物（防止哪天又混回掉落表）；
+ *     ② 遗物副本这条**唯一入口**真的能拿到遗物；
+ *     ③ 遗物实例结构完整（能强化、能装备）、uid 唯一、仓库逐件累加；
+ *     ④ 遗物是**零成本**产出（不扣银两），但**每日额度**只管挂机通道。
  *
  * 同 AGENTS.md 铁律 #22 的教训：养成链路的「配置齐全」≠「功能可用」。
  *
@@ -63,10 +64,13 @@ const { getRelicMods, relicUpgradeCost } = await import('../../src/core/systems/
 const { makeTestRelic } = await import('./helpers.ts')
 const { getEquippedRelics } = await import('../../src/core/systems/loadout.ts')
 const { Rng } = await import('../../src/core/rng.ts')
-const { RELIC_ACQUIRE } = await import('../../src/core/config/economy.ts')
+const { dungeonStageId } = await import('../../src/core/config/dungeons.ts')
 
 /** 强化一级的花费（与 core 的 relicUpgradeCost 同一口径，不在测试里写死数字） */
 const RELIC_UPGRADE = relicUpgradeCost(1)!
+
+/** 遗物副本「锋锐 · 简易」关卡 id（关卡 id 的唯一出处是 `dungeonStageId`） */
+const RELIC_EASY = dungeonStageId('relicZhanTan', 'easy')
 
 let harness: ServerHarness
 let now: number
@@ -109,12 +113,19 @@ async function serverRelicTotal(): Promise<number> {
   return page?.total ?? 0
 }
 
-describe('遗物获取链路（独立入口「遗物祈愿」）', () => {
+describe('遗物获取链路（遗物副本：遗物的唯一来源）', () => {
   beforeEach(async () => {
     await registerAndLoad('relic_user')
   })
 
-  it('⚠ 挂机**不再产出遗物**（掉落表只剩银两 + 经验书）', async () => {
+  /** 造一份「主线已通关第 1 关」的存档（遗物副本的解锁线） */
+  async function seedRelicReady(): Promise<void> {
+    await seedSave((save) => {
+      save.campaign.clearedStage = 1
+    })
+  }
+
+  it('⚠ **主线**通道**不再产出遗物**（掉落表只剩银两 + 经验书）', async () => {
     const store = useGameStore()
     await seedSave((save) => {
       // ⚠ 主线通道跟随最新通关关卡 ⇒ 先打通一关才有产出
@@ -125,73 +136,79 @@ describe('遗物获取链路（独立入口「遗物祈愿」）', () => {
     advanceBattles(3)
     const result = await store.tickIdle()
     expect(result).not.toBeNull()
-    // 三通道明细里的遗物清单**恒空**
+    // 主线通道明细里的遗物清单**恒空**
     expect(result!.channels.every((c) => (c.rewards.relics?.length ?? 0) === 0)).toBe(true)
     // 仓库件数不变
     expect(await serverRelicTotal()).toBe(before)
   })
 
-  it('祈愿：花银两换一件遗物，仓库真的多了一件', async () => {
+  it('打遗物副本：仓库真的多了一件', async () => {
+    // ⚠ 铁律 #22：「配置齐全」≠「功能可用」。
+    //   遗物是**整条强化链的入口**（初阶强化副本要求「持有 Lv1 遗物」才解锁），
+    //   所以「打一把遗物副本 → 服务端仓库真的多了一件」必须被守住。
     const store = useGameStore()
-    await seedSave()
+    await seedRelicReady()
     const before = await serverRelicTotal()
-    const silver0 = store.save.player.silver
 
-    const wish = await store.acquireRelic()
-    expect(wish).not.toBeNull()
-    expect(wish!.silver).toBe(RELIC_ACQUIRE.SILVER_COST)
-    expect(store.save.player.silver).toBe(silver0 - RELIC_ACQUIRE.SILVER_COST)
-    expect(await serverRelicTotal()).toBe(before + 1)
+    const res = await store.challengeDungeon(RELIC_EASY)
+    expect(res).not.toBeNull()
+    expect(res!.win).toBe(true)
+    expect(res!.rewards.relics?.length).toBeGreaterThan(0)
+    expect(await serverRelicTotal()).toBe(before + res!.rewards.relics!.length)
   })
 
-  it('祈愿出的遗物实例结构完整（defId / uid / 等级齐全，能被强化与装备）', async () => {
+  it('遗物副本产出的遗物实例结构完整（defId / uid / 等级齐全，能被强化与装备）', async () => {
     const store = useGameStore()
-    await seedSave()
-    const wish = await store.acquireRelic()
-    expect(wish).not.toBeNull()
+    await seedRelicReady()
+    const res = await store.challengeDungeon(RELIC_EASY)
+    expect(res).not.toBeNull()
 
     const relics = await serverRelics()
     expect(relics.length).toBeGreaterThan(0)
-    const relic = relics.find((r) => r.uid === wish!.uid)
+    const defId = res!.rewards.relics![0]
+    const relic = relics.find((r) => r.defId === defId)
     expect(relic).toBeDefined()
-    expect(relic!.defId).toBeTruthy()
+    expect(relic!.uid).toBeTruthy()
     expect(relic!.level).toBeGreaterThanOrEqual(1)
   })
 
-  it('⚠ 银两不足：祈愿被拒，余额不变、**不产生负数**', async () => {
+  it('⚠ 遗物是**零成本**产出（不扣银两），且手动挑战**不消耗每日额度**', async () => {
+    // ⚠ 每日额度（`RELIC_DROP.DAILY_CAP`）是**挂机**的防通胀闸门：
+    //   遗物零成本 ⇒ 挂机不限额就是印钞机；
+    //   但手动挑战是**主动行为**（逐场结算、耗时换产出），不该被卡住。
     const store = useGameStore()
-    await seedSave((save) => {
-      save.player.silver = RELIC_ACQUIRE.SILVER_COST - 1
-    })
-    const before = await serverRelicTotal()
+    await seedRelicReady()
+    const silver0 = store.save.player.silver
 
-    const wish = await store.acquireRelic()
-    expect(wish).toBeNull()
-    // ⚠ 铁律 #10：扣费动作必须先做余额校验 ⇒ 余额不变、不为负
-    expect(store.save.player.silver).toBe(RELIC_ACQUIRE.SILVER_COST - 1)
-    expect(store.save.player.silver).toBeGreaterThanOrEqual(0)
-    expect(await serverRelicTotal()).toBe(before)
+    const res = await store.challengeDungeon(RELIC_EASY)
+    expect(res).not.toBeNull()
+    expect(res!.win).toBe(true)
+    // 银两一分没少
+    expect(store.save.player.silver).toBe(silver0)
+    // 额度计数仍然是 0（额度只管挂机通道）
+    expect(store.save.relicDaily.count).toBe(0)
   })
 
-  it('多次祈愿：每件 uid 唯一，仓库逐件累加', async () => {
+  it('多次挑战遗物副本：每件 uid 唯一，仓库逐件累加', async () => {
     const store = useGameStore()
-    await seedSave()
+    await seedRelicReady()
     const before = await serverRelicTotal()
 
     const uids: string[] = []
     for (let i = 0; i < 3; i++) {
-      const wish = await store.acquireRelic()
-      expect(wish).not.toBeNull()
-      uids.push(wish!.uid)
+      const res = await store.challengeDungeon(RELIC_EASY)
+      expect(res).not.toBeNull()
+      uids.push(...(res!.rewards.relics ?? []))
     }
-    expect(new Set(uids).size).toBe(3)
-    expect(await serverRelicTotal()).toBe(before + 3)
+    expect(await serverRelicTotal()).toBe(before + uids.length)
+    const relics = await serverRelics()
+    expect(new Set(relics.map((r) => r.uid)).size).toBe(relics.length)
   })
 
   it('仓库分页接口可用：分页取到的件数与总数对得上', async () => {
     const store = useGameStore()
-    await seedSave()
-    for (let i = 0; i < 3; i++) await store.acquireRelic()
+    await seedRelicReady()
+    for (let i = 0; i < 3; i++) await store.challengeDungeon(RELIC_EASY)
 
     const page = await store.loadRelicPage({ page: 1, size: 2 })
     expect(page).not.toBeNull()
@@ -202,9 +219,9 @@ describe('遗物获取链路（独立入口「遗物祈愿」）', () => {
 
   it('遗物统计接口给出仓库总数（顶栏件数与图鉴收藏数靠它）', async () => {
     const store = useGameStore()
-    await seedSave()
-    await store.acquireRelic()
-    await store.acquireRelic()
+    await seedRelicReady()
+    await store.challengeDungeon(RELIC_EASY)
+    await store.challengeDungeon(RELIC_EASY)
 
     const stats = await store.loadRelicStats()
     expect(stats).not.toBeNull()
@@ -229,7 +246,7 @@ describe('遗物获取链路（独立入口「遗物祈愿」）', () => {
     expect(await serverRelicTotal()).toBe(3)
   })
 
-  it('⚠ 离线结算**同样不产出遗物**（服务端按自己的时间补算也不产出）', async () => {
+  it('⚠ 离线结算**主线通道同样不产出遗物**（服务端按自己的时间补算也不产出）', async () => {
     const store = useGameStore()
     await seedSave((save) => {
       save.campaign.clearedStage = 1

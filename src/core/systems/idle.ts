@@ -1,14 +1,16 @@
 /**
- * 挂机与离线结算（§5.7 · **挂机改版 v11**）。
+ * 挂机与离线结算（§5.7 · **挂机改版 v11 + 遗物副本 v12**）。
  *
- * ## 三通道并行 + 已通关直挂
+ * ## 四通道并行 + 已通关直挂
  *
- * - **主线 / 技能副本 / 强化副本各自一条独立通道**，
- *   各自计量同一段墙钟时间、各自记账，产出互不干扰（玩家可同时挂三条）。
+ * - **主线 / 技能副本 / 强化副本 / 遗物副本各自一条独立通道**，
+ *   各自计量同一段墙钟时间、各自记账，产出互不干扰（玩家可同时挂四条）。
  * - **挂机不再跑战斗**：通道目标必须是「已通关」的内容，
  *   结算时按掉落表**逐次掷奖**直接入库 ⇒ 永不卡关、不会战败、不会空转。
  * - 主线推进改为**纯手动挑战**（`campaign.challenge`）；
  *   副本同样要手动挑战通关才可挂机（`dungeon.challenge`）。
+ * - **遗物通道**（存档 v12）产出遗物实例，并受**每日额度**约束
+ *   （`RELIC_DROP.DAILY_CAP`）——遗物是零成本产出，没有额度就是印钞机。
  *
  * ## 离线收益曲线（⚠ 数值一律读 `IDLE` 配置，此处只描述**结构**）
  *
@@ -30,7 +32,7 @@ import type {
   StageDef,
 } from '../model/types.ts'
 import { IDLE_CHANNEL_KINDS } from '../model/types.ts'
-import { IDLE, DROP_TABLES } from '../config/economy.ts'
+import { IDLE, DROP_TABLES, type DungeonDifficultyId } from '../config/economy.ts'
 import { STAGE_INDEX } from '../config/stages.ts'
 import {
   DUNGEON_INDEX,
@@ -40,8 +42,9 @@ import {
 } from '../config/dungeons.ts'
 import { Rng } from '../rng.ts'
 import { emptyOverflow, type InventoryOverflowResult } from './inventory.ts'
+import { recordRelicOutput, relicQuotaLeft, rollRelicDrop } from './relic.ts'
 
-/** 三条通道的固定顺序（遍历顺序 = 界面展示顺序 = 锚点表顺序） */
+/** 四条通道的固定顺序（遍历顺序 = 界面展示顺序 = 锚点表顺序） */
 export { IDLE_CHANNEL_KINDS }
 
 /**
@@ -90,8 +93,12 @@ export interface ResolvedChannelTarget {
   dungeonStageId: string | null
   /** 主线：掉落表 id */
   dropTableId: string | null
-  /** 副本：每胜产量 */
+  /** 副本：每胜产量（遗物副本为 `null`——遗物是实例，不是堆叠物） */
   drop: { itemId: string; min: number; max: number } | null
+  /** 遗物通道：候选遗物池（遗物定义 id）；其余通道为 `null` */
+  relicPool: readonly string[] | null
+  /** 遗物通道：难度档（决定稀有度权重与件数）；其余通道为 `null` */
+  difficulty: DungeonDifficultyId | null
 }
 
 /**
@@ -127,6 +134,8 @@ export function resolveChannelTarget(
       dungeonStageId: null,
       dropTableId: stage.dropTableId,
       drop: null,
+      relicPool: null,
+      difficulty: null,
     }
   }
 
@@ -135,11 +144,19 @@ export function resolveChannelTarget(
     return resolveDungeonTarget(save, kind, target.dungeonStageId)
   }
 
+  // ⚠ 遗物通道（存档 v12）：**第四个**副本通道。
+  //   ⚠ 这里不能写成 `if (kind !== 'enhance') return null`——
+  //   那会让遗物通道的目标**静默解析失败**（通道被清空、玩家以为没挂上）。
+  if (target.kind === 'relic') {
+    if (kind !== 'relic') return null
+    return resolveDungeonTarget(save, kind, target.dungeonStageId)
+  }
+
   if (kind !== 'enhance') return null
   return resolveDungeonTarget(save, kind, target.dungeonStageId)
 }
 
-/** 副本通道的目标解析（技能 / 强化共用） */
+/** 副本通道的目标解析（技能 / 强化 / 遗物共用） */
 function resolveDungeonTarget(
   save: SaveData,
   kind: IdleChannelKind,
@@ -151,13 +168,19 @@ function resolveDungeonTarget(
   if (!variant || variant.kind !== kind) return null
   // 副本必须**已通关**才可挂机
   if (save.dungeons.cleared[stage.id] !== true) return null
+  const isRelic = kind === 'relic'
   return {
     kind,
     name: stage.name,
     stageId: null,
     dungeonStageId: stage.id,
     dropTableId: null,
-    drop: { itemId: stage.drop.itemId, min: stage.drop.min, max: stage.drop.max },
+    // ⚠ 遗物副本的 `drop` 为 `null`（遗物是实例，不是堆叠物）
+    drop: stage.drop
+      ? { itemId: stage.drop.itemId, min: stage.drop.min, max: stage.drop.max }
+      : null,
+    relicPool: isRelic ? stage.relicPool : null,
+    difficulty: isRelic ? stage.difficulty : null,
   }
 }
 
@@ -197,26 +220,90 @@ export function rollMainDrop(stage: StageDef, rng: Rng): RewardBundle {
  * 按副本关卡产量**掷一次**奖励（必掉，落在 `min ~ max` 区间）。
  *
  * ⚠ 副本掉落**只发所选材料**：不发银两 / 经验书 / 遗物 / 首通结晶。
+ * ⚠ 遗物副本的 `drop` 为 `null`（遗物是实例）⇒ 这里**直接返回空包**，
+ *   遗物走 `rollRelicChannelRewards`。
  */
 export function rollDungeonDrop(
   stage: DungeonStageDef,
   rng: Rng,
 ): RewardBundle {
+  if (!stage.drop) return {}
   const count = rng.int(stage.drop.min, stage.drop.max)
   if (count <= 0) return {}
   return { items: { [stage.drop.itemId]: count } as RewardBundle['items'] }
 }
 
 /**
+ * 一次通道掷奖的**结果**。
+ *
+ * ⚠ `rolls` 是**实际掷出的次数**（可能小于请求次数：遗物通道额度不足时会提前收手）。
+ */
+export interface ChannelRollOutcome {
+  /** 本次产出（唯一入库口径） */
+  rewards: RewardBundle
+  /** 遗物保底计数（仅遗物通道有值；其余通道原样回传） */
+  pity: number
+  /** 实际掷奖次数 */
+  rolls: number
+}
+
+/**
+ * **遗物通道的逐次掷奖**（每日额度感知）。
+ *
+ * ⚠ **额度按「件」计**（`RELIC_DROP.DAILY_CAP`），不是按「次」——
+ *   hard 档一次掷奖可能出 2~3 件 ⇒ 只能**逐次掷、逐件扣**，
+ *   最后一次用 `maxRelics` 裁剪，裁到 0 件就收手（剩下的预算不扣）。
+ *
+ * ⚠ **额度用满 ≠ 目标失效**：目标不清空，玩家第二天照常领取。
+ */
+function rollRelicChannelRewards(
+  target: ResolvedChannelTarget,
+  rolls: number,
+  rng: Rng,
+  pity: number,
+  maxRelics: number,
+): ChannelRollOutcome {
+  const rewards: RewardBundle = {}
+  if (!target.relicPool || target.relicPool.length === 0 || !target.difficulty) {
+    return { rewards, pity, rolls: 0 }
+  }
+  let curPity = pity
+  let produced = 0
+  let used = 0
+  for (let i = 0; i < rolls; i++) {
+    const remaining = maxRelics - produced
+    if (remaining <= 0) break
+    const rolled = rollRelicDrop(target.relicPool, target.difficulty, rng, curPity, remaining)
+    if (rolled.defIds.length === 0) break
+    curPity = rolled.pity
+    produced += rolled.defIds.length
+    used += 1
+    rewards.relics = [...(rewards.relics ?? []), ...rolled.defIds]
+  }
+  return { rewards, pity: curPity, rolls: used }
+}
+
+/**
  * 通道的**逐次掷奖**（挂机不跑战斗，这里只按掉落表掷骰）。
  *
  * @param rolls 掷奖次数
+ * @param options 遗物通道专用：`pity` = 保底计数，`maxRelics` = 剩余额度（件）
  */
 export function rollChannelRewards(
   target: ResolvedChannelTarget,
   rolls: number,
   rng: Rng,
-): RewardBundle {
+  options: { pity?: number; maxRelics?: number } = {},
+): ChannelRollOutcome {
+  if (target.kind === 'relic') {
+    return rollRelicChannelRewards(
+      target,
+      rolls,
+      rng,
+      options.pity ?? 0,
+      options.maxRelics ?? Number.POSITIVE_INFINITY,
+    )
+  }
   const rewards: RewardBundle = {}
   for (let i = 0; i < rolls; i++) {
     const one =
@@ -225,7 +312,7 @@ export function rollChannelRewards(
         : rollDungeonDrop(DUNGEON_STAGE_INDEX.get(target.dungeonStageId!)!, rng)
     mergeRewardBundles(rewards, one)
   }
-  return rewards
+  return { rewards, pity: options.pity ?? 0, rolls }
 }
 
 /**
@@ -314,12 +401,12 @@ export interface ChannelSettlement {
 }
 
 /**
- * **离线结算结果**（三通道明细）。
+ * **离线结算结果**（四通道明细）。
  *
  * ⚠ 只含**本次有产出**的通道；无产出的通道不出现（界面据此分段展示）。
  */
 export interface OfflineSettlementResult {
-  /** 三通道明细（只含本次有产出的通道） */
+  /** 四通道明细（只含本次有产出的通道） */
   channels: ChannelSettlement[]
   /** 本次结算总次数 */
   rolls: number
@@ -385,12 +472,12 @@ function measureChannel(
 }
 
 /**
- * **结算三条挂机通道**（挂机改版 v11 的核心入口）。
+ * **结算四条挂机通道**（挂机改版 v11 + 遗物副本 v12 的核心入口）。
  *
  * 流程（设计稿 §3.6）：
  *   ① 解析目标 → ② 计量预算 → ③ 掷奖入库 → ④ 生成回执
  *
- * ⚠ 三条通道**各自独立**：一条通道的目标失效**不影响**另外两条。
+ * ⚠ 四条通道**各自独立**：一条通道的目标失效**不影响**另外三条。
  * ⚠ 时钟回退时**跳过该通道**，水位保持原值（不重发）。
  * ⚠ 无完整次数时**不发奖、不耗随机**。
  */
@@ -418,17 +505,45 @@ export function settleIdleChannels(
     }
     if (!payout) continue
 
-    const rolls = Math.min(rollsFromEffectiveMs(ch.effectiveMs), maxRolls)
+    const budgetRolls = Math.min(rollsFromEffectiveMs(ch.effectiveMs), maxRolls)
+    if (budgetRolls <= 0) continue
+
+    // ⚠ **遗物通道的每日额度**（防通胀闸门，铁律 #59）。
+    //   遗物是**零成本**产出，而仓库溢出会自动分解折算成银两
+    //   ⇒ 没有额度，挂机遗物通道就是印钞机。
+    //
+    //   ⚠ 额度按「件」计 ⇒ 掷奖次数只能取 `min(预算次数, 剩余额度)`：
+    //     每次掷奖至少出 1 件，所以剩余额度就是次数的**上界**。
+    //   ⚠ **额度用满 ≠ 目标失效**：这里**不能**清空 `ch.target`
+    //     （否则玩家每天都要重设一次挂机目标）。
+    const quotaLeft = kind === 'relic' ? relicQuotaLeft(save, ctx.now) : Number.POSITIVE_INFINITY
+    const rolls = kind === 'relic' ? Math.min(budgetRolls, quotaLeft) : budgetRolls
     if (rolls <= 0) continue
 
     // ⚠ **挂机改版 v11**：掷奖走**这条通道自己的随机序列**（不是全局序列）——
     //   开 / 关另一条通道不会改变本通道的掉落，
     //   「分批领取 == 一次领取」在每条通道各自成立（设计稿 §3.3 / §3.6）。
     const chanRng = channelRngOf(save, kind)
-    const rewards = rollChannelRewards(target, rolls, chanRng)
+    const pityBefore =
+      kind === 'relic' && target.dungeonStageId ? (save.relicPity[target.dungeonStageId] ?? 0) : 0
+    const outcome = rollChannelRewards(target, rolls, chanRng, {
+      pity: pityBefore,
+      maxRelics: quotaLeft,
+    })
     save.rng.channels[kind] = chanRng.snapshot()
+    const usedRolls = outcome.rolls
+    if (usedRolls <= 0) continue
     // 同一事务扣除本次消耗的预算
-    ch.effectiveMs = Math.max(0, ch.effectiveMs - rolls * ROLL_MS)
+    // ⚠ 遗物通道可能因额度不足**少掷**几次 ⇒ 只扣实际掷出的那几次，
+    //   剩下的预算留给明天（额度跨日重置后继续领）。
+    ch.effectiveMs = Math.max(0, ch.effectiveMs - usedRolls * ROLL_MS)
+
+    // ⚠ 遗物通道：保底计数与每日额度**同事务落盘**
+    //   （刷新页面 / 换设备都不能重置，否则保底与额度形同虚设）。
+    if (kind === 'relic' && target.dungeonStageId) {
+      save.relicPity[target.dungeonStageId] = outcome.pity
+      recordRelicOutput(save, ctx.now, outcome.rewards.relics?.length ?? 0)
+    }
 
     const elapsedSeconds = ch.pendingOfflineMs / 1000
     ch.pendingOfflineMs = 0
@@ -436,11 +551,11 @@ export function settleIdleChannels(
     channels.push({
       channel: kind,
       targetName: target.name,
-      rolls,
-      rewards,
+      rolls: usedRolls,
+      rewards: outcome.rewards,
       elapsedSeconds,
     })
-    totalRolls += rolls
+    totalRolls += usedRolls
     if (elapsedSeconds > maxOfflineSeconds) maxOfflineSeconds = elapsedSeconds
   }
 
@@ -498,7 +613,7 @@ export function idleChannelRolls(ch: IdleChannelState): number {
 }
 
 /**
- * 三条通道的**待结算次数**（服务端账本口径）。
+ * 四条通道的**待结算次数**（服务端账本口径）。
  *
  * ⚠ 界面显示的「可结算 N 次」**必须取这里**（服务端真相），
  *   **不能**读客户端镜像里的 `effectiveMs`：
@@ -507,11 +622,17 @@ export function idleChannelRolls(ch: IdleChannelState): number {
  *   ⇒ 界面永远显示「0 次」，而点下去服务端照发（数字自相矛盾）。
  *
  *   服务端的真相只有两处能拿到：**心跳回执**（实时）与**结算回执**（结算后）。
+ *
+ * ⚠ **遗物通道还要受每日额度约束**：`N = min(预算次数, 剩余额度)`。
+ *   额度按「件」计、每次掷奖至少出 1 件 ⇒ 剩余额度就是次数的**上界**，
+ *   所以这里写的 N **绝不超过**实发次数（铁律 #62：界面只能少写，不能多写）。
  */
-export function idlePendingRolls(save: SaveData): Record<IdleChannelKind, number> {
+export function idlePendingRolls(save: SaveData, now: number): Record<IdleChannelKind, number> {
   const out = {} as Record<IdleChannelKind, number>
+  const quotaLeft = relicQuotaLeft(save, now)
   for (const kind of IDLE_CHANNEL_KINDS) {
-    out[kind] = idleChannelRolls(save.idle.channels[kind])
+    const rolls = idleChannelRolls(save.idle.channels[kind])
+    out[kind] = kind === 'relic' ? Math.min(rolls, quotaLeft) : rolls
   }
   return out
 }

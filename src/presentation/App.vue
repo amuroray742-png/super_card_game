@@ -19,6 +19,7 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from './stores/game'
 import { useAccountStore } from './stores/account'
+import type { IdleChannelKind } from '../core/model/types.ts'
 import { formatNumber } from './utils/format'
 import { rewardLines } from './utils/reward-text'
 import { richParts } from '../content/compliance/index.ts'
@@ -100,13 +101,21 @@ function goGacha() {
 //   旧实现在这里硬编码「银两 / 经验 / 术式结晶 / 强化石 / 英灵印记」，
 //   与背包 / 登记表对不上——现已改为通用聚合（`rewardLines`）。
 //
-// ⚠ **挂机改版 v11**：离线结算是**三通道分段**——每条通道各自报告
+// ⚠ **挂机改版 v11**：离线结算是**分通道段**——每条通道各自报告
 //   目标、结算次数与掉落明细（`ChannelSettlement`）。
+// ⚠ **存档 v12 增加遗物通道**：通道名映射漏一条 = 结算面板把遗物产出写成别的通道
+//   （四选一的写法曾让第四种通道默默落到「强化副本」上）。
+const CHANNEL_LABELS: Record<IdleChannelKind, string> = {
+  main: '主线',
+  skill: '技能副本',
+  enhance: '强化副本',
+  relic: '遗物副本',
+}
+
 const offlineChannels = computed(() =>
   (store.offlineReport?.channels ?? []).map((ch) => ({
     ...ch,
-    /** 通道名（主线 / 技能副本 / 强化副本） */
-    label: ch.channel === 'main' ? '主线' : ch.channel === 'skill' ? '技能副本' : '强化副本',
+    label: CHANNEL_LABELS[ch.channel],
     lines: rewardLines(ch.rewards),
   })),
 )
@@ -284,8 +293,13 @@ function goBackBare() {
     <div v-if="!bare && store.offlineReport" class="mask" @click.self="store.offlineReport = null">
       <div class="dialog" data-testid="offline-settlement">
         <div class="panel-title">离线挂机结算</div>
+        <!--
+          ⚠ 通道数**按实际结算段数推导**，不写死「三条 / 四条」：
+          只有挂上目标且真的结算了的通道才会出现在 `offlineReport.channels` 里，
+          写死一个数就是「过期即说谎」——v12 加了遗物通道后这里就漏改过一次。
+        -->
         <p class="muted tiny" style="margin: 0 0 10px">
-          三条通道各自结算，共 {{ store.offlineReport.rolls }} 次。
+          {{ offlineChannels.length }} 条通道各自结算，共 {{ store.offlineReport.rolls }} 次。
         </p>
         <div v-for="ch in offlineChannels" :key="ch.channel" class="offline-chan">
           <div class="row-between tiny">

@@ -30,6 +30,7 @@ import type {
   Rarity,
   IdleChannelKind,
 } from '../../core/model/types.ts'
+import { IDLE_CHANNEL_KINDS } from '../../core/model/types.ts'
 import type { ItemId } from '../../core/config/items.ts'
 import type { DungeonDifficultyId, RelicStoneTierId } from '../../core/config/economy.ts'
 import { createNewSave, normalizeSave } from '../../core/save/schema.ts'
@@ -44,7 +45,13 @@ import { type HeartbeatResult, type IdleActionResult } from '../../core/systems/
 import { idlePendingRolls, type ChannelSettlement } from '../../core/systems/idle.ts'
 import { getEquippedRelics, equippedOwnerMap, RELIC_SLOT_COUNT } from '../../core/systems/loadout.ts'
 import { getPool } from '../../core/config/pools.ts'
-import { relicUpgradeCost, applyRelicUpgrade, decomposeValue, RELIC_SETS } from '../../core/systems/relic.ts'
+import {
+  relicUpgradeCost,
+  applyRelicUpgrade,
+  decomposeValue,
+  RELIC_DEFS,
+  RELIC_SETS,
+} from '../../core/systems/relic.ts'
 import { type RelicAdvice } from '../../core/systems/relic-advice.ts'
 import {
   applyExp,
@@ -153,10 +160,10 @@ export const useGameStore = defineStore('game', () => {
   function clearChallengeReplay() {
     challengeReplay.value = null
   }
-  /** 离线结算结果（三通道明细） */
+  /** 离线结算结果（分通道明细） */
   const offlineReport = shallowRef<IdleActionResult | null>(null)
   /**
-   * 三条挂机通道的**待结算次数**（界面显示「可结算 N 次」的唯一来源）。
+   * 四条挂机通道的**待结算次数**（界面显示「可结算 N 次」的唯一来源）。
    *
    * ⚠ **不能读客户端镜像里的 `effectiveMs`**：
    *   镜像只在服务端回包时刷新，而服务端**回包前必先结算**
@@ -166,8 +173,15 @@ export const useGameStore = defineStore('game', () => {
    * ⚠ 真相有两个来源，**都取服务端口径**：
    *   ① **心跳回执**（`idle.heartbeat` 的 `pending`）——实时；
    *   ② **收到存档快照时按同一份换算重算**（服务端刚结算过 ⇒ 与服务端一致）。
+   *
+   * ⚠ **遗物通道是第四条**（存档 v12）：主 / 技能 / 强化 / 遗物。
    */
-  const idlePending = ref<Record<IdleChannelKind, number>>({ main: 0, skill: 0, enhance: 0 })
+  const idlePending = ref<Record<IdleChannelKind, number>>({
+    main: 0,
+    skill: 0,
+    enhance: 0,
+    relic: 0,
+  })
   /** 全局提示 */
   const toast = ref<{ text: string; kind: 'info' | 'ok' | 'warn' } | null>(null)
   /** 新手引导步骤（-1 = 结束） */
@@ -270,7 +284,12 @@ export const useGameStore = defineStore('game', () => {
     save.value = next
     // ⚠ 收到存档快照 = 服务端**刚结算过**（回包前必先结算）⇒ 此刻的待结算次数
     //   按**同一份换算**重算即可与服务端对齐（心跳回包是另一条实时来源）。
-    idlePending.value = idlePendingRolls(next)
+    //
+    // ⚠ **必须传 `now`**：遗物通道的待结算次数还要受「每日额度」裁剪
+    //   （core 的 `idlePendingRolls` 内部按 `relicQuotaLeft(save, now)` 取上限），
+    //   少传一个参数就等于把「今天还能领多少件遗物」算错（铁律 #62：界面只能少写）。
+    //   时间一律取**注入时钟**（铁律 #12：禁止 `Date.now()`）。
+    idlePending.value = idlePendingRolls(next, clock.now())
     // 回放倍速跟随服务端设置（设置本身也是服务端权威的）
     battleSpeed.value = next.settings.speed ?? 1
     // 缓存同步写完再返回：界面与自动化脚本读缓存时拿到的就是最新版本
@@ -366,7 +385,7 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 离线结算明细的**阈值判定**（服务端已过滤一道，这里再挡一道）。
    *
-   * ⚠ **挂机改版 v11**：三条通道各自报告自己的实际离线时长 ⇒ 取**最大值**判定。
+   * ⚠ **挂机改版 v11**：四条通道各自报告自己的实际离线时长 ⇒ 取**最大值**判定。
    *   在线计量不计入该时长（只有离线段才累加）。
    */
   function offlineReportable(report: IdleActionResult | null | undefined): IdleActionResult | null {
@@ -428,6 +447,38 @@ export const useGameStore = defineStore('game', () => {
       if (reconnectTask === task) { reconnectTask = null; reconnecting.value = false }
     })
     return task
+  }
+
+  /**
+   * **刷新服务端存档镜像**（只拉取，不建档 / 不迁移）。
+   *
+   * ⚠ 为什么需要它：客户端镜像只在**动作回包**时刷新，
+   *   而「副本通关记录」这类事实可能刚被**另一条链路**改掉
+   *   （另一台设备打赢的副本、后台脚本跑的动作）。
+   *   镜像不刷新 ⇒ 副本页把「已通关」显示成「未通关」，
+   *   「设为挂机通道」按钮**一直禁用** ⇒ 玩家以为功能坏了（铁律 #10）。
+   *
+   * ⚗ 与 `load()` 的区别：`load()` 还负责建档 / 旧档迁移（**有副作用**），
+   *   页面级刷新不能走那条路 —— 每进一次页面都跑一遍迁移检查既慢又危险。
+   *
+   * ⚠ **走动作队列**（`enqueue`）：刷新与动作**串行**——
+   *   否则「刷新拉到的快照」可能比「并发动作的结果」旧，
+   *   后落地的刷新会把刚生效的进度**回滚**掉（镜像倒退 = 玩家看到的东西凭空消失）。
+   */
+  async function refreshSave(): Promise<boolean> {
+    const account = useAccountStore()
+    if (offline.value || account.offline || !account.isAuthenticated) return false
+    return enqueue(async () => {
+      try {
+        const cloud = await account.pullCloudSave()
+        if (!cloud) return false
+        await applyServerSave(cloud)
+        return true
+      } catch (err) {
+        if (isNetworkFailure(err)) offline.value = true
+        return false
+      }
+    })
   }
 
   async function load() {
@@ -568,7 +619,7 @@ export const useGameStore = defineStore('game', () => {
     // 上一个账号的离线结算报告不能带到新账号上
     offlineReport.value = null
     // 同理：上一个账号的挂机待结算次数不能带到新账号上（会显示成「有 N 次可领」）
-    idlePending.value = { main: 0, skill: 0, enhance: 0 }
+    idlePending.value = { main: 0, skill: 0, enhance: 0, relic: 0 }
     // 同理：上一场战斗的回放不能带到新账号
     challengeReplay.value = null
   }
@@ -625,13 +676,16 @@ export const useGameStore = defineStore('game', () => {
   })
 
   /**
-   * 三条挂机通道的**可结算次数**（界面显示用）。
+   * 四条挂机通道的**可结算次数**（界面显示用）。
    *
    * ⚠ 取 `idlePending`（服务端口径），**不是**客户端镜像里的 `effectiveMs`——
    *   镜像里的余额恒是「不足一次」的余数 ⇒ 永远显示 0 次（见 `idlePending` 注释）。
+   *
+   * ⚠ 通道清单走 core 的 `IDLE_CHANNEL_KINDS`（**唯一一份**，铁律 #3）：
+   *   漏掉一条 = 界面少一个入口（遗物通道曾被漏过）。
    */
   const idleChannels = computed(() =>
-    (['main', 'skill', 'enhance'] as const).map((kind) => ({
+    IDLE_CHANNEL_KINDS.map((kind) => ({
       kind,
       state: save.value.idle.channels[kind],
       rolls: idlePending.value[kind],
@@ -670,7 +724,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
-   * **一键领取挂机收益**（三通道同时结算）。
+   * **一键领取挂机收益**（四条通道同时结算）。
    *
    * ⚠ **挂机改版 v11**：挂机**不跑战斗**，领取次数由服务端按各通道的
    *   可用预算决定；客户端**不能**创造时间（不再传 `battles`）。
@@ -688,9 +742,9 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
-   * **设置挂机通道**（主线 / 技能副本 / 强化副本）。
+   * **设置挂机通道**（主线 / 技能副本 / 强化副本 / 遗物副本）。
    *
-   * ⚠ 三条通道**各自独立**账本：设置一条**不影响**另外两条。
+   * ⚠ 四条通道**各自独立**账本：设置一条**不影响**另外三条。
    * ⚠ 主线只能选**已通关**的关卡；副本只能选**已通关**的副本关卡。
    */
   async function setIdleChannel(payload: {
@@ -736,15 +790,14 @@ export const useGameStore = defineStore('game', () => {
     return res
   }
 
-  /** **遗物祈愿**（遗物的独立获取入口） */
-  async function acquireRelic() {
-    const res = await runAction({ type: 'relic.acquire' }, true)
-    if (res) {
-      await loadRelicPage()
-      await loadRelicStats()
-    }
-    return res
-  }
+  /**
+   * ⚠ **存档 v12 起「遗物祈愿」已下线**（core 的动作 `relic.acquire` 已删除）。
+   *
+   * 遗物的**唯一来源**是遗物副本（手动挑战 / 遗物挂机通道），
+   * 表现层不再有「花银两换一件遗物」这条路——留着这个包装函数
+   * 只会让编译期报错（动作层已无此动作），所以这里**整段删掉**，
+   * 而不是留一个空壳。
+   */
 
   // ─────────────────────────── 英灵 ───────────────────────────
 
@@ -848,6 +901,26 @@ export const useGameStore = defineStore('game', () => {
    *   否则会把「已解锁」误判成「未解锁」（玩家明明有 Lv60 却点不了）。
    */
   const relicStatsLoaded = ref(false)
+
+  /**
+   * **仓库里各套装共有多少件**（套装 id → 件数）。
+   *
+   * ⚠ **套装进度只有这一份口径**：副本页（这个副本覆盖的套装已有几件）
+   *   与遗物仓库（12 个套装各 x / 5 件）都读它——两处各算一套的话，
+   *   玩家会看到「仓库说 3 件、副本页说 2 件」这种自相矛盾的数字。
+   *
+   * ⚠ 数据源是**服务端统计**（`relicStats.byDefId`）：客户端镜像里
+   *   只有已装备遗物，直接数 `save.relics` 会漏掉仓库里的大部分件。
+   */
+  const relicSetCounts = computed(() => {
+    const map = new Map<string, number>()
+    for (const [defId, count] of Object.entries(relicStats.value.byDefId)) {
+      const def = RELIC_DEFS.get(defId)
+      if (!def) continue
+      map.set(def.setId, (map.get(def.setId) ?? 0) + count)
+    }
+    return map
+  })
   /**
    * 最近一次仓库查询条件。
    *
@@ -1276,8 +1349,10 @@ export const useGameStore = defineStore('game', () => {
     relicPageError,
     relicStats,
     relicStatsLoaded,
+    relicSetCounts,
     // actions
     load,
+    refreshSave,
     reconnect,
     reconnecting,
     invalidate,
@@ -1291,7 +1366,6 @@ export const useGameStore = defineStore('game', () => {
     challengeStage,
     challengeDungeon,
     clearChallengeReplay,
-    acquireRelic,
     pull,
     nextBattleSeed,
     feedBooks,

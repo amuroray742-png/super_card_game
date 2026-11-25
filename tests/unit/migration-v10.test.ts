@@ -102,9 +102,10 @@ describe('v9 → v10 迁移', () => {
     expect(twice.legacy.relicStones).toBe(once.legacy.relicStones)
   })
 
-  it('存档版本升到 10', () => {
+  it('存档版本升到当前版本', () => {
     expect(migrate(legacyV9Save()).version).toBe(SAVE_VERSION)
-    expect(SAVE_VERSION).toBe(11)
+    // ⚠ 遗物副本 v12（遗物唯一来源 = 遗物副本，祈愿下线）
+    expect(SAVE_VERSION).toBe(12)
   })
 
   it('normalizeSave 保留原始版本号（迁移由 migrate 负责，不由规范化负责）', () => {

@@ -33,7 +33,7 @@ const FIXTURE_TEAM = ['hanxin', 'xiangyu', 'zhugeliang', 'jeannedarc', 'tesla', 
 /** 英灵等级（够打副本简易档） */
 const FIXTURE_HERO_LEVEL = 30
 
-/** 造前置存档：满编队伍 + 金系英灵（主线未通关，副本也没通关） */
+/** 造前置存档：满编队伍 + 金系英灵（副本没通关） */
 export function buildDungeonFixture(now = Date.now()): SaveData {
   const save = createNewSave(now)
 
@@ -42,7 +42,12 @@ export function buildDungeonFixture(now = Date.now()): SaveData {
     save.team.slots[slot] = id
   })
 
-  save.campaign.clearedStage = 0
+  // ⚠ **主线通关第 1 关**（存档 v12 的最小适配）：
+  //   遗物副本按「主线通关第 N 关」解锁（`RELIC_DROP.UNLOCK_STAGE`），
+  //   第一个遗物副本的解锁线就是**第 1 关** ⇒ 主线停在 0 时，
+  //   遗物副本 tab 整页都是「未解锁」，截图验不到任何产出信息。
+  //   只推进到第 1 关（不放水）：后面的副本仍应是锁着的。
+  save.campaign.clearedStage = 1
   save.campaign.chapterProgress = 1
   // ⚠ 主线通道**跟随最新通关关卡**（`stageId = null`）：首胜前没有可挂目标。
   save.idle.channels.main.target = { kind: 'main', stageId: null }

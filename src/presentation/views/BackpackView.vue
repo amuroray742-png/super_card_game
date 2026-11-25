@@ -98,11 +98,18 @@ const skillMats = computed(() =>
   }),
 )
 
-/** 某五行副本的每胜产量（普通难度） */
+/**
+ * 某五行副本的每胜产量（普通难度）。
+ *
+ * ⚠ 存档 v12 起副本有两类产出：材料副本发**堆叠物**（`drop` 有值），
+ *   遗物副本发**实例**（`drop === null`）——这里取不到产量就显示「—」，
+ *   不能直接解引用（否则模板在遗物副本的道具上会崩）。
+ */
 function dropPerWin(itemId: ItemId): string {
   const variant = DUNGEON_VARIANTS.find((v) => v.itemId === itemId)
   if (!variant) return '—'
   const drop = dungeonDropAmount(variant, 'normal')
+  if (!drop) return '—'
   return drop.min === drop.max ? `${drop.min}` : `${drop.min}~${drop.max}`
 }
 

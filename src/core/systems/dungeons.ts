@@ -1,9 +1,10 @@
 /**
  * 材料副本（技能副本 / 强化副本）——**挂机改版 v11**。
  *
- * ## 副本是 24 个独立关卡
+ * ## 副本是 42 个独立关卡
  *
- * `(变体 × 难度) = 1 关`，共 5 技能变体 × 3 难度 + 3 强化变体 × 3 难度 = **24 关**。
+ * `(变体 × 难度) = 1 关`，共 5 技能变体 × 3 难度 + 3 强化变体 × 3 难度
+ * + 6 遗物变体 × 3 难度 = **42 关**（遗物副本是存档 v12 加的第 4 条挂机通道）。
  * 每关有自己的敌人组合、缩放锚点、战力门槛与产量，**打赢一次即通关**。
  *
  * ## 契约
@@ -20,7 +21,7 @@
 import type { BattleContext, BattleResult, SaveData } from '../model/types.ts'
 import { HERO_INDEX } from '../config/heroes/index.ts'
 import { getEnemy } from '../config/enemies.ts'
-import { RELIC, DUNGEON_DIFFICULTY_ORDER, type DungeonDifficultyId } from '../config/economy.ts'
+import { RELIC, RELIC_DROP, DUNGEON_DIFFICULTY_ORDER, type DungeonDifficultyId } from '../config/economy.ts'
 import {
   DUNGEON_INDEX,
   dungeonStageById,
@@ -62,6 +63,22 @@ export function dungeonUnlocked(
   variant: DungeonVariant,
   facts?: DungeonUnlockFacts,
 ): { unlocked: boolean; reason: string; hintRoute: string } {
+  if (variant.kind === 'relic') {
+    // ⚠ 遗物副本按**主线进度**解锁，**不能**挂在遗物上——
+    //   强化副本要求「持有 Lv1 遗物」，若遗物副本也要求持有遗物 ⇒ 循环依赖
+    //   ⇒ 首件遗物永远拿不到 ⇒ 整条强化链锁死（2026-11-24 那次故障的成因）。
+    const need = RELIC_DROP.UNLOCK_STAGE[variant.id] ?? 1
+    const cleared = save.campaign.clearedStage
+    if (cleared < need) {
+      return {
+        unlocked: false,
+        reason: `需要主线通关第 ${need} 关（当前第 ${cleared} 关）`,
+        hintRoute: 'expedition',
+      }
+    }
+    return { unlocked: true, reason: '', hintRoute: 'expedition' }
+  }
+
   if (variant.kind === 'enhance') {
     const tier = RELIC.STONE_TIERS.find((t) => t.id === variant.tier)
     const unlockLevel = tier?.unlockRelicLevel ?? 1

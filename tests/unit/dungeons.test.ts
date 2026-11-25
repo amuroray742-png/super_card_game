@@ -1,15 +1,23 @@
 /**
- * 材料副本（挂机改版 v11：**24 个独立关卡**）。
+ * 副本关卡表（挂机改版 v11 + 遗物副本 v12：**42 个独立关卡**）。
  *
  * ## 与旧版的差别
  *
  * 旧版副本没有自己的关卡实体——「难度 = 取材主线某章」，副本其实是拿主线波次换皮。
- * 新版副本是 `(变体 × 难度) = 1 关`，共 `5 技能变体 × 3 难度 + 3 强化变体 × 3 难度 = 24 关`，
- * 每关有自己的敌人组合、缩放锚点、战力门槛与产量，**打赢一次即通关**。
+ * 新版副本是 `(变体 × 难度) = 1 关`，共 `5 技能变体 × 3 难度 + 3 强化变体 × 3 难度
+ * + 6 遗物变体 × 3 难度 = 42 关`，每关有自己的敌人组合、缩放锚点、战力门槛与产量，
+ * **打赢一次即通关**。
+ *
+ * ## 三种副本，三种产出形状
+ *
+ * - **技能副本**：产出对应五行的技能材料（堆叠物）；
+ * - **强化副本**：产出对应档位的强化石（堆叠物）；
+ * - **遗物副本**：产出**遗物实例**（`relicPool` + `rewards.relics`）——
+ *   遗物是**实物**，不是堆叠物 ⇒ 关卡定义里 `drop` 为 `null`。
  *
  * ## 守什么
  *
- * 1. **24 关齐全**：id 唯一且符合 `dgn_<变体>_<难度>`；
+ * 1. **42 关齐全**：id 唯一且符合 `dgn_<变体>_<难度>`；
  * 2. **同一变体三难度共用同一批敌人**——难度差异只来自缩放 / 门槛 / 产量，
  *    不靠改敌人表救难度（设计稿 §3.2.1 ③ / U8）；
  * 3. **敌人真实存在**（配错 id ⇒ 战斗直接开不起来）；
@@ -18,6 +26,8 @@
  * 6. **解锁判定**：技能副本要「该五行有可升技能的英灵」，
  *    强化副本要「仓库最高遗物等级 ≥ 解锁线」，未解锁要给原因与引导路由；
  * 7. **副本与主线分开记账**（副本不写 `campaign`），胜利只发所选材料。
+ * 8. **遗物副本**：12 个套装被 6 个副本**恰好覆盖一次**；候选池 = 2 套 × 5 件；
+ *    第一个副本在**主线第 1 关**即可进入（首件遗物的可达性是硬卡）。
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -30,7 +40,10 @@ import {
   dungeonStageId,
   dungeonStagesOf,
   dungeonStagesOfVariant,
+  findRelicDungeonVariant,
+  relicPoolOf,
 } from '../../src/core/config/dungeons.ts'
+import { RELIC_SETS as RELIC_SET_LIST } from '../../src/core/config/relics.ts'
 import {
   dungeonStageUnlocked,
   dungeonUnlocked,
@@ -38,7 +51,7 @@ import {
   suggestLowerDifficulty,
   variantById,
 } from '../../src/core/systems/dungeons.ts'
-import { DUNGEON, DUNGEON_DIFFICULTIES, DUNGEON_DIFFICULTY_ORDER, RELIC } from '../../src/core/config/economy.ts'
+import { DUNGEON, DUNGEON_DIFFICULTIES, DUNGEON_DIFFICULTY_ORDER, RELIC, RELIC_DROP } from '../../src/core/config/economy.ts'
 import { getEnemy } from '../../src/core/config/enemies.ts'
 import { createNewSave } from '../../src/core/save/schema.ts'
 import { createHeroState } from '../../src/core/systems/growth.ts'
@@ -76,13 +89,13 @@ function strongSave(): SaveData {
   return save
 }
 
-describe('副本关卡表（24 关）', () => {
-  it('24 关 = 8 变体 × 3 难度，id 唯一且符合 `dgn_<变体>_<难度>`', () => {
+describe('副本关卡表（42 关）', () => {
+  it('42 关 = 14 变体 × 3 难度，id 唯一且符合 `dgn_<变体>_<难度>`', () => {
     // ⚠ 铁律 #8：关卡 id 的**唯一出处**是 `dungeonStageId`，
     //   表现层与动作层都从这里取，禁止自行拼接（拼错了战斗直接开不起来）。
-    expect(DUNGEON_VARIANT_ORDER).toHaveLength(8)
+    expect(DUNGEON_VARIANT_ORDER).toHaveLength(14)
     expect(DUNGEON_DIFFICULTY_ORDER).toHaveLength(3)
-    expect(DUNGEON_STAGES).toHaveLength(24)
+    expect(DUNGEON_STAGES).toHaveLength(42)
 
     const ids = new Set<string>()
     for (const stage of DUNGEON_STAGES) {
@@ -91,29 +104,29 @@ describe('副本关卡表（24 关）', () => {
       expect(stage.id).toBe(dungeonStageId(stage.variantId, stage.difficulty))
       expect(stage.id).toMatch(/^dgn_[A-Za-z0-9]+_(easy|normal|hard)$/)
     }
-    expect(ids.size).toBe(24)
+    expect(ids.size).toBe(42)
   })
 
-  it('难度段顺序固定为 [简易 × 8, 普通 × 8, 困难 × 8]', () => {
+  it('难度段顺序固定为 [简易 × 14, 普通 × 14, 困难 × 14]', () => {
     // ⚠ 锚点表（SCALE_ANCHORS / POWER_ANCHORS）与关卡表**逐位对齐**，
     //   顺序变了 ⇒ 难度锚点会张冠李戴（铁律 #4 / #41）。
     const easy = DUNGEON_STAGES.filter((s) => s.difficulty === 'easy')
     const normal = DUNGEON_STAGES.filter((s) => s.difficulty === 'normal')
     const hard = DUNGEON_STAGES.filter((s) => s.difficulty === 'hard')
-    expect(easy).toHaveLength(8)
-    expect(normal).toHaveLength(8)
-    expect(hard).toHaveLength(8)
-    expect(DUNGEON_STAGES.slice(0, 8).every((s) => s.difficulty === 'easy')).toBe(true)
-    expect(DUNGEON_STAGES.slice(8, 16).every((s) => s.difficulty === 'normal')).toBe(true)
-    expect(DUNGEON_STAGES.slice(16).every((s) => s.difficulty === 'hard')).toBe(true)
+    expect(easy).toHaveLength(14)
+    expect(normal).toHaveLength(14)
+    expect(hard).toHaveLength(14)
+    expect(DUNGEON_STAGES.slice(0, 14).every((s) => s.difficulty === 'easy')).toBe(true)
+    expect(DUNGEON_STAGES.slice(14, 28).every((s) => s.difficulty === 'normal')).toBe(true)
+    expect(DUNGEON_STAGES.slice(28).every((s) => s.difficulty === 'hard')).toBe(true)
   })
 
   it('缩放与门槛取自标定锚点表（不许手填）', () => {
     // ⚠ 铁律 #41：锚点是**标定值**，改了英灵 / 成长数值后必须重跑标定。
     //   这里锁住「关卡表与锚点表逐位对齐」，防止有人手填出一个与现实脱节的门槛。
-    expect(DUNGEON.SCALE_ANCHORS).toHaveLength(24)
-    expect(DUNGEON.POWER_ANCHORS).toHaveLength(24)
-    expect(DUNGEON.DESIGN_LEVELS).toHaveLength(24)
+    expect(DUNGEON.SCALE_ANCHORS).toHaveLength(42)
+    expect(DUNGEON.POWER_ANCHORS).toHaveLength(42)
+    expect(DUNGEON.DESIGN_LEVELS).toHaveLength(42)
     DUNGEON_STAGES.forEach((stage, index) => {
       expect(stage.enemyScale, `${stage.id} 的缩放没有对齐锚点表`).toBe(
         DUNGEON.SCALE_ANCHORS[index],
@@ -147,8 +160,10 @@ describe('副本关卡表（24 关）', () => {
     }
   })
 
-  it('段间单调：easy < normal < hard（缩放、门槛、产量严格递增）', () => {
+  it('段间单调：easy < normal < hard（缩放、门槛严格递增）', () => {
     // ⚠ 难度曲线必须单调——否则玩家会撞上"简单比困难还难"的关卡。
+    // ⚠ **产量**只在**材料副本**上有（遗物副本 `drop` 为 `null`，
+    //   件数由 `RELIC_DROP.COUNT` 决定，不在这张表里）。
     for (const variantId of DUNGEON_VARIANT_ORDER) {
       const [easy, normal, hard] = dungeonStagesOfVariant(variantId)
       expect(easy.difficulty).toBe('easy')
@@ -158,6 +173,7 @@ describe('副本关卡表（24 关）', () => {
       expect(hard.enemyScale).toBeGreaterThan(normal.enemyScale)
       expect(normal.powerRequired).toBeGreaterThan(easy.powerRequired)
       expect(hard.powerRequired).toBeGreaterThan(normal.powerRequired)
+      if (!easy.drop || !normal.drop || !hard.drop) continue
       expect(normal.drop.min).toBeGreaterThan(easy.drop.min)
       expect(hard.drop.min).toBeGreaterThan(normal.drop.min)
     }
@@ -166,16 +182,17 @@ describe('副本关卡表（24 关）', () => {
 
 describe('副本索引函数', () => {
   it('`dungeonStageById` 与 `DUNGEON_STAGE_INDEX` 一致', () => {
-    expect(DUNGEON_STAGE_INDEX.size).toBe(24)
+    expect(DUNGEON_STAGE_INDEX.size).toBe(42)
     for (const stage of DUNGEON_STAGES) {
       expect(dungeonStageById(stage.id)).toEqual(stage)
     }
     expect(dungeonStageById('dgn_not_exists_easy')).toBeNull()
   })
 
-  it('`dungeonStagesOf` 按种类切分（15 技能 + 9 强化）', () => {
+  it('`dungeonStagesOf` 按种类切分（15 技能 + 9 强化 + 18 遗物）', () => {
     expect(dungeonStagesOf('skill')).toHaveLength(15)
     expect(dungeonStagesOf('enhance')).toHaveLength(9)
+    expect(dungeonStagesOf('relic')).toHaveLength(18)
     for (const stage of dungeonStagesOf('skill')) {
       expect(DUNGEON_INDEX.get(stage.variantId)?.kind).toBe('skill')
     }
@@ -285,6 +302,93 @@ describe('副本解锁判定', () => {
       )
       expect(byStage.reason).toBe(byVariant.reason)
       expect(byStage.hintRoute).toBe(byVariant.hintRoute)
+    }
+  })
+})
+
+describe('遗物副本关卡表（遗物的唯一来源）', () => {
+  it('遗物副本关卡：`drop` 为 null，候选池 = 2 套 × 5 件 = 10 件', () => {
+    // ⚠ 遗物是**实例**（实物），不是堆叠物 ⇒ 关卡定义里 `drop` 必须是 `null`，
+    //   产出走 `relicPool` + `rewards.relics`（铁律 #22：一关只产一种东西）。
+    const stages = dungeonStagesOf('relic')
+    expect(stages).toHaveLength(18)
+    for (const stage of stages) {
+      expect(stage.drop, `${stage.id} 不该有堆叠物掉落`).toBeNull()
+      expect(stage.relicPool, `${stage.id} 缺候选遗物池`).toBeTruthy()
+      expect(stage.relicPool!.length, `${stage.id} 的候选池件数不对`).toBe(10)
+      // 候选池内容必须**等于** `relicPoolOf(variant)`（唯一出处，铁律 #8）
+      const variant = DUNGEON_INDEX.get(stage.variantId)!
+      expect([...stage.relicPool!]).toEqual([...relicPoolOf(variant)!])
+    }
+  })
+
+  it('材料副本关卡：`drop` 有值，候选池为 null（两种产出形状互斥）', () => {
+    for (const stage of DUNGEON_STAGES) {
+      const variant = DUNGEON_INDEX.get(stage.variantId)!
+      if (variant.kind === 'relic') continue
+      expect(stage.drop, `${stage.id} 缺材料掉落`).toBeTruthy()
+      expect(stage.relicPool, `${stage.id} 不该有遗物池`).toBeNull()
+    }
+  })
+
+  it('12 个套装被 6 个遗物副本**恰好覆盖一次**', () => {
+    // ⚠ 套装是遗物产出的「维度」：漏一个 ⇒ 那套永远拿不到；
+    //   覆盖两次 ⇒ 两个副本产出完全重叠（一边变成死内容）。
+    const covered = new Map<string, string[]>()
+    for (const variant of DUNGEON_VARIANTS.filter((v) => v.kind === 'relic')) {
+      expect(variant.relicSetIds, `${variant.id} 应当覆盖 2 个套装`).toHaveLength(2)
+      for (const setId of variant.relicSetIds ?? []) {
+        covered.set(setId, [...(covered.get(setId) ?? []), variant.id])
+      }
+    }
+    // 套装总数取配置表（不在测试里另写一份清单）
+    expect(RELIC_SET_LIST).toHaveLength(12)
+    for (const set of RELIC_SET_LIST) {
+      const owners = covered.get(set.id) ?? []
+      expect(owners, `套装 ${set.id} 没有被遗物副本覆盖`).toHaveLength(1)
+    }
+    // 反向：每个套装都能唯一定位到它的副本（表现层「缺哪套 → 去哪个副本」的桥）
+    for (const set of RELIC_SET_LIST) {
+      const variant = findRelicDungeonVariant(set.id)
+      expect(variant, `套装 ${set.id} 找不到对应的遗物副本`).toBeTruthy()
+      expect(variant!.kind).toBe('relic')
+      expect(variant!.relicSetIds).toContain(set.id)
+    }
+  })
+
+  it('⚠ 新号可达性：第一个遗物副本在**主线第 1 关**即可进入', () => {
+    // ⚠ **硬卡**：历史上「首件遗物拿不到」把整条强化链锁死
+    //   （初阶强化副本要求「持有 Lv1 遗物」⇒ 循环依赖）。
+    //   遗物副本必须**按主线进度**解锁，且第一个副本的解锁线 = 1。
+    const stage = dungeonStageById(dungeonStageId('relicZhanTan', 'easy'))!
+    expect(RELIC_DROP.UNLOCK_STAGE.relicZhanTan).toBe(1)
+
+    const save = createNewSave(NOW, 7)
+    // 主线第 1 关还没通关 ⇒ 锁着
+    const locked = dungeonStageUnlocked(save, stage)
+    expect(locked.unlocked).toBe(false)
+    expect(locked.hintRoute).toBe('expedition')
+
+    // ⚠ 主线通关第 1 关 ⇒ 立刻可进（首件遗物必须可达）
+    save.campaign.clearedStage = 1
+    const unlocked = dungeonStageUnlocked(save, stage)
+    expect(unlocked.unlocked, '主线第 1 关后遗物副本仍不可进').toBe(true)
+    expect(unlocked.reason).toBe('')
+  })
+
+  it('遗物副本按主线进度逐级解锁，且不与「持有遗物」形成循环依赖', () => {
+    // ⚠ 遗物副本**不能**挂在遗物上（强化副本要求持有 Lv1 遗物 ⇒ 循环依赖）。
+    //   所以判定的唯一依据是**主线通关关卡**。
+    const save = createNewSave(NOW, 7)
+    for (const variant of DUNGEON_VARIANTS.filter((v) => v.kind === 'relic')) {
+      const need = RELIC_DROP.UNLOCK_STAGE[variant.id]
+      expect(need, `${variant.id} 缺解锁线`).toBeGreaterThanOrEqual(1)
+      // 仓库里**一件遗物都没有**时，也只按主线进度判
+      expect(save.relics).toHaveLength(0)
+      save.campaign.clearedStage = need - 1
+      expect(dungeonUnlocked(save, variant).unlocked, `${variant.id} 提前解锁了`).toBe(false)
+      save.campaign.clearedStage = need
+      expect(dungeonUnlocked(save, variant).unlocked, `${variant.id} 没解锁`).toBe(true)
     }
   })
 })

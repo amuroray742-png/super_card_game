@@ -47,6 +47,7 @@ import { judgeRecycle } from './recycle-verdict.ts'
 import { feedBooks, itemsToExp, materialTotals, storedExp } from './item-flow.ts'
 import {
   applyChannels,
+  bestRelicDungeonStage,
   challengeDungeonStage,
   decideChannels,
   targetPlanName,
@@ -58,7 +59,6 @@ import {
   IDLE,
   LEVEL,
   RELIC,
-  RELIC_ACQUIRE,
   SKILL,
   STAGE,
   STAR,
@@ -96,12 +96,15 @@ const { values } = parseArgs({
      */
     challengesPerDay: { type: 'string', default: '8' },
     /**
-     * 每天**祈愿遗物**的件数上限（遗物的独立获取入口）。
+     * 每天**手动挑战遗物副本**的场次（存档 v12：遗物只来自遗物副本）。
      *
-     * ⚠ 理性玩家不会把全部银两砸进祈愿——银两同时要付境界突破 /
-     *   技能升级 / 遗物强化。默认 2。
+     * ⚠ 祈愿已下线 ⇒ 遗物改走遗物副本（`dungeon.challenge`）。
+     *   遗物是**零成本**产出（不花银两）⇒ 银两不再有「祈愿」这个出口。
+     *
+     * ⚠ 这是**模拟口径**（玩家不是无限刷的机器人），不是经济数值 ⇒
+     *   与 `challengesPerDay` 同类，住在工具的命令行参数里。
      */
-    relicsPerDay: { type: 'string', default: '2' },
+    relicRunsPerDay: { type: 'string', default: '2' },
     /** 机读结果输出路径 */
     out: { type: 'string', default: 'artifacts/baselines/recalibrate.json' },
     /** 只看报告，不落盘 */
@@ -115,7 +118,7 @@ const BISECT = Math.max(6, Number(values.bisect) || 18)
 const OFFLINE_HOURS = Math.max(0, Number(values.offlineHours) || 0)
 const ONLINE_HOURS = Math.max(0, Number(values.onlineHours) || 0)
 const CHALLENGES_PER_DAY = Math.max(0, Number(values.challengesPerDay) || 0)
-const RELICS_PER_DAY = Math.max(0, Number(values.relicsPerDay) || 0)
+const RELIC_RUNS_PER_DAY = Math.max(0, Number(values.relicRunsPerDay) || 0)
 const OUT_PATH = values.out ? resolve(process.cwd(), values.out) : ''
 
 const HOUR_MS = 3_600_000
@@ -624,7 +627,7 @@ interface DaySnapshot {
   skillLevel: number
   /** 上阵英灵的**平均**星级（同名碎片的升星维度；模拟里没有碎片来源 ⇒ 恒为 1） */
   starLevel: number
-  /** 当天实际结算的掷奖次数（三通道合计） */
+  /** 当天实际结算的掷奖次数（四通道合计） */
   rolls: number
   /** 当天被卡住的关卡（手动挑战打不赢的那一关） */
   blockedAtStage: number | null
@@ -781,21 +784,49 @@ function simulate(): SimulationResult {
     //   那部分奖励**不在回包里**（直接入库），漏记就会凭空少一块产出。
     const beforeChallenge = snapshotResources(save)
     const mainResult = runManualCampaignChallenges(save, ctx, CHALLENGES_PER_DAY)
-    const draft = decideChannels(save, ctx, teamIds, ROLLS_PER_DAY)
+    const draft = decideChannels(save, ctx, teamIds, ROLLS_PER_DAY, ctx.now + OFFLINE_HOURS * HOUR_MS)
     for (const stageId of draft.challenges) {
       challengeDungeonStage(save, ctx, stageId)
     }
     const challengeFlow = diffResources(beforeChallenge, snapshotResources(save))
 
-    // ── ② 定三通道目标（必须在离线期开始之前） ──
+    // ── 遗物副本：遗物的**唯一来源**（存档 v12） ──
+    //
+    // ⚠ 祈愿已下线（`relic.acquire` 已从动作层移除）：
+    //   遗物改由**遗物副本**产出（`dungeon.challenge` → `rewards.relics`）。
+    //   ⇒ 银两**不再**有「祈愿」这个出口（遗物是零成本产出）。
+    //
+    // ⚠ **每天限量**：手动挑战遗物副本的场次由 `RELIC_RUNS_PER_DAY` 给
+    //   （模拟口径，不是经济数值）——模拟玩家不是无限刷的机器人。
+    //
+    // ⚠ 目标关卡取「**打得赢的最高**遗物副本关卡」（`bestRelicDungeonStage`）：
+    //   与挂机通道选的是同一关 ⇒ 手动挑战顺带把它**打通**，
+    //   之后它就能当挂机目标（挂机只挂已通关内容）。
+    // ⚠ 放在**挂机结算之前**：打通了 ⇒ 第四通道（遗物）当天的挂机产出才有着落。
+    const relicTarget = bestRelicDungeonStage(save)
+    let relicWins = 0
+    if (relicTarget) {
+      for (let i = 0; i < RELIC_RUNS_PER_DAY; i++) {
+        if (!challengeDungeonStage(save, ctx, relicTarget.stageId)) break
+        relicWins++
+      }
+      if (relicWins > 0) {
+        // 新遗物立即按推荐穿上（否则强化链路拿不到可升的对象）
+        for (const heroId of teamIds) {
+          applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
+        }
+      }
+    }
+
+    // ── ② 定四通道目标（必须在离线期开始之前） ──
     //
     // ⚠ **目标是存档状态**：它决定了「下一段离线期归谁」。
     //   切换时服务端先按**旧目标**结清，所以这里必须在
     //   「那段挂机时间开始之前」选，而不是在结算之后。
     //
-    // ⚠ **三通道并行**（挂机改版 v11）：不用分配时间，
+    // ⚠ **四通道并行**（挂机改版 v11 + 遗物副本 v12）：不用分配时间，
     //   每条通道各自拿满同一段墙钟时间。
-    const decision = decideChannels(save, ctx, teamIds, ROLLS_PER_DAY)
+    const decision = decideChannels(save, ctx, teamIds, ROLLS_PER_DAY, ctx.now + OFFLINE_HOURS * HOUR_MS)
     applyChannels(save, ctx, decision.plans)
     const todayTargetName = targetPlanName(decision.plans)
 
@@ -821,7 +852,7 @@ function simulate(): SimulationResult {
       ctx.now += IDLE.HEARTBEAT_INTERVAL_MS
       applyAction(save, { type: 'idle.heartbeat' }, ctx)
     }
-    // ④ 领奖：三通道按各自预算结算（次数由服务端按账本决定，客户端只是上限）
+    // ④ 领奖：四通道按各自预算结算（次数由服务端按账本决定，客户端只是上限）
     const tick = applyAction(save, { type: 'idle.tick' }, ctx)
     const idleResult = tick.ok ? tick.result : null
 
@@ -839,6 +870,9 @@ function simulate(): SimulationResult {
     // 手动挑战的产出（基础掉落 + 首通经验书保底 + 首通时结清的主线通道）
     produced.silver += challengeFlow.silver
     addItemsToFlow(produced, challengeFlow.items)
+    // ⚠ **遗物副本手动挑战的产出**（存档 v12）：遗物是**实例**，
+    //   不走 `items`（堆叠道具）⇒ 单独记进 `produced.relics`。
+    produced.relics += relicWins
     // ⚠ **新号启动资金 + 新手十连的重复转化计入第 1 章的产出**：
     //   `createNewSave` 给的新号启动资金（银两 5 万 / 起步经验书）是真实流入，
     //   只是发生在 t=0、不在挂机回包里；新手十连的重复转化（同名碎片）同理——
@@ -860,33 +894,7 @@ function simulate(): SimulationResult {
       ladderDays[stage.chapter - 1] = day
     }
 
-    // ── 祈愿遗物（遗物的独立获取入口） ──
-    //
-    // ⚠ 挂机改版 v11：遗物**不再从掉落表出**（掉落表只剩银两 + 经验书），
-    //   遗物改走 `relic.acquire`（花 `RELIC_ACQUIRE.SILVER_COST` 银两祈愿一件）。
-    //   ⇒ 银两多了一个出口，强化链路才有「遗物 → 强化石 → 强化」的闭环。
-    //
-    // ⚠ **每天限量**：理性玩家不会把全部银两砸进祈愿——
-    //   银两同时要付境界突破 / 技能升级 / 遗物强化。限量由 `RELICS_PER_DAY` 给。
-    const relicCost = RELIC_ACQUIRE.SILVER_COST
-    let acquired = 0
-    for (let i = 0; i < RELICS_PER_DAY; i++) {
-      if (save.player.silver < relicCost) break
-      const wish = applyAction(save, { type: 'relic.acquire' }, ctx)
-      if (!wish.ok) break
-      acquired++
-    }
-    if (acquired > 0) {
-      // 新遗物立即按推荐穿上（否则强化链路拿不到可升的对象）
-      for (const heroId of teamIds) {
-        applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
-      }
-    }
-
     const { spent, maxAction } = spendGrowth(save, ctx, teamIds)
-    // 祈愿是**银两的出口**，记在消耗侧（回收比要看到它）
-    spent.silver += acquired * relicCost
-    maxAction.silver = Math.max(maxAction.silver, relicCost)
     syncRngState(save, ctx.rng)
 
     const state = save.heroes[teamIds[0]]
@@ -921,7 +929,7 @@ function simulate(): SimulationResult {
       relicLevel: Math.round(relicLevel * 10) / 10,
       skillLevel: Math.round(skillLevel * 10) / 10,
       starLevel: Math.round(starLevel * 10) / 10,
-      /** 当天实际结算的掷奖次数（三通道合计） */
+      /** 当天实际结算的掷奖次数（四通道合计） */
       rolls: idleResult?.rolls ?? 0,
       /** 当天被卡住的关卡（手动挑战打不赢的那一关） */
       blockedAtStage: mainResult.blockedAt,
@@ -957,8 +965,8 @@ console.log(
     `${ONLINE_HOURS > 0 ? ` + 在线 ${ONLINE_HOURS}h` : ''}）· 节奏验证 ${DAYS} 天`,
 )
 console.log(
-  `  手动挑战 ${CHALLENGES_PER_DAY} 关/天 · 祈愿遗物 ${RELICS_PER_DAY} 件/天` +
-    `（挂机改版 v11：主线推进只走手动挑战，三通道并行）`,
+  `  手动挑战 ${CHALLENGES_PER_DAY} 关/天 · 遗物副本 ${RELIC_RUNS_PER_DAY} 场/天` +
+    `（挂机改版 v11 + 遗物副本 v12：主线推进只走手动挑战，四通道并行）`,
 )
 console.log(
   `  每章 ${LEVELS_PER_CHAPTER} 级 · 章内总跨度 = ${STAGE.IN_CHAPTER_SPAN} × ` +
@@ -1331,7 +1339,13 @@ if (OUT_PATH && !values.dry) {
         generatedAt: new Date(BASE_NOW).toISOString(),
         rollsPerDayPerChannel: ROLLS_PER_DAY,
         challengesPerDay: CHALLENGES_PER_DAY,
-        relicsPerDay: RELICS_PER_DAY,
+        /**
+         * 每天**手动挑战遗物副本**的场次（存档 v12）。
+         *
+         * ⚠ 旧键 `relicsPerDay` 是「每天祈愿遗物件数」——祈愿已下线，
+         *   口径换成「遗物副本场次」（量纲一致：件/天 ≈ 场/天）。
+         */
+        relicRunsPerDay: RELIC_RUNS_PER_DAY,
         levelsPerChapter: LEVELS_PER_CHAPTER,
         inChapterSpan: STAGE.IN_CHAPTER_SPAN,
         bossMultiplier: STAGE.BOSS_MULTIPLIER,

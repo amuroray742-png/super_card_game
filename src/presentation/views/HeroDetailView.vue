@@ -478,13 +478,20 @@ function skillUpHint(index: number): { ok: boolean; text: string } {
  *   并显示差额、每胜产量和返回主线入口」。
  *
  * ⚠ 每胜产量取自 core 的 `dungeonDropAmount`——表现层不自己算（铁律 #4）。
+ *
+ * ⚠ **存档 v12 起变体有两类产出**：技能副本发堆叠材料（`itemId` 有值），
+ *   遗物副本发**实例**（`itemId === null`、`drop === null`）。
+ *   这里只处理技能副本，但**必须判空**——不判空会在类型检查与运行期各炸一次。
  */
 const skillDungeon = computed(() => {
   const element = def.value?.element
   if (!element) return null
   const variant = findDungeonVariant('skill', element)
   if (!variant) return null
+  // ⚠ 遗物副本没有堆叠道具与产量区间 → 这里取不到就当「没有副本入口」
+  if (!variant.itemId) return null
   const drop = dungeonDropAmount(variant, 'easy')
+  if (!drop) return null
   return {
     variant,
     materialName: ITEM_DEFS[variant.itemId].name,

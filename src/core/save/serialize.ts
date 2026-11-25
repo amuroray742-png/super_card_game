@@ -106,7 +106,7 @@ export function serializePublicSave(save: SaveData): string {
  * 客户端读取投影 → 存档形态（`relics` 只含已装备遗物）。
  *
  * 随机状态在客户端一律清零——权威序列只在服务端（铁律 #24）。
- * ⚠ 挂机改版 v11：三条挂机通道的随机序列也一并清零（它们住在同一个私有块里）。
+ * ⚠ 挂机改版 v11：四条挂机通道的随机序列也一并清零（它们住在同一个私有块里）。
  */
 export function deserializePublicSave(text: string): SaveData {
   const save = deserialize(text)

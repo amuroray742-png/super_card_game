@@ -333,7 +333,7 @@ describe('动作层：成功路径', () => {
     expect(main).toBeDefined()
     expect(main!.rewards.silver ?? 0).toBeGreaterThan(0)
     expect(save.player.silver).toBe(main!.rewards.silver ?? 0)
-    // ⚠ **遗物不再从掉落表出**（改走独立入口 `relic.acquire`）⇒ rewards.relics 恒空
+    // ⚠ **遗物不再从掉落表出**（遗物唯一来源 = 遗物副本）⇒ 主线通道的 rewards.relics 恒空
     expect(res.result.channels.every((c) => (c.rewards.relics?.length ?? 0) === 0)).toBe(true)
     expect(save.relics).toHaveLength(0)
   })

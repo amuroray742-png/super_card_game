@@ -41,7 +41,7 @@
  * npx tsx tools/capture/screenshot.ts --gacha-reveal --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/gacha-reveal.png
  *
- * # 遗物场景（注册账号 → 十连 → 编队 → 推征产遗物 → 铸造页 + 英灵页）
+ * # 遗物场景（注册账号 → 导入前置（60 件遗物）→ 仓库：套装进度 / 每日额度 / 保底 → 遗物副本页 → 英灵页）
  * npx tsx tools/capture/screenshot.ts --relic --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/relic.png
  *
@@ -96,7 +96,7 @@ interface Options {
   daily: boolean
   /** 演武场场景：登录 → 十连 → 演武场页（三队编成 / 敌方梯队 / 挑战） */
   ladder: boolean
-  /** 副本挑战场景：登录 → 十连 → 副本页（24 关列表 / 挑战 / 设为挂机通道） */
+  /** 副本挑战场景：登录 → 十连 → 副本页（42 关列表 / 挑战 / 设为挂机通道） */
   dungeonChallenge: boolean
   /** 浏览器兼容性测量模式（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏） */
   compat: boolean
@@ -538,18 +538,26 @@ async function assertResourceBarFullyVisible(page: Page): Promise<void> {
 }
 
 /**
- * 遗物场景：导入前置存档（60 件遗物 + 满编队伍）→ 铸造页 + 英灵页。
+ * 遗物场景：导入前置存档（60 件遗物 + 满编队伍）→ 铸造页 + 遗物副本页 + 英灵页。
  *
- * 截图用于验收三件事：
+ * 截图用于验收四件事：
  * 1. **遗物图标**：仓库里每件遗物都该有自己的实物立绘（不是一排同名文字）；
  * 2. **一键推荐装备**：英灵页的「一键推荐装备」按钮与战力增量；
- * 3. **套装效果可见**：2/4/6 件阶梯加成与「还差几件」的提示。
+ * 3. **套装效果可见**：2/4/6 件阶梯加成与「还差几件」的提示；
+ * 4. **养成规则在玩家眼前**（铁律 #27）：套装进度 / 每日额度 / 保底进度
+ *    三块都要在仓库页里看得见 —— 看不见等于这条养成线是隐形的。
  *
- * ⚠ 为什么用「导入前置」而不是「祈愿抽遗物」：
- *   挂机改版 v11 后遗物**已移出掉落表**，唯一来源是独立入口「遗物祈愿」
- *   （`relic.acquire`，5000 银两 / 次）。凑齐 60 件要祈愿 60 次（30 万银两），
- *   而且抽到的是**随机稀有度**，凑不出「12 套各 5 件」。
- *   导入前置一次到位，**60 张图标能在同一张仓库截图里全部验收**。
+ * 外加一件（遗物副本 v12 之后的关键项）：
+ * 5. **遗物副本入口点得动**：遗物**只**来自遗物副本，
+ *    「去遗物副本获取遗物」必须真的能点、点完落到副本页——
+ *    否则玩家一件遗物都拿不到，而动作层的 E2E 是全绿的
+ *    （**动作层有 ≠ 玩家点得到**）。
+ *
+ * ⚠ 为什么用「导入前置」而不是「真去刷遗物副本」：
+ *   遗物副本一场要**真实打一场战斗**，60 件要刷上百场，且掉落是**随机稀有度**，
+ *   凑不出「12 套各 5 件」这种整齐库存 ⇒ 截图只能造数据。
+ *   前置存档的遗物按**遗物副本的产出规则**生成（core 的 `rollRelicDrop`），
+ *   一次到位，**60 张图标能在同一张仓库截图里全部验收**。
  *   详见 `tools/capture/relic-fixture.ts`。
  */
 async function runRelicScenario(
@@ -573,7 +581,38 @@ async function runRelicScenario(
   await assertResourceBarFullyVisible(page)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-forge.png'), fullPage: opts.fullPage })
 
+  // ② 套装进度（铁律 #27：养成规则必须在玩家眼前）
+  //    ⚠ 断言落在**套装进度行**上（`relic-set-row-<套装 id>`）——
+  //    套装 id 走 core 的登记表，不在脚本里另写一份名单。
+  const setRows = page.locator('[data-testid^="relic-set-row-"]')
+  await setRows.first().waitFor({ state: 'visible', timeout: 10_000 })
+  console.log(`[relic] 套装进度行：${await setRows.count()} 行`)
+  await setRows.first().scrollIntoViewIfNeeded()
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-set-progress.png') })
+
+  // ③ 每日额度（挂机通道的防通胀闸门）
+  await page.getByTestId('relic-daily-quota').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-daily-quota.png') })
+
+  // ④ 保底进度（各遗物副本关卡分别记）
+  const pityRows = page.locator('[data-testid^="relic-pity-row-"]')
+  await pityRows.first().waitFor({ state: 'visible', timeout: 10_000 })
+  console.log(`[relic] 保底进度行：${await pityRows.count()} 行`)
+  await pityRows.first().scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-pity.png') })
+
+  // ⑤ **点一次「去遗物副本获取遗物」** → 落到遗物副本页
+  //    ⚠ 这一步是「动作层有 ≠ 玩家点得到」的验收：按钮在、能点、点完真的落到副本页。
+  await page.getByTestId('relic-go-dungeon').click()
+  await page.getByTestId('dungeon-kind-relic').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-dungeon-relic.png'), fullPage: opts.fullPage })
+
   // 顶栏资源说明弹窗（图标 → 名称 + 作用描述）
+  await page.goto(`${base}/#/forge`, { waitUntil: 'networkidle' })
   await page.locator('.res-item[data-res="crystals"]').click()
   await page.getByTestId('resource-dialog').waitFor({ state: 'visible', timeout: 10_000 })
   await page.waitForTimeout(300)
@@ -610,6 +649,20 @@ async function runRelicScenario(
   await page.getByText('套装效果', { exact: true }).scrollIntoViewIfNeeded()
   await page.waitForTimeout(400)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-set.png') })
+
+  // 推征页：**第 4 条挂机通道**（遗物通道）
+  //
+  // ⚠ 为什么单独拍这一屏：遗物副本既是「手动挑战的副本」，
+  //   又是**挂机通道的第 4 条**（铁律 #64）——
+  //   只拍副本页验不到「挂机里能不能挂遗物副本」，而这条正是本次改动的核心入口。
+  //   前置存档已经把遗物通道挂在第一个遗物副本关卡上（见 `relic-fixture.ts`），
+  //   所以这里要看到「遗物 · <变体> · <难度> · <地名>」的目标行。
+  await page.goto(`${base}/#/expedition`, { waitUntil: 'networkidle' })
+  const relicChannel = page.getByTestId('idle-channel-relic')
+  await relicChannel.waitFor({ state: 'visible', timeout: 10_000 })
+  await relicChannel.scrollIntoViewIfNeeded()
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-idle-relic.png') })
 
   return ''
 }
@@ -677,7 +730,8 @@ async function runBackpackScenario(
   await page.screenshot({ path: outPath.replace(/\.png$/, '-dungeon.png'), fullPage: opts.fullPage })
 
   // ⑦ 强化副本页（三档石 + 每胜产量 + 设为挂机通道）
-  //    ⚠ 挂机改版 v11：副本页是「24 个独立关卡」平铺，**变体不再是独立分组**，
+  //    ⚠ 挂机改版 v11：副本页是「独立关卡」（存档 v12 共 42 关）平铺，
+  //    **变体不再是独立分组**，
   //    断言落在关卡行上（关卡 id 唯一出处是 core 的 `dungeonStageId`）。
   await page.goto(`${base}/#/dungeon?kind=enhance&tier=relicStoneTier1&difficulty=easy`, {
     waitUntil: 'networkidle',
@@ -1053,7 +1107,7 @@ async function runLadderScenario(
 /**
  * 副本挑战场景（挂机改版 v11 新增）。
  *
- * ⚠ 为什么要有这个场景：副本从「取材主线波次」变成 **24 个独立关卡**之后，
+ * ⚠ 为什么要有这个场景：副本从「取材主线波次」变成**独立关卡**（存档 v12 共 42 关）之后，
  *   副本页多了一整张关卡列表（按难度段分组）、每关有「挑战」与「设为挂机通道」
  *   两个动作、还有「未通关 / 未解锁」两种状态——
  *   这些**只在副本页上验**得出，单测与 E2E 都看不到布局与文案。
@@ -1079,12 +1133,14 @@ async function runDungeonChallengeScenario(
   await page.locator('[data-testid="dungeon-kind-skill"]').waitFor({ state: 'visible' })
   await page.waitForTimeout(opts.waitMs)
 
-  // ③ 列表完整性：副本页按 tab 分成**技能 15 关**（5 变体 × 3 难度）
-  //    与**强化 9 关**（3 变体 × 3 难度），合计 24 关。
+  // ③ 列表完整性：副本页按 tab 分成**技能 15 关**（5 变体 × 3 难度）、
+  //    **强化 9 关**（3 变体 × 3 难度）与**遗物 18 关**（6 变体 × 3 难度），
+  //    合计 42 关（存档 v12）。
   //    ⚠ 断言的数量走 core 的 `dungeonStagesOf`（关卡表的唯一出处），
-  //    不在脚本里另写一份「15 / 9」。
+  //    不在脚本里另写一份「15 / 9 / 18」。
   const skillCount = dungeonStagesOf('skill').length
   const enhanceCount = dungeonStagesOf('enhance').length
+  const relicCount = dungeonStagesOf('relic').length
   const rows = page.locator('[data-testid^="dungeon-stage-"]')
   const rowCount = await rows.count()
   if (rowCount !== skillCount) {
@@ -1119,7 +1175,7 @@ async function runDungeonChallengeScenario(
   // ⑥ 打赢一次即通关 ⇒ 「已通关」+「设为挂机通道」变为可用（这是副本的核心契约）
   await expectEnabled(firstRow.locator(`[data-testid="dungeon-set-channel-${firstStageId}"]`), '设为挂机通道')
 
-  // ⑦ 强化副本 tab：另有 enhanceCount 关（合计 24 关）
+  // ⑦ 强化副本 tab：另有 enhanceCount 关
   await page.locator('[data-testid="dungeon-kind-enhance"]').click()
   await page.waitForTimeout(opts.waitMs)
   const enhanceRows = await page.locator('[data-testid^="dungeon-stage-"]').count()
@@ -1128,7 +1184,17 @@ async function runDungeonChallengeScenario(
   }
   await page.screenshot({ path: outPath.replace(/\.png$/, '') + '-enhance.png' })
 
-  // ⚠ 返回空串：本场景自己拍完三张（列表 / 结算 / 强化 tab），
+  // ⑧ 遗物副本 tab（存档 v12）：遗物的唯一来源 ⇒ 第三个 tab 必须真的有内容
+  //    ⚠ 断言的数量同样走 core 的 `dungeonStagesOf('relic')`，不在脚本里写死 18。
+  await page.locator('[data-testid="dungeon-kind-relic"]').click()
+  await page.waitForTimeout(opts.waitMs)
+  const relicRows = await page.locator('[data-testid^="dungeon-stage-"]').count()
+  if (relicRows !== relicCount) {
+    throw new Error(`遗物副本页应有 ${relicCount} 行，实际 ${relicRows} 行`)
+  }
+  await page.screenshot({ path: outPath.replace(/\.png$/, '') + '-relic.png' })
+
+  // ⚠ 返回空串：本场景自己拍完三张（列表 / 结算 / 强化 tab / 遗物 tab），
   //   再让 main() 按 resultPath 补拍会**覆盖掉结算那张**（它拍的是切 tab 之后的画面）。
   return ''
 }

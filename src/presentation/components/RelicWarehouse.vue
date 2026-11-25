@@ -11,18 +11,47 @@
  * ⚠ **强化石按档位扣**（资源/背包版本 v10）：强化石分初阶 / 中阶 / 高阶三档，
  *   档位由「目标等级」决定（`relicUpgradeCost`）。名称一律取 `ITEM_DEFS`
  *   （铁律 #8），界面不得就地写中文名。
+ *
+ * ## 存档 v12：遗物祈愿已下线
+ *
+ * 「花银两祈愿 1 件遗物」这条路**整条删掉**（core 的动作 `relic.acquire` 已删除），
+ * 遗物的**唯一来源**是**遗物副本**（手动挑战 / 遗物挂机通道）。
+ * 所以本组件顶部的面板从「祈愿」改成：
+ *   ① **套装进度**（12 个套装各 x / 5 件，点一下直达对应遗物副本）；
+ *   ② **每日额度**（挂机通道的防通胀闸门；手动挑战不受限）；
+ *   ③ **保底进度**（各遗物副本关卡的保底计数）。
+ *
+ * > 教训：入口下线时，**替代路径必须在同一个位置接上**——
+ * > 否则玩家看到的是「仓库空着 + 没有路可走」，整条遗物养成线等于消失。
  */
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
-import { RELIC_DEFS, RELIC_SETS, getRelicMods, getSetModsBySetIds, relicUpgradeCost } from '../../core/systems/relic.ts'
+import {
+  RELIC_DEFS,
+  RELIC_SETS,
+  getRelicMods,
+  getSetModsBySetIds,
+  relicQuotaLeft,
+  relicUpgradeCost,
+} from '../../core/systems/relic.ts'
+import {
+  DUNGEON_INDEX,
+  DUNGEON_VARIANT_ORDER,
+  dungeonStagesOfVariant,
+  findRelicDungeonVariant,
+  type DungeonVariant,
+} from '../../core/config/dungeons.ts'
+import { relicIdsBySet } from '../../core/config/relics.ts'
 import { relicTemperRuleHint } from '../utils/relic-hint.ts'
-import { RELIC } from '../../core/config/economy.ts'
+import { RELIC, RELIC_DROP } from '../../core/config/economy.ts'
 import { relicIconPath } from '../../core/config/art.ts'
 import { ITEM_DEFS, type ItemId } from '../../core/config/items.ts'
 import { formatNumber } from '../utils/format'
 import type { Rarity, RelicInstance, StatMod } from '../../core/model/types.ts'
 
 const store = useGameStore()
+const router = useRouter()
 
 const RARITIES: Rarity[] = ['SSR', 'SR', 'R', 'N']
 
@@ -60,16 +89,76 @@ const selectedSet = computed(() =>
 /** 选中遗物的词条（core：主词条随等级缩放） */
 const selectedMods = computed<StatMod[]>(() => (selected.value ? getRelicMods(selected.value) : []))
 
-/** 仓库中各套装件数（服务端统计，不在客户端遍历仓库） */
-const ownedSetCount = computed(() => {
-  const map = new Map<string, number>()
-  for (const [defId, count] of Object.entries(store.relicStats.byDefId)) {
-    const def = RELIC_DEFS.get(defId)
-    if (!def) continue
-    map.set(def.setId, (map.get(def.setId) ?? 0) + count)
+/**
+ * 仓库中各套装件数（**服务端口径**，由 store 独家产出）。
+ *
+ * ⚠ 复用 store 的 `relicSetCounts`（与副本页的套装进度**同一份口径**）——
+ *   两处各数一遍的话，玩家会看到「仓库说 3 件、副本页说 2 件」。
+ */
+const ownedSetCount = computed(() => store.relicSetCounts)
+
+// ─────────────────────────── 遗物副本（遗物的唯一来源） ───────────────────────────
+
+/**
+ * **遗物副本的变体列表**（6 个，按配置固定顺序）。
+ *
+ * ⚠ 套装 → 副本的映射由 core 的 `findRelicDungeonVariant` 独家产出，
+ *   表现层不自己遍历变体表（铁律 #3 / #8）。
+ */
+const relicVariants = computed<DungeonVariant[]>(() =>
+  DUNGEON_VARIANT_ORDER.map((id) => DUNGEON_INDEX.get(id))
+    .filter((v): v is DungeonVariant => !!v && v.kind === 'relic'),
+)
+
+/** 某套装共有几件（配置口径：`relicIdsBySet`） */
+function setTotalOf(setId: string): number {
+  return relicIdsBySet(setId).length
+}
+
+/** 某套装在仓库里已有几件 */
+function setCountOf(setId: string): number {
+  return ownedSetCount.value.get(setId) ?? 0
+}
+
+/**
+ * **今日剩余遗物额度**（件）。
+ *
+ * ⚠ 走 core 的 `relicQuotaLeft`（**唯一一份**，按 UTC 日期键判定）；
+ *   时间取**注入时钟** `store.now()`，禁止 `Date.now()`（铁律 #12）。
+ */
+const quotaLeft = computed(() => relicQuotaLeft(store.save, store.now()))
+
+/** 某关卡的保底计数（连续未出 SSR 的**件数**，随存档落盘） */
+function pityOf(stageId: string): number {
+  return store.save.relicPity[stageId] ?? 0
+}
+
+/** 还差几件必出 SSR */
+function pityRemain(stageId: string): number {
+  return Math.max(0, RELIC_DROP.PITY_SSR - pityOf(stageId))
+}
+
+/**
+ * 点某个套装 → **直达产出它的遗物副本**。
+ *
+ * ⚠ 深链参数用 `?relic=<setId>`：副本页拿到它就高亮那个副本
+ *   （`findRelicDungeonVariant` 是套装 → 副本的**唯一**映射）。
+ * ⚠ 入口必须**真的可达**（铁律 #10）：套装进度写在仓库里，
+ *   点一下就要落到能拿到这件遗物的关卡上，而不是只改个 URL。
+ */
+function goDungeonOfSet(setId: string) {
+  const variant = findRelicDungeonVariant(setId)
+  if (!variant) {
+    store.notify('该套装暂时没有对应副本', 'warn')
+    return
   }
-  return map
-})
+  void router.push({ path: '/dungeon', query: { kind: 'relic', relic: setId } })
+}
+
+/** 去遗物副本页（仓库为空时的引导入口） */
+function goRelicDungeon() {
+  void router.push({ path: '/dungeon', query: { kind: 'relic' } })
+}
 
 /** 当前编队已装备的套装 id 列表（用于套装生效件数） */
 const teamSetIds = computed<(string | null)[]>(() => {
@@ -128,6 +217,9 @@ function syncSelected() {
 
 onMounted(() => {
   void reload(1)
+  // ⚠ 刷新一次存档镜像：保底计数（`save.relicPity`）与每日额度都住在存档里，
+  //   另一条链路刚打过副本的话，镜像里的计数是旧的 ⇒ 玩家看到过期的保底进度。
+  void store.refreshSave()
 })
 
 watch(rarityFilter, () => {
@@ -139,6 +231,8 @@ watch(setFilter, () => {
 watch(sortAsc, () => {
   void reload(page.value)
 })
+
+// ─────────────────────────── 分页 ───────────────────────────
 
 function prevPage() {
   if (page.value <= 1) return
@@ -350,6 +444,69 @@ async function toggleLock() {
 
 <template>
   <div>
+    <!-- 套装进度（点击直达产出它的遗物副本） -->
+    <section class="panel">
+      <div class="panel-title">
+        <span>套装进度</span>
+        <span class="tiny muted">点套装 → 去对应副本</span>
+      </div>
+      <button
+        v-for="set in RELIC_SETS.values()"
+        :key="set.id"
+        class="set-row"
+        :data-testid="`relic-set-row-${set.id}`"
+        @click="goDungeonOfSet(set.id)"
+      >
+        <span class="set-row-name">{{ set.name }}</span>
+        <span class="tiny muted">{{ setCountOf(set.id) }} / {{ setTotalOf(set.id) }} 件</span>
+        <span class="tiny muted set-row-dungeon">
+          产出副本：{{ findRelicDungeonVariant(set.id)?.name ?? '—' }}
+        </span>
+      </button>
+    </section>
+
+    <!-- 每日额度（挂机通道的防通胀闸门） -->
+    <section class="panel">
+      <div class="row-between">
+        <span class="tiny muted">今日遗物额度</span>
+        <b class="tiny" data-testid="relic-daily-quota">剩余 {{ quotaLeft }} 件</b>
+      </div>
+      <p class="tiny muted" style="margin: 4px 0 0">
+        遗物挂机通道每日最多产出 {{ formatNumber(RELIC_DROP.DAILY_CAP) }} 件；
+        <b>手动挑战遗物副本不受额度限制</b>。
+      </p>
+    </section>
+
+    <!-- 保底进度（各遗物副本关卡） -->
+    <section class="panel">
+      <div class="panel-title">
+        <span>保底进度</span>
+        <span class="tiny muted">连续 {{ RELIC_DROP.PITY_SSR }} 件未出 SSR 必出</span>
+      </div>
+      <div v-for="variant in relicVariants" :key="variant.id" class="pity-block">
+        <div class="tiny muted" style="margin-bottom: 2px">{{ variant.name }}</div>
+        <div
+          v-for="stage in dungeonStagesOfVariant(variant.id)"
+          :key="stage.id"
+          class="row-between tiny pity-row"
+          :data-testid="`relic-pity-row-${stage.id}`"
+        >
+          <span>{{ stage.name }}</span>
+          <span class="muted">再 {{ pityRemain(stage.id) }} 件必出 SSR</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 遗物副本入口（遗物的唯一来源；铁律 #10：入口必须可达） -->
+    <section class="panel">
+      <button class="btn btn-primary btn-block" data-testid="relic-go-dungeon" @click="goRelicDungeon">
+        去遗物副本获取遗物
+      </button>
+      <p class="tiny muted" style="margin: 6px 0 0">
+        遗物只能从遗物副本获得：主线通关第 1 关即可进入第一个副本，打赢一次即通关。
+      </p>
+    </section>
+
     <!-- 库存概览 -->
     <section class="panel">
       <div class="row-between">
@@ -443,7 +600,12 @@ async function toggleLock() {
       <div v-else-if="store.relicPageLoading" class="empty">加载中…</div>
       <div v-else-if="relics.length === 0" class="empty">
         仓库暂无遗物<br />
-        <span class="tiny">可前往推征获取</span>
+        <span class="tiny">遗物只能从遗物副本获得（主线通关第 1 关即可进入第一个副本）</span>
+        <div style="margin-top: 8px">
+          <button class="btn btn-sm btn-primary" data-testid="relic-go-dungeon-empty" @click="goRelicDungeon">
+            去遗物副本
+          </button>
+        </div>
       </div>
       <div v-else class="relic-grid">
         <div
@@ -721,6 +883,45 @@ async function toggleLock() {
 
 .set-block:last-child {
   border-bottom: none;
+}
+
+/* 套装进度行（可点击 → 直达产出它的遗物副本） */
+.set-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 6px 0;
+  text-align: left;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.set-row:last-child {
+  border-bottom: none;
+}
+
+.set-row-name {
+  font-size: 13px;
+  color: var(--c-text);
+}
+
+.set-row-dungeon {
+  flex-basis: 100%;
+}
+
+/* 保底进度（每个遗物副本一组） */
+.pity-block {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.pity-block:last-child {
+  border-bottom: none;
+}
+
+.pity-row {
+  padding: 1px 0;
 }
 
 .bonus-row {

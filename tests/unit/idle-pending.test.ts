@@ -26,7 +26,8 @@ import { applyAction, type ActionContext } from '../../src/core/systems/actions.
 import { createNewSave } from '../../src/core/save/schema.ts'
 import { serializePublicSave, deserializePublicSave } from '../../src/core/save/serialize.ts'
 import { dungeonStageId } from '../../src/core/config/dungeons.ts'
-import { IDLE } from '../../src/core/config/economy.ts'
+import { IDLE, RELIC_DROP } from '../../src/core/config/economy.ts'
+import { relicDailyKey } from '../../src/core/systems/relic.ts'
 import {
   idleChannelRolls,
   idlePendingRolls,
@@ -42,6 +43,8 @@ const ROLL_MS = IDLE.SECONDS_PER_ROLL * 1000
 
 const SKILL_EARTH_EASY = dungeonStageId('skillEarth', 'easy')
 const ENHANCE_T1_EASY = dungeonStageId('enhanceTier1', 'easy')
+/** 遗物副本「锋锐 · 简易」关卡 id */
+const RELIC_EASY = dungeonStageId('relicZhanTan', 'easy')
 
 function makeCtx(now = NOW): ActionContext {
   return { now, rng: new Rng(777), randomSeed: () => 777 }
@@ -67,7 +70,7 @@ describe('挂机待结算次数：心跳回执是服务端的真相', () => {
     const save = makeSave()
     // 60 秒 ⇒ 10 次掷奖（6 秒/次）
     const pending = heartbeatPending(save, makeCtx(NOW + 60_000))
-    expect(pending).toEqual({ main: 10, skill: 0, enhance: 0 })
+    expect(pending).toEqual({ main: 10, skill: 0, enhance: 0, relic: 0 })
   })
 
   it('★ 按钮上写的次数 == 点「全部领取」实际拿到的次数', () => {
@@ -81,12 +84,12 @@ describe('挂机待结算次数：心跳回执是服务端的真相', () => {
     const tick = applyAction(save, { type: 'idle.tick' }, ctx)
     expect(tick.ok).toBe(true)
     if (!tick.ok) return
-    expect(tick.result.rolls).toBe(pending.main + pending.skill + pending.enhance)
+    expect(tick.result.rolls).toBe(pending.main + pending.skill + pending.enhance + pending.relic)
     const main = tick.result.channels.find((c) => c.channel === 'main')
     expect(main?.rolls).toBe(pending.main)
   })
 
-  it('三条通道各自报各自的次数（互不干扰）', () => {
+  it('四条通道各自报各自的次数（互不干扰）', () => {
     const save = makeSave()
     save.dungeons.cleared[SKILL_EARTH_EASY] = true
     save.dungeons.cleared[ENHANCE_T1_EASY] = true
@@ -96,8 +99,36 @@ describe('挂机待结算次数：心跳回执是服务端的真相', () => {
 
     ctx.now = NOW + 60_000
     const pending = heartbeatPending(save, ctx)
-    expect(pending).toEqual({ main: 10, skill: 10, enhance: 10 })
-    expect(pending.main + pending.skill + pending.enhance).toBe(30)
+    expect(pending).toEqual({ main: 10, skill: 10, enhance: 10, relic: 0 })
+    expect(pending.main + pending.skill + pending.enhance + pending.relic).toBe(30)
+  })
+
+  it('⚠ 遗物通道的待结算次数受**每日额度**裁剪（铁律 #62：界面只能少写）', () => {
+    // ⚠ 遗物是零成本产出 ⇒ 挂机通道有每日额度（`RELIC_DROP.DAILY_CAP`）。
+    //   额度按「件」计、每次掷奖至少出 1 件 ⇒ 剩余额度就是次数的**上界**。
+    //   按钮上写 N 次 ⇒ 点下去**至少**得发 N 次；反过来写多了就是骗玩家。
+    const save = makeSave()
+    save.dungeons.cleared[RELIC_EASY] = true
+    const ctx = makeCtx(NOW)
+    const set = applyAction(
+      save,
+      { type: 'idle.setChannel', channel: 'relic', dungeonStageId: RELIC_EASY },
+      ctx,
+    )
+    expect(set.ok).toBe(true)
+
+    // 额度只剩 3 件 ⇒ 待结算次数被裁到 3（预算本来是 10 次）
+    save.relicDaily = { date: relicDailyKey(NOW), count: RELIC_DROP.DAILY_CAP - 3 }
+    const pending = heartbeatPending(save, makeCtx(NOW + 60_000))
+    expect(pending.relic).toBe(3)
+
+    // ★ 按钮上写的次数 == 点「全部领取」实际拿到的次数
+    const tick = applyAction(save, { type: 'idle.tick' }, makeCtx(NOW + 60_000))
+    expect(tick.ok).toBe(true)
+    if (!tick.ok) return
+    const relic = tick.result.channels.find((c) => c.channel === 'relic')
+    expect(relic?.rolls).toBe(pending.relic)
+    expect(relic?.rewards.relics?.length).toBeLessThanOrEqual(pending.relic)
   })
 
   it('没有有效目标的通道报 0 次（未开启 / 未通关 / 目标失效）', () => {
@@ -105,19 +136,19 @@ describe('挂机待结算次数：心跳回执是服务端的真相', () => {
     const ctx = makeCtx(NOW + 60_000)
 
     // 技能 / 强化通道没设目标 ⇒ 0 次
-    expect(heartbeatPending(save, ctx)).toEqual({ main: 10, skill: 0, enhance: 0 })
+    expect(heartbeatPending(save, ctx)).toEqual({ main: 10, skill: 0, enhance: 0, relic: 0 })
 
     // 主线挂到**未通关**的关卡 ⇒ 目标失效 ⇒ 0 次（挂机只挂已通关内容）
     const bad = createNewSave(NOW, 7)
     bad.campaign.clearedStage = 5
     bad.idle.channels.main.target = { kind: 'main', stageId: 9 }
-    expect(heartbeatPending(bad, ctx)).toEqual({ main: 0, skill: 0, enhance: 0 })
+    expect(heartbeatPending(bad, ctx)).toEqual({ main: 0, skill: 0, enhance: 0, relic: 0 })
   })
 
   it('首胜前主线通道没有目标 ⇒ 0 次', () => {
     const save = createNewSave(NOW, 7)
     // 新档：主线跟随模式，但 `clearedStage = 0` ⇒ 没有可挂的关卡
-    expect(heartbeatPending(save, makeCtx(NOW + 60_000))).toEqual({ main: 0, skill: 0, enhance: 0 })
+    expect(heartbeatPending(save, makeCtx(NOW + 60_000))).toEqual({ main: 0, skill: 0, enhance: 0, relic: 0 })
   })
 })
 
@@ -147,7 +178,7 @@ describe('挂机待结算次数：展示与结算同一份换算', () => {
   it('`idlePendingRolls` 与逐条 `idleChannelRolls` 同数', () => {
     const save = makeSave()
     save.idle.channels.main.effectiveMs = ROLL_MS * 3
-    const pending = idlePendingRolls(save)
+    const pending = idlePendingRolls(save, NOW)
     expect(pending.main).toBe(idleChannelRolls(save.idle.channels.main))
     expect(pending.main).toBe(3)
   })
@@ -170,6 +201,6 @@ describe('回归：客户端镜像算不出次数（回包前已结算）', () =
     // 回包给客户端的镜像 ⇒ 次数算出来是 0
     const mirror = deserializePublicSave(serializePublicSave(save))
     expect(idleChannelRolls(mirror.idle.channels.main)).toBe(0)
-    expect(idlePendingRolls(mirror).main).toBe(0)
+    expect(idlePendingRolls(mirror, NOW).main).toBe(0)
   })
 })

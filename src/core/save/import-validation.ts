@@ -7,7 +7,7 @@ import { POOLS } from '../config/pools.ts'
 import { STAGES } from '../config/stages.ts'
 import { BATTLE, LEVEL, STAR, SKILL, RELIC, REBIRTH, GACHA } from '../config/economy.ts'
 import { ITEM_IDS } from '../config/items.ts'
-import { DUNGEON_STAGE_INDEX } from '../config/dungeons.ts'
+import { DUNGEON_INDEX, DUNGEON_STAGE_INDEX } from '../config/dungeons.ts'
 import { IDLE_CHANNEL_KINDS } from '../systems/idle.ts'
 import { parseEquipKey } from '../systems/loadout.ts'
 import { emptyLadderSquads } from '../config/ladder.ts'
@@ -46,7 +46,27 @@ function validateRawChannelTargets(raw: Record<string, any>): void {
     } else {
       requireValid(typeof target.dungeonStageId === 'string')
       requireValid(DUNGEON_STAGE_INDEX.has(target.dungeonStageId))
+      // ⚠ 副本关卡的**种类**必须与通道种类一致
+      //   （`{kind:'relic', dungeonStageId:'dgn_skillGold_easy'}` 是「凭空捏造」）。
+      //   `normalizeIdleChannel` 会把它洗成 `null`，但归一化前必须先拦住。
+      const stage = DUNGEON_STAGE_INDEX.get(target.dungeonStageId)
+      requireValid(stage !== undefined && DUNGEON_INDEX.get(stage.variantId)?.kind === kind)
     }
+  }
+}
+
+/**
+ * 导入路径的**原始**遗物保底计数校验（同样必须在 `normalizeSave` 之前调用）。
+ *
+ * ⚠ 保底计数**不能由客户端决定**：一份 `pity: 999` 的导入档会让保底机制形同虚设。
+ *   非法 key / 非法数值一律整份拒绝。
+ */
+function validateRawRelicPity(raw: Record<string, any>): void {
+  const pity = raw.relicPity
+  if (pity === null || pity === undefined) return
+  requireValid(record(pity))
+  for (const [id, value] of Object.entries(pity)) {
+    requireValid(DUNGEON_STAGE_INDEX.has(id) && integer(value))
   }
 }
 
@@ -95,7 +115,7 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
     }
   }
   walk(raw)
-  // ⚠ **挂机改版 v11**：导入**只接受 v11**（设计稿 §3.3 / §3.10）。
+  // ⚠ **挂机改版 v11 / 遗物副本 v12**：导入**只接受当前版本**（v12）。
   //   旧版本走服务端存档的迁移链，不走导入路径——导入是「客户端上传的数据」，
   //   版本不一致时宁可拒绝，也不要把半迁移的档放进来。
   requireValid(record(raw) && raw.version === SAVE_VERSION && record(raw.player))
@@ -106,6 +126,7 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   //   之后再校验就是死代码（详见 `validateRawChannelTargets` 的注释）。
   validateRawChannelTargets(raw)
   validateRawDungeonCleared(raw)
+  validateRawRelicPity(raw)
   const save = normalizeSave(raw)
   // ⚠ **实施修正（资源/背包版本 v10）**：导入路径**必须**走迁移。
   //   `normalizeSave` 保留原始版本号（它曾把版本改写成当前版本 →
@@ -164,7 +185,7 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   requireValid(record(save.gacha.pools) && Array.isArray(save.gacha.history) && typeof save.gacha.newbieUsed === 'boolean')
   requireValid(record(save.arena) && Array.isArray(save.arena.runes))
   for (const k of ['tierPoints', 'pvpPoints', 'medals', 'arenaLevel'] as const) requireValid(integer(save.arena[k]))
-  // ⚠ **挂机改版 v11**：三条通道的账本结构逐项校验
+  // ⚠ **挂机改版 v11 / 遗物副本 v12**：四条通道的账本结构逐项校验
   //   （这层是**纵深防御**：真正的闸门在上面的原始值校验——归一化后的目标
   //   必然合法，这里再查一遍是为了防 `normalizeSave` 语义变化时静默失守）
   requireValid(integer(save.idle.totalIdleSeconds) && Number.isFinite(save.idle.activeUntil))
@@ -190,6 +211,13 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   for (const [id, value] of Object.entries(save.dungeons.cleared)) {
     requireValid(DUNGEON_STAGE_INDEX.has(id) && value === true)
   }
+  // ⚠ **遗物副本 v12**：保底计数与每日额度计数逐项校验
+  //   （保底是「防重复抽」机制，额度是「防通胀闸门」，两者都只能由服务端推进）。
+  requireValid(record(save.relicPity))
+  for (const [id, value] of Object.entries(save.relicPity)) {
+    requireValid(DUNGEON_STAGE_INDEX.has(id) && integer(value))
+  }
+  requireValid(record(save.relicDaily) && typeof save.relicDaily.date === 'string' && integer(save.relicDaily.count))
   requireValid(record(save.campaign.stageStars) && integer(save.campaign.chapterProgress, 1))
   for (const [id, stars] of Object.entries(save.campaign.stageStars)) requireValid(STAGES.some(s => String(s.id) === id) && integer(stars, 0, 3))
   requireValid(save.codes.every(code => typeof code === 'string'))
@@ -197,11 +225,11 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   for (const draw of save.gacha.history) requireValid(record(draw) && HERO_INDEX.has(draw.heroId))
   requireValid((BATTLE.SPEED_OPTIONS as readonly number[]).includes(save.settings.speed) && typeof save.settings.sfx === 'boolean' && typeof save.settings.skipAnim === 'boolean')
   // 控制字段不信任导入值：不补历史离线收益、不继承可预测序列或周期领取资格。
-  // ⚠ 挂机改版 v11：三条通道的随机序列也**重新派生**（导入的档不能决定随机序列）。
+  // ⚠ 挂机改版 v11：四条通道的随机序列也**重新派生**（导入的档不能决定随机序列）。
   const importedSeed = seed()
   save.rng = { seed: importedSeed, counter: 0, channels: createChannelRng(importedSeed) }
-  // ⚠ **挂机改版 v11**：导入只接受 v11，且导入后的挂机账本**按新建的方式重置**——
-  //   三条通道的计量水位 = 导入时刻，有效预算 / 离线累计 / 待报告时长全部清零。
+  // ⚠ **挂机改版 v11 / 遗物副本 v12**：导入只接受当前版本，且导入后的挂机账本**按新建的方式重置**——
+  //   四条通道的计量水位 = 导入时刻，有效预算 / 离线累计 / 待报告时长全部清零。
   //   副本通关记录与副本挂机目标一并清空（导入进度不是可信的通关凭证）。
   for (const kind of IDLE_CHANNEL_KINDS) {
     const ch = save.idle.channels[kind]
@@ -214,6 +242,11 @@ export function validateImportedSave(text: string, now: number, seed: () => numb
   }
   save.idle.activeUntil = now
   save.dungeons.cleared = {}
+  // ⚠ **遗物副本 v12**：保底计数与每日额度**不继承**导入值
+  //   （与副本通关记录同理：导入的进度不是可信的凭证）。
+  //   继承 `pity: 999` 会让保底形同虚设；继承 `daily.count` 会白扣玩家额度。
+  save.relicPity = {}
+  save.relicDaily = { date: '', count: 0 }
   save.createdAt = save.savedAt = save.lastTickAt = save.stats.firstStartAt = now
   save.daily = {
     signInStreak: 0,

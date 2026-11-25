@@ -43,6 +43,19 @@ afterEach(async () => {
   await current?.close()
 })
 
+/**
+ * **服务端集成用例的显式超时**。
+ *
+ * ⚠ 这些用例要**真起一整套 Fastify + 内存 SQLite**（`buildApp` + 注册 + 落库 + 拆表），
+ *   单条耗时本就有 1~3 秒；全量并发跑（52 个 worker 同时起进程）时机器负载上来，
+ *   默认的 5 秒会**卡在边缘**（实测 5.5s ⇒ 报 `Test timed out in 5000ms`）。
+ *
+ * ⚠ 这类失败**不是断言不符**，而是超时：单跑该文件是全绿的。
+ *   ⇒ 这里只把**超时**放宽到 15 秒，**不改任何断言**——
+ *   断言一放宽，真 bug 就会被这条超时掩盖过去。
+ */
+const SERVER_IT_TIMEOUT = 15_000
+
 /** 起一个内存库后端 */
 function makeBundle(): AppBundle {
   bundle = buildApp({
@@ -102,7 +115,7 @@ describe('存档分包', () => {
     const full = readServerSave(b.db, id)
     expect(full.relics).toHaveLength(5)
     expect(full.relics.map((r) => r.uid).sort()).toEqual(['r0', 'r1', 'r2', 'r3', 'r4'])
-  })
+  }, SERVER_IT_TIMEOUT)
 
   it('存量整包旧档：读取时就地拆表（幂等，拆完主体不再带遗物）', async () => {
     const b = makeBundle()
@@ -123,7 +136,7 @@ describe('存档分包', () => {
     // 再读一次不会重复插入（幂等）
     await service.load(id)
     expect(countRelics(b.db, id)).toBe(3)
-  })
+  }, SERVER_IT_TIMEOUT)
 
   it('遗物行增量同步：写库量不随遗物数量线性增长', async () => {
     const b = makeBundle()
@@ -143,7 +156,7 @@ describe('存档分包', () => {
     const delta = changes() - before
     // 只应改到存档主体那一行；若遗物被全量重写，这里会是 200+
     expect(delta).toBeLessThanOrEqual(2)
-  })
+  }, SERVER_IT_TIMEOUT)
 
   it('遗物变化时只写变化的那几行', async () => {
     const b = makeBundle()
@@ -162,7 +175,7 @@ describe('存档分包', () => {
     await service.execute(id, { actionId: 'act-1', action: { type: 'idle.heartbeat' } })
     expect(readRelicByUid(b.db, id, 'r0')?.level).toBe(1)
     expect(countRelics(b.db, id)).toBe(3)
-  })
+  }, SERVER_IT_TIMEOUT)
 
   it('删除遗物会同步删表（不留孤儿行）', async () => {
     const b = makeBundle()
@@ -182,7 +195,7 @@ describe('存档分包', () => {
     await service.load(id)
     expect(readServerSave(b.db, id).relics).toHaveLength(2)
     expect(readRelics(b.db, id).map((r) => r.uid)).not.toContain('r1')
-  })
+  }, SERVER_IT_TIMEOUT)
 
   it('客户端公开投影只带已装备遗物，且不含权威随机状态', async () => {
     const save = makeSave(4)
@@ -252,7 +265,7 @@ describe('仓库分页接口', () => {
     expect(p2.items).toHaveLength(2)
     const uids = new Set([...p1.items, ...p2.items].map((r) => r.uid))
     expect(uids.size).toBe(4)
-  })
+  }, SERVER_IT_TIMEOUT)
 
   it('单件查询与统计接口给出权威数据', async () => {
     const b = makeBundle()
@@ -273,5 +286,5 @@ describe('仓库分页接口', () => {
     // 仓库最高等级：强化副本的解锁线要用它
     // （客户端镜像里 save.relics 只有已装备件 → 客户端算不出来）
     expect(stats.maxLevel).toBe(7)
-  })
+  }, SERVER_IT_TIMEOUT)
 })

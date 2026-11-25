@@ -175,7 +175,7 @@ export function parseGameAction(raw: unknown): GameAction | null {
     case 'idle.claimOffline':
       return { type: 'idle.claimOffline' }
     case 'idle.setChannel': {
-      // ⚠ **挂机改版 v11**：三条通道各自独立账本；目标必须是**已通关**的内容。
+      // ⚠ **挂机改版 v11 / 遗物副本 v12**：四条通道各自独立账本；目标必须是**已通关**的内容。
       const channel = str(raw.channel)
       if (!channel || !IDLE_CHANNEL_KINDS.includes(channel as IdleChannelKind)) return null
       const out: Extract<GameAction, { type: 'idle.setChannel' }> = {
@@ -218,8 +218,11 @@ export function parseGameAction(raw: unknown): GameAction | null {
       if (!stageId || stageId.length > 64) return null
       return { type: 'dungeon.challenge', stageId }
     }
+    // ⚠ `relic.acquire`（遗物祈愿）已于存档 v12 **下线**：
+    //   遗物唯一来源 = 遗物副本（`dungeon.challenge` 的遗物关卡）。
+    //   协议里保留这个分支会让人以为「祈愿」还在 ⇒ 显式拒绝并说明原因。
     case 'relic.acquire':
-      return { type: 'relic.acquire' }
+      return null
     case 'settings.update': {
       const out: Extract<GameAction, { type: 'settings.update' }> = { type: 'settings.update' }
       if (raw.speed !== undefined) {

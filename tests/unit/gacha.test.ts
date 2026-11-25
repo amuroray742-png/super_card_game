@@ -175,7 +175,12 @@ describe('概率公示同源（合规硬要求）', () => {
     const measured = (hits / trials) * 100
     // p ≈ 11.7%，σ = sqrt(p(1-p)/n) ≈ 0.0102%，取 4σ ≈ 0.041%
     expect(Math.abs(measured - ssrPublished)).toBeLessThan(0.041)
-  })
+  },
+  // ⚠ **显式超时**：这条要跑 **100 万次**十连（= 1000 万次抽签），
+  //   单跑本机就要 3~5 秒；全量并发跑（52 个 worker 同时起进程）时机器负载上来，
+  //   默认的 5 秒会**卡在边缘**（实测 5.1s ⇒ 报 `Test timed out in 5000ms`）。
+  //   ⇒ 只放宽**超时**，**不放宽任何断言**（3σ 统计窗口一个字都没改）。
+  30_000)
 
   it('公示值随保底进度上升（当前状态影响下一抽概率）', () => {
     const at0 = computeEffectiveRates({ pitySSR: 0, pity10: 0 })

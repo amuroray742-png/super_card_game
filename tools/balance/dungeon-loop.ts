@@ -1,11 +1,11 @@
 /**
  * **挂机通道与材料副本刷取口径**（节奏模拟与副本产出的唯一出处 · 铁律 #4）。
  *
- * ## 三通道并行模型（挂机改版 v11 · 设计稿 §3.9）
+ * ## 四通道并行模型（挂机改版 v11 + 遗物副本 v12 · 设计稿 §3.9）
  *
  * 旧模型：主线 / 技能副本 / 强化副本**共用一份挂机时间**，玩家必须**分配**它
  *   ⇒ 工具要回答「今晚挂哪个去向」。
- * 新模型：**三条通道同时跑**，各自计量同一段墙钟时间、各自记账
+ * 新模型：**四条通道同时跑**，各自计量同一段墙钟时间、各自记账
  *   ⇒ 工具要回答「每条通道各自挂哪个目标」。
  *
  * | 通道 | 目标 | 产出 |
@@ -13,6 +13,7 @@
  * | `main` | **跟随最新通关关卡**（`stageId = null`） | 经验书 + 银两 |
  * | `skill` | 已通关的**技能副本关卡** | 对应五行的技能材料 |
  * | `enhance` | 已通关的**强化副本关卡** | 对应石档的遗物强化石 |
+ * | `relic` | 已通关的**遗物副本关卡** | **遗物实例**（受每日额度约束） |
  *
  * ⚠ 挂机**不再跑战斗**——按掉落表逐次掷奖，所以「副本关卡」在挂机里
  *   只提供**产量表**，不提供战斗难度；难度只在**手动挑战**时起作用。
@@ -28,7 +29,7 @@
  *
  * ## 增益口径（ln · 全队口径）
  *
- * 三个通道的增益必须**同单位**（都是「全队战力相对增幅」）才能比，
+ * 三个**养成**通道的增益必须**同单位**（都是「全队战力相对增幅」）才能比，
  * 所以一律取 ln：
  *
  * - 主线：`人均涨级 × ln(LEVEL.MULT)`（倍率是**每个英灵**各自的）。
@@ -36,6 +37,15 @@
  * - 强化：遗物只穿在**已装备遗物的英灵**身上 ⇒ 按装备占比折算。
  *
  * ⚠ 历史教训：技能分支漏了「÷ 队伍人数」⇒ 技能增益被系统性放大 4~6 倍。
+ *
+ * ## 遗物通道是**第四类**产出（不参与 ln 比较）
+ *
+ * ⚠ 遗物是**实例**、**零成本**产出（不花银两、不发材料），而且**与其它通道并行**
+ *   （不抢挂机时间）⇒ 它没有「和另外三条通道抢收益」的问题，不需要折算成战力增幅。
+ *   它的价值另算：**件数 × 期望稀有度价值**（期望稀有度取 core 的公示口径
+ *   `relicDropRates`，**不在工具里另写一份权重表** —— 铁律 #4）。
+ *   ⚠ 唯一约束是**每日额度**（`RELIC_DROP.DAILY_CAP`）：额度用完 ⇒ 今晚产出 0，
+ *   所以决策时必须把额度算进去（否则模型会以为遗物通道能无限产出）。
  *
  * ## 银两瓶颈必须进增益口径
  *
@@ -54,8 +64,10 @@ import {
   DROP_TABLES,
   LEVEL,
   RELIC,
+  RELIC_DROP,
   SKILL,
   STAGE,
+  DUNGEON_DIFFICULTY_ORDER,
   type DungeonDifficultyId,
   type RelicStoneTierId,
 } from '../../src/core/config/economy.ts'
@@ -72,8 +84,11 @@ import { buildPveContext, buildTeam } from '../../src/core/systems/derive.ts'
 import { atRealmGate, expToNext, skillLevelCap } from '../../src/core/systems/growth.ts'
 import {
   relicMainMultiplier,
+  relicQuotaLeft,
   relicStoneTierForLevel,
   relicUpgradeCost,
+  relicDropRates,
+  RELIC_RARITY_ORDER,
 } from '../../src/core/systems/relic.ts'
 import { getTeamPower } from '../../src/core/systems/team.ts'
 import { dungeonUnlocked } from '../../src/core/systems/dungeons.ts'
@@ -264,7 +279,7 @@ export function skillHeadroomByElement(
 // ─────────────────────────── 副本关卡选择 ───────────────────────────
 
 /**
- * **副本关卡**（挂机改版 v11：副本是 24 个独立关卡）。
+ * **副本关卡**（挂机改版 v11 + 遗物副本 v12：副本是 42 个独立关卡）。
  *
  * ⚠ 难度**不再取材主线波次**——每关有自己的敌人组合、缩放锚点与战力门槛
  *   （`core/config/dungeons.ts` 是唯一定义处）。
@@ -334,14 +349,61 @@ export function bestIdleDungeonStage(
 }
 
 /**
- * 副本关卡一夜（`rolls` 次）的**期望产量**（按产量区间中值）。
+ * **一件遗物的「稀有度价值」**（N=1 / R=2 / SR=3 / SSR=4）。
  *
- * ⚠ 挂机不跑战斗 ⇒ 产量**与难度无关地**取关卡自己的 `drop` 区间；
- *   难度差异体现在「玩家敢挂哪一关」上（门槛 + 是否已通关），不体现在产量上。
+ * ⚠ 档序取 core 的 `RELIC_RARITY_ORDER`（唯一出处），**不在工具里另写一份档序**。
+ *   「价值」= 稀有度在档序里的序号 ⇒ 单位是「档」，可加、可比。
+ */
+export function relicRarityValue(rarity: string): number {
+  const index = RELIC_RARITY_ORDER.indexOf(rarity as (typeof RELIC_RARITY_ORDER)[number])
+  return index < 0 ? 0 : index + 1
+}
+
+/**
+ * **一次遗物掉落的期望稀有度价值**（公示口径 `relicDropRates`，铁律 #4）。
+ *
+ * ⚠ 期望稀有度**必须**取 core 的公示函数（`relicDropRates`）：
+ *   那是「公示 = 实际」的唯一一份口径（实际抽签 `rollRelicDrop` 也读同一张权重表）。
+ *   工具里另写一份权重表 ⇒ 公示与实际对不上（合规硬伤）。
+ */
+export function expectedRelicRarityValue(difficulty: DungeonDifficultyId): number {
+  let value = 0
+  for (const rate of relicDropRates(difficulty)) {
+    value += rate.percent * relicRarityValue(rate.rarity)
+  }
+  return value
+}
+
+/**
+ * **一场胜利的期望件数**（难度档区间中值；口径取 `RELIC_DROP.COUNT`）。
+ *
+ * ⚠ 遗物是**实例**，产出形状与材料副本不同：
+ *   材料副本 = 固定堆叠物；遗物副本 = 1~3 **件实例**（按难度档）。
+ */
+export function relicExpectedPieces(difficulty: DungeonDifficultyId): number {
+  const range = RELIC_DROP.COUNT[difficulty]
+  return (range.min + range.max) / 2
+}
+
+/**
+ * 副本关卡一夜（`rolls` 次）的**期望产量**。
+ *
+ * ⚠ **两种单位**（按关卡种类分流，调用方必须知道自己在比什么）：
+ *   - 材料副本 → **件数**（堆叠物，产量区间中值 × 次数）；
+ *   - 遗物副本 → **期望稀有度价值**（件数 × 期望稀有度价值）——
+ *     遗物是**实例**，不能按堆叠物计（同一件遗物不能被"缩放"成 2.5 件）。
+ *
+ * ⚠ 遗物副本的 `drop` 是 `null`（遗物不是堆叠物）⇒ 直接读 `stage.drop` 会崩，
+ *   这里必须先分流（这正是存档 v12 把 `drop` 改成可空的原因）。
  */
 export function dungeonExpectedYield(stageId: string, rolls: number): number {
   const stage = dungeonStageById(stageId)
   if (!stage) return 0
+  if (stage.relicPool) {
+    // 遗物副本：件数 × 期望稀有度价值
+    return relicExpectedPieces(stage.difficulty) * expectedRelicRarityValue(stage.difficulty) * rolls
+  }
+  if (!stage.drop) return 0
   return Math.round(((stage.drop.min + stage.drop.max) / 2) * rolls)
 }
 
@@ -353,7 +415,7 @@ export function variantUnlocked(save: SaveData, variant: DungeonVariant): boolea
 // ─────────────────────────── 通道决策 ───────────────────────────
 
 /**
- * 一个通道「一夜」的**战力增益**（ln 口径，三个通道放在一起比）。
+ * 一个通道「一夜」的**战力增益**（ln 口径，三个养成通道放在一起比）。
  *
  * ⚠ 为什么用 ln：战力是几个**乘区**相乘的（等级 × 遗物倍率 × 技能强度 × 星级），
  *   所以「战力涨了多少」用**相对变化**才有意义，而相对变化取 ln 之后可加：
@@ -366,9 +428,23 @@ export interface NightGains {
   enhance: number
   /** 技能副本：五行材料换技能等级 */
   skill: number
+  /**
+   * 遗物副本：**件数 × 期望稀有度价值**。
+   *
+   * ⚠ 单位与上面三条**不同**（那是 ln 战力增幅，这是「稀有度档」）。
+   *   遗物是**零成本**产出、且与其它通道**并行**（不抢时间）⇒ 没有互相挤压，
+   *   不需要折算成战力增幅；它只受**每日额度**约束。
+   */
+  relic: number
 }
 
-/** 三通道的目标计划（与 core 的 `IdleChannelTarget` 同形） */
+/**
+ * 四通道的目标计划（与 core 的 `IdleChannelTarget` 同形）。
+ *
+ * ⚠ `relic` 是**可选**键：它是存档 v12 新增的第四键，
+ *   旧的三键调用点（测试里的字面量）不必改也能编译 ⇒ 决策器永远会给出它，
+ *   但「手写一份三键计划」的调用方不会被类型卡住。
+ */
 export interface ChannelPlan {
   /** 主线通道：跟随最新通关关卡（`stageId = null`） */
   main: { kind: 'main'; stageId: number | null }
@@ -376,6 +452,8 @@ export interface ChannelPlan {
   skill: string | null
   /** 强化通道：目标副本关卡 id（`null` = 关闭） */
   enhance: string | null
+  /** 遗物通道：目标遗物副本关卡 id（`null` / 省略 = 关闭） */
+  relic?: string | null
 }
 
 /** 通道决策的完整结果（增益明细留给报告用） */
@@ -386,6 +464,8 @@ export interface ChannelDecision {
   skillElement: Element | null
   /** 强化副本选中的石档 */
   enhanceTier: RelicStoneTierId | null
+  /** 遗物副本选中的变体 id */
+  relicVariantId: DungeonVariantId | null
   /**
    * **需要手动挑战才能解锁的副本关卡**。
    *
@@ -421,29 +501,43 @@ export function teamExpToNext(save: SaveData, teamIds: readonly string[]): numbe
 }
 
 /**
- * **为三条通道各选目标**（**理性玩家模型** · 挂机改版 v11 · 设计稿 §3.9）。
+ * **为四条通道各选目标**（**理性玩家模型** · 挂机改版 v11 + 遗物副本 v12 · 设计稿 §3.9）。
  *
  * ## 增益口径（同单位才能比）
  *
  * - 主线：经验书 → 等级；`人均涨级 × ln(LEVEL.MULT)`。
  * - 技能：缺口最大的五行 → 该变体**打得赢的最高一关**的产量 → 买得起的技能等级。
  * - 强化：缺口最大的石档 → 同理。
+ * - 遗物：**零成本**产出（不花银两 / 不发材料，且与其它通道并行不抢时间）
+ *   ⇒ 不参与 ln 比较，价值按「件数 × 期望稀有度价值」计，
+ *   并受**每日额度**（`RELIC_DROP.DAILY_CAP`）约束。
  *
- * ## 三条硬约束（否则会死锁 / 空转）
+ * ## 四条硬约束（否则会死锁 / 空转）
  *
  * 1. **副本必须已解锁**（core 的 `dungeonUnlocked`）——不替玩家开挂。
  * 2. **银两必须够下一次升级**——副本只发材料不发银两，
  *    银两不够还去刷副本 = 白刷一天（历史上模拟在这条上死锁过）。
  * 3. **境界门槛上主线是唯一出路**——经验卡在门槛不兑现，
  *    突破要银两、而银两只有主线给 ⇒ 门槛上的主线增益 = ∞。
+ * 4. **遗物通道要算额度**——额度用完 ⇒ 今晚产出 0（不是「少产出」，是「没有产出」）。
  */
 export function decideChannels(
   save: SaveData,
   ctx: ActionContext,
   teamIds: readonly string[],
   rollsPerNight: number,
+  /**
+   * **即将结算的时刻**（可选，默认 = `ctx.now`）。
+   *
+   * ⚠ 为什么需要它：**每日额度**按 UTC 日期判定，而「决策」发生在结算**之前**
+   *   （目标是存档状态，它决定这段挂机归谁 —— 设计稿 §3）。
+   *   ⇒ 判断「遗物通道这一段能不能产出」必须看**结算那一刻**的额度：
+   *   决策时额度往往已经被上一段用完了（跨日才重置），
+   *   拿决策时的额度去判断 ⇒ 每天都判成「额度用完」⇒ 第四通道永远选不上。
+   */
+  settleAt: number = ctx.now,
 ): ChannelDecision {
-  const gains: NightGains = { campaign: 0, enhance: 0, skill: 0 }
+  const gains: NightGains = { campaign: 0, enhance: 0, skill: 0, relic: 0 }
   const challenges: string[] = []
   /**
    * 队伍人数（**全队口径的分母**）。
@@ -553,21 +647,47 @@ export function decideChannels(
   }
   gains.skill = bestGain
 
+  // ── 遗物副本：零成本产出，但受每日额度约束 ──
+  //
+  // ⚠ **遗物是唯一来源**（存档 v12）：强化副本要求「持有 Lv1 遗物」，
+  //   遗物副本不通 ⇒ 首件遗物拿不到 ⇒ 强化链路整条锁死。
+  //   所以这条通道**不受银两瓶颈约束**（遗物不花钱），也不和其它通道抢时间。
+  //
+  // ⚠ **额度必须进决策**：额度按「件」计（`RELIC_DROP.DAILY_CAP`），
+  //   额度用完 ⇒ 今晚产出 0（不是「少产出」，是「没有产出」）⇒ 不该挂。
+  let relicStageId: string | null = null
+  let relicVariantId: DungeonVariantId | null = null
+  const quotaLeft = relicQuotaLeft(save, settleAt)
+  if (quotaLeft > 0) {
+    const pick = bestRelicDungeonStage(save)
+    if (pick) {
+      const piecesPerWin = relicExpectedPieces(pick.difficulty)
+      // 今晚实际能产出的件数 = 「掷奖能出的件数」与「剩余额度」的较小者
+      const producible = Math.min(rollsPerNight * piecesPerWin, quotaLeft)
+      gains.relic = producible * expectedRelicRarityValue(pick.difficulty)
+      relicStageId = pick.stageId
+      relicVariantId = pick.variantId
+      if (!pick.cleared) challenges.push(pick.stageId)
+    }
+  }
+
   return {
     plans: {
       main: { kind: 'main', stageId: null },
       skill: skillStageId,
       enhance: enhanceStageId,
+      relic: relicStageId,
     },
     gains,
     skillElement: bestElement,
     enhanceTier,
+    relicVariantId,
     challenges,
   }
 }
 
 /** 副本目标选取结果（附带「是否已通关」） */
-interface DungeonTargetPick extends DungeonStageChoice {
+export interface DungeonTargetPick extends DungeonStageChoice {
   /** 是否已通关（未通关 ⇒ 需要先手动挑战） */
   cleared: boolean
 }
@@ -585,7 +705,49 @@ function pickDungeonTarget(variant: DungeonVariant, save: SaveData): DungeonTarg
 }
 
 /**
- * 选三通道目标（`decideChannels` 的薄封装）。
+ * 选**遗物副本**的挂机目标（**跨 6 个遗物变体**挑，存档 v12）。
+ *
+ * ⚠ 挑选规则（按优先级）：
+ *   ① **已通关**——挂机只挂已通关内容（核心的 `idle.setChannel` 会拒未通关的关卡）；
+ *   ② **难度更高**——每胜件数更多（`RELIC_DROP.COUNT` 的 hard 档是 2~3 件）。
+ *
+ * ⚠ **不替玩家开挂**：变体必须已解锁（`RELIC_DROP.UNLOCK_STAGE` 的主线进度线），
+ *   关卡必须**打得赢**（战力门槛）。
+ *
+ * ⚠ 手动挑战也用这个函数挑目标：打通了同一关 ⇒ 它随后就能当挂机目标
+ *   （挂机只挂已通关内容，设计稿 §3.1）。
+ */
+export function bestRelicDungeonStage(save: SaveData): DungeonTargetPick | null {
+  const power = teamPower(save)
+  const diffRank = (d: DungeonDifficultyId) => DUNGEON_DIFFICULTY_ORDER.indexOf(d)
+  let best: DungeonTargetPick | null = null
+  for (const variant of DUNGEON_VARIANTS) {
+    if (variant.kind !== 'relic') continue
+    if (!variantUnlocked(save, variant)) continue
+    for (const stage of dungeonStagesOfVariant(variant.id)) {
+      if (power < stage.powerRequired) continue
+      const pick: DungeonTargetPick = {
+        stageId: stage.id,
+        variantId: variant.id,
+        difficulty: stage.difficulty,
+        cleared: save.dungeons.cleared[stage.id] === true,
+      }
+      if (!best) {
+        best = pick
+        continue
+      }
+      if (pick.cleared !== best.cleared) {
+        if (pick.cleared) best = pick
+        continue
+      }
+      if (diffRank(pick.difficulty) > diffRank(best.difficulty)) best = pick
+    }
+  }
+  return best
+}
+
+/**
+ * 选四通道目标（`decideChannels` 的薄封装）。
  *
  * ⚠ 保留薄封装是为了让两个模拟脚本的调用点保持一致；
  *   完整决策明细用 `decideChannels`。
@@ -622,15 +784,19 @@ export function targetPlanName(plan: ChannelPlan): string {
     const stage = dungeonStageById(plan.enhance)
     parts.push(stage ? `强化 · ${stage.name}` : '强化副本')
   }
+  if (plan.relic) {
+    const stage = dungeonStageById(plan.relic)
+    parts.push(stage ? `遗物 · ${stage.name}` : '遗物副本')
+  }
   return parts.join(' / ')
 }
 
 // ─────────────────────────── 执行 ───────────────────────────
 
 /**
- * 应用三通道目标（走真实动作层）。
+ * 应用四通道目标（走真实动作层）。
  *
- * ⚠ **三条通道各自独立**：设置一条**不影响**另外两条的时间账本。
+ * ⚠ **四条通道各自独立**：设置一条**不影响**另外两条的时间账本。
  * ⚠ **相同目标直接返回**（`idle.setChannel` 是无操作，不报错）。
  */
 export function applyChannels(
@@ -649,6 +815,11 @@ export function applyChannels(
     ok =
       applyChannel(save, ctx, 'enhance', { kind: 'enhance', dungeonStageId: plans.enhance }) && ok
   }
+  // 遗物通道：目标为空 ⇒ **不动它**（别把玩家已经挂好的遗物目标清掉）
+  if (plans.relic) {
+    ok =
+      applyChannel(save, ctx, 'relic', { kind: 'relic', dungeonStageId: plans.relic }) && ok
+  }
   return ok
 }
 
@@ -656,11 +827,12 @@ export function applyChannels(
 export function applyChannel(
   save: SaveData,
   ctx: ActionContext,
-  channel: 'main' | 'skill' | 'enhance',
+  channel: 'main' | 'skill' | 'enhance' | 'relic',
   target:
     | { kind: 'main'; stageId: number | null }
     | { kind: 'skill'; dungeonStageId: string }
-    | { kind: 'enhance'; dungeonStageId: string },
+    | { kind: 'enhance'; dungeonStageId: string }
+    | { kind: 'relic'; dungeonStageId: string },
 ): boolean {
   const res = applyAction(save, { type: 'idle.setChannel', channel, ...target }, ctx)
   return res.ok
@@ -684,9 +856,9 @@ export function challengeDungeonStage(
 }
 
 /**
- * 结算三通道的挂机收益（`idle.tick`）。
+ * 结算四通道的挂机收益（`idle.tick`）。
  *
- * ⚠ **不调用 heartbeat**：计量一律走动作层自己的三通道结算
+ * ⚠ **不调用 heartbeat**：计量一律走动作层自己的四通道结算
  *   （累计离线时长口径），避免在段内重复套用离线曲线把有效时长放大。
  */
 export function settleIdle(save: SaveData, ctx: ActionContext): IdleActionResult | null {
@@ -694,10 +866,10 @@ export function settleIdle(save: SaveData, ctx: ActionContext): IdleActionResult
   return res.ok ? res.result : null
 }
 
-/** 汇总一次结算的三通道产出（工具内部按通道取数） */
+/** 汇总一次结算的单条通道产出（工具内部按通道取数） */
 export function channelRewards(
   result: IdleActionResult | null,
-  channel: 'main' | 'skill' | 'enhance',
+  channel: 'main' | 'skill' | 'enhance' | 'relic',
 ): { silver: number; items: Record<string, number>; rolls: number } {
   const out = { silver: 0, items: {} as Record<string, number>, rolls: 0 }
   for (const detail of result?.channels ?? []) {

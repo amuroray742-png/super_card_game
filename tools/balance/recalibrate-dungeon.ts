@@ -1,9 +1,9 @@
 /**
- * **副本 24 关的难度标定**（挂机改版 v11 · 设计稿 §3.2.1 ④）。
+ * **副本 42 关的难度标定**（挂机改版 v11 + 遗物副本 v12 · 设计稿 §3.2.1 ④ / §5.2）。
  *
  * ## 为什么要有这个脚本
  *
- * 副本从「取材主线波次」变成 **24 个独立关卡**之后，每关都多出两个**标定值**：
+ * 副本从「取材主线波次」变成 **独立关卡**之后，每关都多出两个**标定值**：
  * `enemyScale`（敌方属性缩放）与 `powerRequired`（战力门槛）。
  * 这两个值**手填不得**（铁律 #41）：
  *
@@ -15,13 +15,13 @@
  *
  * 本脚本把标定流程变成**可复现**的一条命令：
  *
- * 1. **设计阶梯**：`DUNGEON.DESIGN_LEVELS[24]` 给出每关对应的**参考养成档**
+ * 1. **设计阶梯**：`DUNGEON.DESIGN_LEVELS[42]` 给出每关对应的**参考养成档**
  *    （外生常数，不是模拟涌现出来的——拿涌现值当输入会形成坏不动点）。
  * 2. **标定锚点**：`referenceTeam(designLevel)` 对该关二分「能稳过(≥90%)的最大缩放」，
  *    取其**一半**（留战斗容错）→ `SCALE_ANCHORS`；
  *    同时记下该档参考队伍的**战力** → `POWER_ANCHORS`。
  * 3. **单调性核对**：**难度段之间**（简易 → 普通 → 困难）严格递增；
- *    同段内的 8 关因敌人组合不同，**允许互相波动**（与主线「章内允许波动、
+ *    同段内的 14 关因敌人组合不同，**允许互相波动**（与主线「章内允许波动、
  *    章首严格递增」同构）。
  * 4. **写回** `core/config/economy.ts` 的 `DUNGEON` 常量块。
  *
@@ -196,15 +196,20 @@ function writeBack(scales: readonly number[], powers: readonly number[]): void {
 
   const formatScales = (values: readonly number[]) => {
     const lines: string[] = []
-    for (let i = 0; i < values.length; i += 8) {
-      lines.push('    ' + values.slice(i, i + 8).map((v) => Number(v.toFixed(4))).join(', ') + ',')
+    // ⚠ **按难度段换行**（每行 = 一个变体段），不是固定 8 个：
+    //   42 个值按 8 换行会排成 8/8/8/8/8/2，**不再对齐 14 变体的段界**，
+    //   锚点表会被误读（与「主线锚点被副本标定冲掉」同类的事故风险）。
+    const perLine = DUNGEON_VARIANT_ORDER.length
+    for (let i = 0; i < values.length; i += perLine) {
+      lines.push('    ' + values.slice(i, i + perLine).map((v) => Number(v.toFixed(4))).join(', ') + ',')
     }
     return lines.join('\n')
   }
   const formatPowers = (values: readonly number[]) => {
     const lines: string[] = []
-    for (let i = 0; i < values.length; i += 8) {
-      lines.push('    ' + values.slice(i, i + 8).map((v) => Math.round(v)).join(', ') + ',')
+    const perLine = DUNGEON_VARIANT_ORDER.length
+    for (let i = 0; i < values.length; i += perLine) {
+      lines.push('    ' + values.slice(i, i + perLine).map((v) => Math.round(v)).join(', ') + ',')
     }
     return lines.join('\n')
   }

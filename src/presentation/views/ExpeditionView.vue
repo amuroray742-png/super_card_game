@@ -1,17 +1,19 @@
 <script setup lang="ts">
 /**
- * 推征（首页）：**主线手动挑战 + 三通道挂机 + 副本入口**（挂机改版 v11）。
+ * 推征（首页）：**主线手动挑战 + 四通道挂机 + 副本入口**（挂机改版 v11 + 遗物副本 v12）。
  *
  * ## 结构（自上而下）
  *
  * 1. **主线面板**：当前章节 / 关卡名 / 战力对比 / 「挑战此关」+「详情」。
- * 2. **三通道挂机面板**：三张卡（主线 / 技能副本 / 强化副本），
+ * 2. **四通道挂机面板**：四张卡（主线 / 技能副本 / 强化副本 / **遗物副本**），
  *    各显示目标、可结算次数与每次产出；**只有一个「全部领取」入口**。
- * 3. **副本入口卡**：「技能副本」「强化副本」→ `/dungeon?kind=…`。
+ * 3. **副本入口卡**：「技能副本」「强化副本」「**遗物副本**」→ `/dungeon?kind=…`。
  * 4. **本章关卡网格**：点击 → 开关卡详情**弹窗**（URL 不变）。
  * 5. **编队概览**。
  *
  * ⚠ **表现层不自推导战斗事实 / 掉落口径 / 通道状态**：一律取 core 与服务端回包。
+ * ⚠ 「可结算 N 次」一律取**服务端口径** `store.idlePending`（铁律 #62：
+ *   界面写的次数只能少写，绝不能多写）。
  */
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -24,6 +26,7 @@ import {
   dungeonStagesOf,
   type DungeonKind,
 } from '../../core/config/dungeons.ts'
+import { relicQuotaLeft } from '../../core/systems/relic.ts'
 import { formatNumber, formatPower } from '../utils/format'
 import { rewardLines } from '../utils/reward-text'
 import StageDetailModal from '../components/StageDetailModal.vue'
@@ -54,7 +57,7 @@ const powerGap = computed(() => {
 /** 当前章节的关卡列表 */
 const chapterStages = computed(() => STAGES.filter((s) => s.chapter === chapter.value))
 
-// ─────────────────────────── 三通道挂机 ───────────────────────────
+// ─────────────────────────── 四通道挂机 ───────────────────────────
 
 interface ChannelCard {
   kind: IdleChannelKind
@@ -85,22 +88,40 @@ function mainTargetName(): string | null {
   return s ? s.name : null
 }
 
-/** 副本通道的目标名 */
+/**
+ * 副本通道的目标名。
+ *
+ * ⚠ **遗物通道也算副本目标**（存档 v12）：旧判断只认 `skill` / `enhance`，
+ *   遗物通道的目标永远显示不出来（卡片上写着「未设置目标」，玩家以为没挂上）。
+ */
 function dungeonTargetName(kind: IdleChannelKind): string | null {
   const t = store.save.idle.channels[kind].target
   if (!t) return null
-  const id = t.kind === 'skill' || t.kind === 'enhance' ? t.dungeonStageId : null
+  const id =
+    t.kind === 'skill' || t.kind === 'enhance' || t.kind === 'relic' ? t.dungeonStageId : null
   if (!id) return null
   return DUNGEON_STAGE_INDEX.get(id)?.name ?? null
 }
 
-/** 三张通道卡（次数取**服务端口径**：心跳回执的 `idlePending`） */
+/**
+ * **今日剩余遗物额度**（件）。
+ *
+ * ⚠ 走 core 的 `relicQuotaLeft`（**唯一一份**，按 UTC 日期键判定）；
+ *   时间取**注入时钟** `store.now()`，禁止 `Date.now()`（铁律 #12）。
+ * ⚠ 额度只管**挂机**：手动挑战遗物副本不受限（界面必须写清楚，
+ *   否则玩家会以为「额度用尽 = 遗物彻底拿不到」）。
+ */
+const relicQuotaLeftNow = computed(() => relicQuotaLeft(store.save, store.now()))
+
+/** 四张通道卡（次数取**服务端口径**：心跳回执的 `idlePending`） */
 const channels = computed<ChannelCard[]>(() => {
   const main = store.save.idle.channels.main
   const skill = store.save.idle.channels.skill
   const enhance = store.save.idle.channels.enhance
+  const relic = store.save.idle.channels.relic
   const skillName = dungeonTargetName('skill')
   const enhanceName = dungeonTargetName('enhance')
+  const relicName = dungeonTargetName('relic')
   return [
     {
       kind: 'main',
@@ -129,13 +150,37 @@ const channels = computed<ChannelCard[]>(() => {
       hint: enhanceName ? null : '通关一个强化副本关卡后即可开启',
       enabled: enhance.target !== null,
     },
+    {
+      kind: 'relic',
+      name: '遗物副本',
+      targetName: relicName,
+      rolls: store.idlePending.relic,
+      perRoll: '遗物实例',
+      hint: relicName ? null : '通关一个遗物副本关卡后即可开启',
+      enabled: relic.target !== null,
+    },
   ]
 })
 
-/** 全部可结算次数（三通道相加） */
+/** 全部可结算次数（四通道相加） */
 const totalRolls = computed(() => channels.value.reduce((sum, c) => sum + c.rolls, 0))
 
-/** **一键领取**（三通道同时结算） */
+/** 通道名（结算明细用；**唯一一份**，四处各写一套必然对不上） */
+const CHANNEL_LABELS: Record<IdleChannelKind, string> = {
+  main: '主线',
+  skill: '技能副本',
+  enhance: '强化副本',
+  relic: '遗物副本',
+}
+
+/**
+ * **一键领取**（四通道同时结算）。
+ *
+ * ⚠ 动作层只有 `idle.tick`（**一次结算全部通道**），没有「单通道领取」这个动作——
+ *   所以遗物通道上的「可领 N 次」按钮调的是同一个 `tickIdle`：
+ *   按钮上写的 N 是**遗物通道自己**的待结算次数（服务端口径），
+ *   实发只会**不少于**它（铁律 #62：界面只能少写，不能多写）。
+ */
 async function claimAll() {
   const res = await store.tickIdle()
   if (!res) return
@@ -146,7 +191,7 @@ async function claimAll() {
   // ⚠ 结算明细的名称一律取登记表（铁律 #8：禁止就地写中文名）
   const parts: string[] = []
   for (const ch of res.channels) {
-    const label = ch.channel === 'main' ? '主线' : ch.channel === 'skill' ? '技能副本' : '强化副本'
+    const label = CHANNEL_LABELS[ch.channel]
     const lines = rewardLines(ch.rewards).map((l) => `${l.label} ${formatNumber(l.value)}`)
     parts.push(`${label} ${ch.rolls} 次：${lines.join('、') || '无产出'}`)
   }
@@ -245,11 +290,11 @@ async function challengeStageCurrent() {
       </div>
     </section>
 
-    <!-- 三通道挂机面板 -->
+    <!-- 四通道挂机面板 -->
     <section class="panel">
       <div class="panel-title">
         <span>挂机通道</span>
-        <span class="tiny muted">三条通道各自独立计量</span>
+        <span class="tiny muted">四条通道各自独立计量</span>
       </div>
 
       <div v-for="ch in channels" :key="ch.kind" class="chan-card" :data-testid="`idle-channel-${ch.kind}`">
@@ -264,6 +309,11 @@ async function challengeStageCurrent() {
         <div class="tiny muted" style="margin-top: 2px">
           可结算 {{ ch.rolls }} 次 · 每次产出 {{ ch.perRoll }}
         </div>
+        <!-- ⚠ 遗物通道额外写清「每日额度」：遗物是零成本产出，
+             额度是防通胀闸门，玩家必须知道额度用完后还能不能玩（手动挑战不受限）。 -->
+        <div v-if="ch.kind === 'relic'" class="tiny muted" style="margin-top: 2px">
+          今日剩余额度 {{ relicQuotaLeftNow }} 件 · 手动挑战不受额度限制
+        </div>
         <div v-if="ch.hint" class="tiny warn-text" style="margin-top: 2px">{{ ch.hint }}</div>
         <div class="row" style="gap: 6px; margin-top: 6px">
           <button
@@ -275,12 +325,23 @@ async function challengeStageCurrent() {
           >
             更换目标
           </button>
+          <!-- ⚠ 遗物通道多一个「可领 N 次」入口（动作层只有整队结算，见 claimAll 注释） -->
           <button
-            v-else
+            v-if="ch.kind === 'relic'"
+            class="btn btn-sm btn-primary"
+            style="flex: 1"
+            data-testid="idle-claim-relic"
+            :disabled="ch.rolls <= 0"
+            @click="claimAll"
+          >
+            可领 {{ ch.rolls }} 次
+          </button>
+          <button
+            v-if="ch.kind !== 'main'"
             class="btn btn-sm btn-ghost"
             style="flex: 1"
             :data-testid="`idle-channel-${ch.kind}-pick`"
-            @click="gotoDungeon(ch.kind === 'skill' ? 'skill' : 'enhance')"
+            @click="gotoDungeon(ch.kind === 'skill' ? 'skill' : ch.kind === 'enhance' ? 'enhance' : 'relic')"
           >
             去设置
           </button>
@@ -306,6 +367,10 @@ async function challengeStageCurrent() {
         <button class="btn btn-sm entry-card" style="flex: 1" data-testid="dungeon-entry-enhance" @click="gotoDungeon('enhance')">
           <b>强化副本</b>
           <span class="tiny muted">三档强化石</span>
+        </button>
+        <button class="btn btn-sm entry-card" style="flex: 1" data-testid="dungeon-entry-relic" @click="gotoDungeon('relic')">
+          <b>遗物副本</b>
+          <span class="tiny muted">遗物唯一来源</span>
         </button>
       </div>
     </section>

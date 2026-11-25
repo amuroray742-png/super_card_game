@@ -1,25 +1,27 @@
 /**
- * 挂机与离线结算（挂机改版 v11：**三通道并行 + 已通关直挂**）。
+ * 挂机与离线结算（挂机改版 v11 + 遗物副本 v12：**四通道并行 + 已通关直挂**）。
  *
  * ## 与旧版的根本差别
  *
  * - 旧版挂机 = 「跑战斗自动推进主线」，产出里**带遗物**；
  * - 新版挂机 = 「按掉落表**逐次掷奖**」，**永不卡关**（目标必须已通关），
- *   产出**不含遗物**（遗物改走独立入口 `relic.acquire`，见 §1.3 / U3）。
+ *   产出**不含遗物**（遗物改由**遗物副本**产出，见 §1.3 / U3）。
  *
- * 三条通道（主线 / 技能副本 / 强化副本）**各自独立计量**同一段墙钟时间、
- * 各自记账，产出互不干扰——玩家可以同时挂三条。
+ * 四条通道（主线 / 技能副本 / 强化副本 / **遗物副本**）**各自独立计量**同一段墙钟时间、
+ * 各自记账，产出互不干扰——玩家可以同时挂四条。
  *
  * ## 本文件守住的语义
  *
  * 1. 离线收益曲线三段（1h 满效率 / 1~3h 线性衰减 / 3h 封顶）+ 在线 3 倍；
- * 2. 三条通道各自独立计量、**互不扣别人的预算**；
+ * 2. 四条通道各自独立计量、**互不扣别人的预算**；
  * 3. 目标必须**已通关**（主线指定关卡 / 副本关卡）——挂机永不卡关；
  * 4. 余数保留、分批领取 == 一次领取；
  * 5. 时钟回退不计量、水位保持原值；
  * 6. 通道关闭 → 预算与离线累计归零；
  * 7. 发奖扣账 + 单次结算次数上限；
- * 8. **掉落口径**：主线只发银两 + 经验书，**`rewards.relics` 永远为空**。
+ * 8. **掉落口径**：主线只发银两 + 经验书，**`rewards.relics` 永远为空**；
+ * 9. **遗物通道**：产出遗物实例、受**每日额度**约束、额度用满时**目标不清空**、
+ *    待结算次数 ≤ 实发次数（铁律 #62）。
  *
  * ⚠ 时间与随机全部**注入**（铁律 #1）：本文件不出现 `Date.now()` / `Math.random()`。
  */
@@ -31,6 +33,7 @@ import {
   computeOfflineEfficiency,
   idleChannelRemainingMs,
   idleChannelRolls,
+  idlePendingRolls,
   measureIdleChannels,
   mergeRewardBundles,
   offlineEffectiveSeconds,
@@ -42,11 +45,12 @@ import {
   type IdleSettleContext,
   type ResolvedChannelTarget,
 } from '../../src/core/systems/idle.ts'
-import { EXP_BOOK, IDLE, START_RESOURCES } from '../../src/core/config/economy.ts'
+import { EXP_BOOK, IDLE, RELIC_DROP, START_RESOURCES } from '../../src/core/config/economy.ts'
 import { isExpBook } from '../../src/core/config/items.ts'
 import { STAGE_INDEX } from '../../src/core/config/stages.ts'
 import { dungeonStageById, dungeonStageId } from '../../src/core/config/dungeons.ts'
 import { createNewSave } from '../../src/core/save/schema.ts'
+import { RELIC_DEFS, relicDailyKey } from '../../src/core/systems/relic.ts'
 import { Rng } from '../../src/core/rng.ts'
 import type { RewardBundle, SaveData } from '../../src/core/model/types.ts'
 
@@ -59,6 +63,8 @@ const ROLL = ROLL_MS
 const SKILL_EARTH_EASY = dungeonStageId('skillEarth', 'easy')
 /** 强化副本「初阶 · 简易」关卡 id */
 const ENHANCE_T1_EASY = dungeonStageId('enhanceTier1', 'easy')
+/** 遗物副本「锋锐 · 简易」关卡 id */
+const RELIC_EASY = dungeonStageId('relicZhanTan', 'easy')
 
 /** 造一份存档：已通关第 5 关（主线通道有目标可挂） */
 function makeSave(seed = 7): SaveData {
@@ -126,28 +132,30 @@ describe('离线收益曲线（§5.7）', () => {
   })
 })
 
-// ─────────────────────────── 三通道并行 ───────────────────────────
+// ─────────────────────────── 四通道并行 ───────────────────────────
 
-describe('三通道并行：各自独立计量', () => {
-  /** 三条通道全部打开的存档 */
-  function threeChannels(): SaveData {
+describe('四通道并行：各自独立计量', () => {
+  /** 四条通道全部打开的存档 */
+  function fourChannels(): SaveData {
     const save = makeSave()
     save.dungeons.cleared[SKILL_EARTH_EASY] = true
     save.dungeons.cleared[ENHANCE_T1_EASY] = true
+    save.dungeons.cleared[RELIC_EASY] = true
     save.idle.channels.main.target = { kind: 'main', stageId: null }
     save.idle.channels.skill.target = { kind: 'skill', dungeonStageId: SKILL_EARTH_EASY }
     save.idle.channels.enhance.target = { kind: 'enhance', dungeonStageId: ENHANCE_T1_EASY }
+    save.idle.channels.relic.target = { kind: 'relic', dungeonStageId: RELIC_EASY }
     return save
   }
 
-  it('同一段墙钟时间里，三条通道各自结算，互不扣别人的预算', () => {
+  it('同一段墙钟时间里，四条通道各自结算，互不扣别人的预算', () => {
     // ⚠ 历史教训：旧版三个去向**共用一份时间账本**，切一次就把另一条的时间吞掉。
-    //   这里守的是「三条通道各自计量」——每条都拿到完整的 60 秒。
-    const save = threeChannels()
+    //   这里守的是「四条通道各自计量」——每条都拿到完整的 60 秒。
+    const save = fourChannels()
     const result = settleIdleChannels(save, settleCtx(NOW + 60_000))
 
-    expect(result.channels).toHaveLength(3)
-    expect(result.rolls).toBe(30)
+    expect(result.channels).toHaveLength(4)
+    expect(result.rolls).toBe(40)
     for (const kind of IDLE_CHANNEL_KINDS) {
       const detail = result.channels.find((c) => c.channel === kind)
       expect(detail, `${kind} 通道没有结算`).toBeTruthy()
@@ -158,27 +166,28 @@ describe('三通道并行：各自独立计量', () => {
     }
   })
 
-  it('一条通道的目标失效**不影响**另外两条', () => {
-    // ⚠ 铁律 #3 的反面：系统逻辑必须遍历配置表，一条通道挂掉不能连累另外两条。
-    const save = threeChannels()
+  it('一条通道的目标失效**不影响**另外三条', () => {
+    // ⚠ 铁律 #3 的反面：系统逻辑必须遍历配置表，一条通道挂掉不能连累另外三条。
+    const save = fourChannels()
     // 让技能副本目标失效（通关记录被清掉）
     delete save.dungeons.cleared[SKILL_EARTH_EASY]
     const result = settleIdleChannels(save, settleCtx(NOW + 60_000))
 
     const kinds = result.channels.map((c) => c.channel).sort()
-    expect(kinds).toEqual(['enhance', 'main'])
+    expect(kinds).toEqual(['enhance', 'main', 'relic'])
     expect(result.channels.find((c) => c.channel === 'skill')).toBeUndefined()
     // 失效的那条通道预算归零（目标没了，时间也就没有意义）
     expect(save.idle.channels.skill.effectiveMs).toBe(0)
   })
 
-  it('三条通道的产出物互不串味：主线发银两/经验书，副本只发自己的材料', () => {
-    const save = threeChannels()
+  it('四条通道的产出物互不串味：主线发银两/经验书，副本只发自己的材料', () => {
+    const save = fourChannels()
     const result = settleIdleChannels(save, settleCtx(NOW + 60_000))
 
     const main = result.channels.find((c) => c.channel === 'main')!
     const skill = result.channels.find((c) => c.channel === 'skill')!
     const enhance = result.channels.find((c) => c.channel === 'enhance')!
+    const relic = result.channels.find((c) => c.channel === 'relic')!
 
     expect(main.rewards.silver).toBeGreaterThan(0)
     for (const id of Object.keys(main.rewards.items ?? {})) {
@@ -189,6 +198,10 @@ describe('三通道并行：各自独立计量', () => {
     expect(Object.keys(skill.rewards.items ?? {})).toEqual(['skillMatEarth'])
     expect(enhance.rewards.silver).toBeUndefined()
     expect(Object.keys(enhance.rewards.items ?? {})).toEqual(['relicStoneTier1'])
+    // 遗物通道只发遗物（实例），不发材料、不发银两
+    expect(relic.rewards.silver).toBeUndefined()
+    expect(relic.rewards.items).toBeUndefined()
+    expect(relic.rewards.relics?.length).toBeGreaterThan(0)
   })
 })
 
@@ -455,13 +468,23 @@ describe('掉落口径：主线不再发遗物', () => {
     // ⚠ 铁律 #26 的反面：掉落口径只有一份（`rewards`），
     //   副本材料绝不能混进主线的银两/经验书通道。
     const stage = dungeonStageById(SKILL_EARTH_EASY)!
+    expect(stage.drop, '材料副本必须有 drop').toBeTruthy()
     const rolled = rollDungeonDrop(stage, new Rng(3))
     expect(Object.keys(rolled.items ?? {})).toEqual(['skillMatEarth'])
     expect(rolled.silver).toBeUndefined()
     expect(rolled.relics).toBeUndefined()
     const count = rolled.items!.skillMatEarth!
-    expect(count).toBeGreaterThanOrEqual(stage.drop.min)
-    expect(count).toBeLessThanOrEqual(stage.drop.max)
+    expect(count).toBeGreaterThanOrEqual(stage.drop!.min)
+    expect(count).toBeLessThanOrEqual(stage.drop!.max)
+  })
+
+  it('遗物副本掷奖（rollDungeonDrop）返回空包：遗物是实例，不走堆叠物通道', () => {
+    // ⚠ 遗物副本的 `drop` 为 `null` ⇒ 堆叠物掷奖通道对它**无产出**。
+    //   遗物走遗物通道（`rollChannelRewards` 的 relic 分支）。
+    const stage = dungeonStageById(RELIC_EASY)!
+    expect(stage.drop).toBeNull()
+    const rolled = rollDungeonDrop(stage, new Rng(3))
+    expect(rolled).toEqual({})
   })
 
   it('通道掷奖按次数累计（rollChannelRewards）', () => {
@@ -472,10 +495,155 @@ describe('掉落口径：主线不再发遗物', () => {
       dungeonStageId: SKILL_EARTH_EASY,
     }) as ResolvedChannelTarget
     const stage = dungeonStageById(SKILL_EARTH_EASY)!
-    const rolled = rollChannelRewards(target, 10, new Rng(9))
-    const total = rolled.items!.skillMatEarth!
-    expect(total).toBeGreaterThanOrEqual(10 * stage.drop.min)
-    expect(total).toBeLessThanOrEqual(10 * stage.drop.max)
+    // ⚠ `rollChannelRewards` 现在返回 `{ rewards, pity, rolls }`
+    //   （遗物通道要额外带回保底计数与**实际掷出次数**）。
+    const outcome = rollChannelRewards(target, 10, new Rng(9))
+    expect(outcome.rolls).toBe(10)
+    const total = outcome.rewards.items!.skillMatEarth!
+    expect(total).toBeGreaterThanOrEqual(10 * stage.drop!.min)
+    expect(total).toBeLessThanOrEqual(10 * stage.drop!.max)
+  })
+})
+
+// ─────────────────────────── 遗物通道（第四通道） ───────────────────────────
+
+/**
+ * 按 core 的保底规则**重放**一串遗物 id，返回最终保底计数。
+ *
+ * ⚠ easy 档一次恰好一件 ⇒ 「件」与「次」同义；起始 pity = 0 且只有 10 件
+ *   ⇒ 掷奖过程中**不会**触发保底（保底要求「掷之前」计数已达阈值），
+ *   所以「非 SSR +1 / SSR 归零」这条规则足以精确重放。
+ */
+function replayPity(defIds: readonly string[]): number {
+  let pity = 0
+  for (const id of defIds) {
+    pity = RELIC_DEFS.get(id)?.rarity === 'SSR' ? 0 : pity + 1
+  }
+  return pity
+}
+
+describe('遗物通道：产出、每日额度与保底', () => {
+  /** 遗物通道已打开的存档（遗物副本已通关） */
+  function relicChannelSave(): SaveData {
+    const save = makeSave()
+    save.dungeons.cleared[RELIC_EASY] = true
+    save.idle.channels.relic.target = { kind: 'relic', dungeonStageId: RELIC_EASY }
+    return save
+  }
+
+  it('目标解析：副本**已通关**才能挂（未通关返回 null）', () => {
+    // ⚠ 「挂机永不卡关」：目标必须是**已通关**的内容。
+    const save = makeSave()
+    expect(
+      resolveChannelTarget(save, 'relic', { kind: 'relic', dungeonStageId: RELIC_EASY }),
+    ).toBeNull()
+
+    save.dungeons.cleared[RELIC_EASY] = true
+    const target = resolveChannelTarget(save, 'relic', { kind: 'relic', dungeonStageId: RELIC_EASY })
+    expect(target).not.toBeNull()
+    expect(target!.dungeonStageId).toBe(RELIC_EASY)
+    // ⚠ 遗物副本没有堆叠物掉落，但**有候选遗物池**与难度档
+    expect(target!.drop).toBeNull()
+    expect(target!.relicPool?.length).toBe(10)
+    expect(target!.difficulty).toBe('easy')
+  })
+
+  it('目标解析：遗物通道挂技能副本关卡 → 解析失败（口径串了）', () => {
+    // ⚠ 种类必须与通道一致：否则结算会按错误的产出物发奖。
+    const save = makeSave()
+    save.dungeons.cleared[SKILL_EARTH_EASY] = true
+    expect(
+      resolveChannelTarget(save, 'relic', { kind: 'relic', dungeonStageId: SKILL_EARTH_EASY }),
+    ).toBeNull()
+  })
+
+  it('产出：结算真的发出遗物，保底计数与每日计数**同事务落盘**', () => {
+    // ⚠ 铁律 #22：「配置齐全」≠「功能可用」。
+    //   遗物是**零成本**产出，挂机通道必须真的能掉出实例。
+    const save = relicChannelSave()
+    const result = settleIdleChannels(save, settleCtx(NOW + 60_000))
+
+    const detail = result.channels.find((c) => c.channel === 'relic')
+    expect(detail, '遗物通道没有结算').toBeTruthy()
+    expect(detail!.rolls).toBe(10)
+    expect(detail!.rewards.relics?.length).toBeGreaterThan(0)
+
+    // 保底计数被写回存档（刷新页面不能重置，否则保底形同虚设，铁律 #24）
+    expect(save.relicPity[RELIC_EASY]).toBe(replayPity(detail!.rewards.relics!))
+    // 每日计数被累加（额度按「件」计）
+    expect(save.relicDaily.date).toBe(relicDailyKey(NOW))
+    expect(save.relicDaily.count).toBe(detail!.rewards.relics!.length)
+  })
+
+  it('⚠ 额度用满时产出为 0，但**目标不清空**（玩家第二天照常领）', () => {
+    // ⚠ 每日额度是**挂机**的防通胀闸门：遗物零成本，仓库溢出会自动分解折算银两
+    //   ⇒ 没有额度，挂机遗物通道就是印钞机。
+    // ⚠ 但「额度用满」**不等于**「目标失效」：清空目标 ⇒ 玩家每天都要重设一次。
+    const save = relicChannelSave()
+    save.relicDaily = { date: relicDailyKey(NOW), count: RELIC_DROP.DAILY_CAP }
+    const result = settleIdleChannels(save, settleCtx(NOW + 60_000))
+
+    expect(result.channels.find((c) => c.channel === 'relic')).toBeUndefined()
+    // 额度没被消耗（主线通道的产出与遗物通道无关）
+    expect(save.relicDaily.count).toBe(RELIC_DROP.DAILY_CAP)
+    // ⚠ 目标必须还在
+    expect(save.idle.channels.relic.target).toEqual({ kind: 'relic', dungeonStageId: RELIC_EASY })
+  })
+
+  it('跨日重置：额度恢复满（昨天的计数不算今天）', () => {
+    // ⚠ 日期键用 **UTC**（`relicDailyKey`）：客户端与服务端时区可能不同，
+    //   「哪一天」的判定必须处处一致。
+    const save = relicChannelSave()
+    save.relicDaily = { date: relicDailyKey(NOW - 86_400_000), count: RELIC_DROP.DAILY_CAP }
+    const result = settleIdleChannels(save, settleCtx(NOW + 60_000))
+
+    const detail = result.channels.find((c) => c.channel === 'relic')
+    expect(detail, '跨日后遗物通道没有产出').toBeTruthy()
+    expect(detail!.rewards.relics?.length).toBeGreaterThan(0)
+    // 计数重置成今天的（不是昨天的）
+    expect(save.relicDaily.date).toBe(relicDailyKey(NOW))
+    expect(save.relicDaily.count).toBe(detail!.rewards.relics!.length)
+  })
+
+  it('★ 待结算次数 ≤ 实发次数（铁律 #62：界面只能少写，不能多写）', () => {
+    // ⚠ 按钮上写的次数是**玩家真正在意的**：写 10 次却只发 3 次 ⇒ 玩家觉得被坑。
+    //   额度按「件」计、每次掷奖至少出 1 件 ⇒ 剩余额度就是次数的**上界**。
+    const save = relicChannelSave()
+    save.idle.channels.relic.effectiveMs = 60_000 // 10 次掷奖
+    save.relicDaily = { date: relicDailyKey(NOW), count: RELIC_DROP.DAILY_CAP - 3 } // 只剩 3 件
+
+    const pending = idlePendingRolls(save, NOW)
+    expect(pending.relic).toBe(3) // min(预算 10, 剩余额度 3)
+
+    const result = settleIdleChannels(save, settleCtx(NOW + 60_000))
+    const detail = result.channels.find((c) => c.channel === 'relic')
+    expect(detail).toBeTruthy()
+    // 实发次数 ≤ 按钮上写的次数
+    expect(detail!.rolls).toBeLessThanOrEqual(pending.relic)
+    expect(detail!.rewards.relics!.length).toBeLessThanOrEqual(pending.relic)
+    // 额度用满 ⇒ 剩下的预算**留在存档里**（明天额度重置后继续领）
+    expect(save.idle.channels.relic.effectiveMs).toBeGreaterThan(0)
+  })
+
+  it('`rollChannelRewards` 的新返回值 `{ rewards, pity, rolls }` 被正确使用', () => {
+    // ⚠ 遗物通道要额外带回两样东西：**保底计数**（跨场次累计）与
+    //   **实际掷出次数**（额度不足时会少掷）——少了任何一样，
+    //   「保底形同虚设」或「多扣预算」就会回来。
+    const save = relicChannelSave()
+    const target = resolveChannelTarget(save, 'relic', {
+      kind: 'relic',
+      dungeonStageId: RELIC_EASY,
+    }) as ResolvedChannelTarget
+
+    const outcome = rollChannelRewards(target, 10, new Rng(3), { pity: 0, maxRelics: 15 })
+    expect(outcome.rolls).toBe(10)
+    expect(outcome.rewards.relics?.length).toBe(10)
+    expect(outcome.pity).toBeGreaterThanOrEqual(0)
+    // 非遗物通道：保底原样回传（不参与遗物保底）
+    const mainTarget = resolveChannelTarget(save, 'main', { kind: 'main', stageId: null })!
+    const mainOutcome = rollChannelRewards(mainTarget, 3, new Rng(3), { pity: 7 })
+    expect(mainOutcome.pity).toBe(7)
+    expect(mainOutcome.rolls).toBe(3)
   })
 })
 

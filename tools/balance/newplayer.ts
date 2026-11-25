@@ -45,15 +45,22 @@ import {
 } from './dungeon-loop.ts'
 import {
   DAILY,
+  DUNGEON_DIFFICULTY_ORDER,
   EXP_BOOK,
   GACHA,
   IDLE,
   LEVEL,
   RELIC,
-  RELIC_ACQUIRE,
+  RELIC_DROP,
   SKILL,
   START_RESOURCES,
 } from '../../src/core/config/economy.ts'
+import {
+  DUNGEON_INDEX,
+  DUNGEON_VARIANT_ORDER,
+  dungeonStageId,
+  type DungeonVariantId,
+} from '../../src/core/config/dungeons.ts'
 import type { HeroDef, Rarity, SaveData } from '../../src/core/model/types.ts'
 
 // ─────────────────────────── 命令行 ───────────────────────────
@@ -113,6 +120,33 @@ const BASE_NOW = Date.UTC(2026, 0, 5, 4, 0, 0)
 
 const RARITY_ORDER: Rarity[] = ['SSR', 'SR', 'R', 'N']
 const FIRST_CHAPTER_STAGES = STAGES.filter((s) => s.chapter === 1)
+
+/**
+ * **新号第一个能进的遗物副本关卡**（难度 = 简单档）。
+ *
+ * ⚠ 变体 id **不写死**：从 `DUNGEON_VARIANT_ORDER` 里挑「解锁线最早」的那个遗物变体
+ *   （解锁线口径 = `RELIC_DROP.UNLOCK_STAGE`）⇒ 配置改了这里自动跟着改
+ *   （铁律 #3：禁止硬编码变体 id 列表）。
+ * ⚠ 关卡 id **必须**走 core 的 `dungeonStageId()`（唯一出处，禁止自己拼字符串）。
+ *
+ * ⚠ 为什么新号第一个遗物副本必须在「主线第 1 关」就解锁：
+ *   强化副本要求「持有 Lv1 遗物」⇒ 若遗物副本也要求持有遗物，
+ *   首件遗物就永远拿不到 ⇒ 整条强化链锁死（2026-11-24 那次故障的成因）。
+ */
+const firstRelicStageId = (() => {
+  let bestId: DungeonVariantId | null = null
+  let bestUnlock = Number.POSITIVE_INFINITY
+  for (const id of DUNGEON_VARIANT_ORDER) {
+    if (DUNGEON_INDEX.get(id)?.kind !== 'relic') continue
+    const unlock = RELIC_DROP.UNLOCK_STAGE[id] ?? Number.POSITIVE_INFINITY
+    if (unlock < bestUnlock) {
+      bestUnlock = unlock
+      bestId = id
+    }
+  }
+  if (!bestId) throw new Error('遗物副本变体为空（配置异常）')
+  return dungeonStageId(bestId, DUNGEON_DIFFICULTY_ORDER[0])
+})()
 
 // ─────────────────────────── 阵容档位 ───────────────────────────
 
@@ -459,13 +493,13 @@ function advanceIdle(
   // ② 再来一跳（一个心跳间隔后）：租约已生效 → onlineMs > 0 → 离线累计归零
   ctx.now += IDLE.HEARTBEAT_INTERVAL_MS
   applyAction(save, { type: 'idle.heartbeat' }, ctx)
-  // ③ 领奖：三通道按各自预算结算（次数由服务端账本决定，客户端只是上限）
+  // ③ 领奖：四通道按各自预算结算（次数由服务端账本决定，客户端只是上限）
   //
   // ⚠ 挂机改版 v11：次数**不再由客户端传**（旧版是 `battles`），
   //   服务端按各通道的 `effectiveMs` 决定掷几次 ⇒ 客户端创造不出时间。
   const tick = applyAction(save, { type: 'idle.tick' }, ctx)
   const run = tick.ok ? tick.result : null
-  // ⚠ **三通道并行** ⇒ 产出要**按通道合并**再统计（每条通道各发各的）
+  // ⚠ **四通道并行** ⇒ 产出要**按通道合并**再统计（每条通道各发各的）
   let silver = 0
   const items: Record<string, number> = {}
   for (const detail of run?.channels ?? []) {
@@ -627,7 +661,30 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
       blockedAtStage = null
     }
 
-    // ── 选本段（1 小时）的三通道目标 ──
+    // ── 遗物副本：遗物的**唯一来源**（存档 v12） ──
+    //
+    // ⚠ 祈愿已下线（`relic.acquire` 已从动作层移除）：
+    //   遗物只能从**遗物副本**拿 ⇒ 强化链路（强化石 → 强化）才有起点。
+    //
+    // ⚠ **新号可达性**：第一个遗物副本的解锁线是「主线第 1 关」
+    //   （`RELIC_DROP.UNLOCK_STAGE`）—— 打通第 1 关就能进，
+    //   不会与「强化副本要求持有 Lv1 遗物」形成循环依赖。
+    //
+    // ⚠ 这里每段打**一次**简单档：模拟「玩家上线后会顺手刷一次遗物副本」。
+    //   遗物副本的挂机产出由 `decideChannels` 的第四通道负责（受每日额度约束）。
+    const relicChallenge = applyAction(
+      save,
+      { type: 'dungeon.challenge', stageId: firstRelicStageId },
+      ctx,
+    )
+    if (relicChallenge.ok && relicChallenge.result.win) {
+      // 新遗物立即按推荐穿上（否则强化链路拿不到可升的对象）
+      for (const heroId of teamIds) {
+        applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
+      }
+    }
+
+    // ── 选本段（1 小时）的四通道目标 ──
     //
     // ⚠ **必须在「这段挂机时间开始之前」选**：目标是存档状态，
     //   它决定了这段离线期归谁（切换时服务端先按**旧目标**结清，设计稿 §3）。
@@ -637,12 +694,14 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
     //   这正是「每小时上线一次」的口径（与 recalibrate 的「每天一次」不同，
     //   两者相差 9 倍，见 economy.ts 的 IDLE 注释）。
     //
-    // ⚠ **三通道并行**（挂机改版 v11）：不用分配时间，各自拿满同一段墙钟时间。
+    // ⚠ **四通道并行**（挂机改版 v11 + 遗物副本 v12）：不用分配时间，各自拿满同一段墙钟时间。
     const decision = decideChannels(
       save,
       ctx,
       teamIds,
       Math.floor((CHUNK_HOURS * 3600) / IDLE.SECONDS_PER_ROLL),
+      // ⚠ 遗物通道的**每日额度**要在**结算那一刻**判定（跨日才重置）
+      ctx.now + CHUNK_HOURS * HOUR_MS,
     )
     // 副本目标必须已通关才能挂 ⇒ 先把选中的副本关卡打通
     for (const stageId of decision.challenges) {
@@ -654,6 +713,7 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
       ctx,
       teamIds,
       Math.floor((CHUNK_HOURS * 3600) / IDLE.SECONDS_PER_ROLL),
+      ctx.now + CHUNK_HOURS * HOUR_MS,
     ).plans
     applyChannels(save, ctx, plan)
     const produced = advanceIdle(save, ctx, CHUNK_HOURS)
@@ -663,14 +723,7 @@ function simulateProfile(template: SaveData, profile: TeamProfile): ProfileResul
       for (const heroId of teamIds) applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
     }
     // 祈愿遗物（遗物的独立获取入口）：银两换遗物，强化链路才有起点
-    if (save.player.silver >= RELIC_ACQUIRE.SILVER_COST) {
-      const wish = applyAction(save, { type: 'relic.acquire' }, ctx)
-      if (wish.ok) {
-        for (const heroId of teamIds) {
-          applyAction(save, { type: 'relic.autoEquip', heroId }, ctx)
-        }
-      }
-    }
+    // ⚠ **存档 v12**：祈愿已下线 ⇒ 遗物改由**遗物副本**产出（见上面的遗物副本挑战）。
     const spend = spendGrowth(save, ctx, teamIds)
     totalExpFed += spend.expFed
     if (spend.realmBreaks > 0 && firstRealmBreakHour === null) {

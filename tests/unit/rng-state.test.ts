@@ -112,17 +112,18 @@ describe('core：RNG 快照忠实复原', () => {
 describe('存档：随机数状态字段', () => {
   it('存档版本已升级（新增 rng 字段）', () => {
     // ⚠ 资源/背包版本 v10（抽卡券 / 印记 / 经验池退役 → 道具系统 + 副本）
-    expect(SAVE_VERSION).toBe(11)
+    //   挂机改版 v11（三通道并行）→ 遗物副本 v12（四通道 + 保底 + 每日额度）
+    expect(SAVE_VERSION).toBe(12)
   })
 
   it('新建存档带随机种子', () => {
     const rng = createNewSave(1, 42).rng
     expect(rng.seed).toBe(42)
     expect(rng.counter).toBe(0)
-    // ⚠ 挂机改版 v11：三条挂机通道**各自**一条序列（设计稿 §3.3），
-    //   且互不相同 —— 开一条通道不会改变另外两条的掉落。
-    expect(Object.keys(rng.channels).sort()).toEqual(['enhance', 'main', 'skill'])
-    expect(new Set(Object.values(rng.channels).map((c) => c.seed)).size).toBe(3)
+    // ⚠ 挂机改版 v11 + 遗物副本 v12：**四条**挂机通道**各自**一条序列（设计稿 §3.3），
+    //   且互不相同 —— 开一条通道不会改变另外三条的掉落。
+    expect(Object.keys(rng.channels).sort()).toEqual(['enhance', 'main', 'relic', 'skill'])
+    expect(new Set(Object.values(rng.channels).map((c) => c.seed)).size).toBe(4)
   })
 
   it('旧档（无 rng 字段）规范化后种子为 0，等待服务端补种子', () => {

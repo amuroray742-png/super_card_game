@@ -21,7 +21,7 @@ import { makeRelicUid, parseLegacyRelicUid, RELIC_DEFS, RELIC_SETS } from '../sy
 import { emptyLadderSquads } from '../config/ladder.ts'
 import '../config/relics.ts'
 
-export const SAVE_VERSION = 11
+export const SAVE_VERSION = 12
 
 export type Migration = (save: SaveData) => SaveData
 
@@ -29,10 +29,10 @@ export type Migration = (save: SaveData) => SaveData
 const ITEM_ID_SET = new Set<string>(ITEM_IDS)
 
 /**
- * 三条挂机通道**各自**的随机序列（挂机改版 v11 · 设计稿 §3.3）。
+ * 四条挂机通道**各自**的随机序列（挂机改版 v11 · 设计稿 §3.3；存档 v12 加遗物通道）。
  *
- * ⚠ 通道种子由**存档根种子**派生：三条序列互不相同，但都随存档落盘。
- *   根种子轮换（服务端补种子 / 迁移轮换）时三条通道的序列一起换，
+ * ⚠ 通道种子由**存档根种子**派生：四条序列互不相同，但都随存档落盘。
+ *   根种子轮换（服务端补种子 / 迁移轮换）时四条通道的序列一起换，
  *   不会「一个玩家一条固定序列」（铁律 #24）。
  *
  * ⚠ 这份状态住在**私有随机块** `save.rng` 里 —— 公开快照 / 缓存 / 导出串
@@ -141,7 +141,7 @@ export const MIGRATIONS: Record<number, Migration> = {
   },
   // v5 → v6：旧版曾把权威随机状态发给客户端，载入后轮换该序列。
   5: (save) => {
-    // ⚠ 挂机改版 v11：三条通道的序列也一起轮换（服务端补根种子时会再派生一次）
+    // ⚠ 挂机改版 v11 / 遗物副本 v12：四条通道的序列也一起轮换（服务端补根种子时会再派生一次）
     save.rng = { seed: 0, counter: 0, channels: createChannelRng(0) }
     return save
   },
@@ -283,6 +283,10 @@ export const MIGRATIONS: Record<number, Migration> = {
         main: emptyIdleChannel({ kind: 'main', stageId: null }, measuredAt),
         skill: emptyIdleChannel(null, measuredAt),
         enhance: emptyIdleChannel(null, measuredAt),
+        // ⚠ 遗物通道在 v12 才存在，这里先占位（保持类型完整）；
+        //   随后的 `MIGRATIONS[11]` 会**重建**它（关闭、无预算），
+        //   所以这里填什么都不影响最终结果。
+        relic: emptyIdleChannel(null, measuredAt),
       },
       activeUntil: Number.isFinite(legacyIdle?.activeUntil)
         ? (legacyIdle!.activeUntil as number)
@@ -293,6 +297,33 @@ export const MIGRATIONS: Record<number, Migration> = {
       ),
     }
     save.dungeons = { cleared: {} }
+    return save
+  },
+  // v11 → v12：**遗物副本**（遗物的唯一来源从「银两祈愿」改为「遗物副本」）
+  //
+  // 旧结构：三条挂机通道（`idle.channels.{main,skill,enhance}`），
+  //   遗物来自独立动作 `relic.acquire`（花 5000 银两祈愿）。
+  // 新结构：**第四条通道** `idle.channels.relic`（遗物副本专属），
+  //   外加遗物副本的**保底计数**与**每日产出计数**。
+  //
+  // 迁移策略：
+  // - 新增遗物通道，**关闭**（旧档没有遗物副本目标可继承）；
+  // - 其余三条通道**原样保留**（它们的账本与随机序列语义没变）；
+  // - 保底计数清空（旧档的遗物来自祈愿，没有副本保底概念）；
+  // - 每日产出计数清零（额度从 v12 起算）。
+  11: (save) => {
+    const measuredAt = Number.isFinite(save.idle?.channels?.main?.measuredAt)
+      ? (save.idle!.channels!.main!.measuredAt as number)
+      : save.lastTickAt
+    save.idle = {
+      ...save.idle,
+      channels: {
+        ...save.idle.channels,
+        relic: emptyIdleChannel(null, measuredAt),
+      },
+    }
+    save.relicPity = {}
+    save.relicDaily = { date: '', count: 0 }
     return save
   },
 }
@@ -380,13 +411,16 @@ export function createNewSave(now: number, seed = 0): SaveData {
       channels: {
         // 主线通道默认「跟随最新通关关卡」；首胜前没有可挂的目标 → 不计收益
         main: emptyIdleChannel({ kind: 'main', stageId: null }, now),
-        // 技能 / 强化通道开局关闭，玩家在首胜后主动设置目标
+        // 技能 / 强化 / 遗物通道开局关闭，玩家在首胜后主动设置目标
         skill: emptyIdleChannel(null, now),
         enhance: emptyIdleChannel(null, now),
+        relic: emptyIdleChannel(null, now),
       },
       activeUntil: now,
       totalIdleSeconds: 0,
     },
+    relicPity: {},
+    relicDaily: { date: '', count: 0 },
     dungeons: { cleared: {} },
     codes: [],
     settings: { speed: 1, sfx: true, skipAnim: false },
@@ -473,7 +507,7 @@ function normalizeItems(raw: unknown): SaveData['items'] {
 /**
  * 规范化**单条挂机通道**。
  *
- * ⚠ **逐通道兜底**（挂机改版 v11）：三条通道**各自独立**，
+ * ⚠ **逐通道兜底**（挂机改版 v11 / 遗物副本 v12）：四条通道**各自独立**，
  *   一条通道的目标形状非法**只关掉那一条**，不能连累另外两条。
  *
  * ⚠ 形状非法的目标一律置 `null`（= 通道关闭，不计量）——
@@ -517,6 +551,28 @@ function normalizeIdleChannel(
     }
   }
   return state
+}
+
+/**
+ * 规范化**遗物保底计数**（存档 v12）。
+ *
+ * ⚠ 只保留**合法副本关卡 id** 的非负整数：
+ *   非法 key 会让 `save.relicPity` 变成一个可以塞任意字符串的黑洞
+ *   （存档体积无上限增长），且保底计数只对真实遗物副本有意义。
+ *
+ * ⚠ 合法值**原样保留**：保底必须跨会话累计，
+ *   每次载入都归零 ⇒ 玩家刷新页面就能重抽（铁律 #24 的同款坑）。
+ */
+function normalizeRelicPity(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Number.isFinite(value)) continue
+    const n = Math.max(0, Math.floor(value as number))
+    if (!DUNGEON_STAGE_INDEX.has(id)) continue
+    out[id] = n
+  }
+  return out
 }
 
 /**
@@ -570,7 +626,7 @@ export function normalizeSave(raw: unknown): SaveData {
     rng: {
       seed: typeof save.rng?.seed === 'number' ? save.rng.seed : 0,
       counter: typeof save.rng?.counter === 'number' ? save.rng.counter : 0,
-      // ⚠ 挂机改版 v11：三条通道的随机序列（缺字段时按根种子派生）
+      // ⚠ 挂机改版 v11 / 遗物副本 v12：四条通道的随机序列（缺字段时按根种子派生）
       channels: normalizeChannelRng(
         save.rng?.channels,
         typeof save.rng?.seed === 'number' ? save.rng.seed : 0,
@@ -593,9 +649,19 @@ export function normalizeSave(raw: unknown): SaveData {
         main: normalizeIdleChannel(save.idle?.channels?.main, 'main', fallbackMeasuredAt),
         skill: normalizeIdleChannel(save.idle?.channels?.skill, 'skill', fallbackMeasuredAt),
         enhance: normalizeIdleChannel(save.idle?.channels?.enhance, 'enhance', fallbackMeasuredAt),
+        // ⚠ 遗物通道（v12）：漏掉这一行 ⇒ 该通道账本每次载入都被**静默重置**
+        //   （表现层看不出任何异常，但玩家会发现「挂机进度一直在原地踏步」）。
+        relic: normalizeIdleChannel(save.idle?.channels?.relic, 'relic', fallbackMeasuredAt),
       },
       activeUntil: Number.isFinite(save.idle?.activeUntil) ? save.idle!.activeUntil : fallbackMeasuredAt,
       totalIdleSeconds: Math.max(0, num(save.idle?.totalIdleSeconds)),
+    },
+    // 遗物副本的保底计数（v12）：只保留**合法关卡 id** 的非负整数
+    relicPity: normalizeRelicPity(save.relicPity),
+    // 遗物每日产出计数（v12）
+    relicDaily: {
+      date: typeof save.relicDaily?.date === 'string' ? save.relicDaily.date : '',
+      count: Math.max(0, num(save.relicDaily?.count)),
     },
     dungeons: {
       cleared: normalizeDungeonCleared(save.dungeons?.cleared),

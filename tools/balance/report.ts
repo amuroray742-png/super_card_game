@@ -40,7 +40,7 @@ import {
   REALMS,
   SKILL,
   RELIC,
-  RELIC_ACQUIRE,
+  RELIC_DROP,
   STAR,
   STAGE,
   IDLE,
@@ -48,14 +48,17 @@ import {
   LADDER,
   LADDER_RETURN_REWARDS,
   DUNGEON_DIFFICULTIES,
+  DUNGEON_DIFFICULTY_ORDER,
   DUNGEON_DROPS,
   EXP_BOOK,
   GACHA,
+  type DungeonDifficultyId,
 } from '../../src/core/config/economy.ts'
 import { STAGES } from '../../src/core/config/stages.ts'
 import { totalExpToReach, starUpCost, expToNext } from '../../src/core/systems/growth.ts'
-import { relicTotalCost } from '../../src/core/systems/relic.ts'
+import { relicTotalCost, relicDropRates, RELIC_SETS } from '../../src/core/systems/relic.ts'
 import { referenceGearAt, referenceTeam } from './reference-build.ts'
+import { relicExpectedPieces } from './dungeon-loop.ts'
 import { HEROES } from '../../src/core/config/heroes/index.ts'
 import { DAILY_TASKS, WEEKLY_TASKS, type TaskReward } from '../../src/core/config/tasks.ts'
 import {
@@ -63,7 +66,11 @@ import {
   ITEM_BY_ELEMENT,
   type ItemId,
 } from '../../src/core/config/items.ts'
-import { DUNGEON_VARIANTS } from '../../src/core/config/dungeons.ts'
+import {
+  DUNGEON_INDEX,
+  DUNGEON_VARIANTS,
+  DUNGEON_VARIANT_ORDER,
+} from '../../src/core/config/dungeons.ts'
 import { resourceName } from '../../src/core/config/resources.ts'
 import { computeOfflineEfficiency } from '../../src/core/systems/idle.ts'
 import {
@@ -131,31 +138,48 @@ function expectedOfTable(tableKey: string): Expected {
     out.items[drop.id] = (out.items[drop.id] ?? 0) + (drop.chance / 100) * count
   }
   out.exp = itemsToExp(out.items as Partial<Record<ItemId, number>>)
-  // ⚠ **挂机改版 v11：掉落表里已没有遗物**（`relicDrop` 字段退役）。
-  //   遗物改走**独立获取入口** `relic.acquire`（银两祈愿），
-  //   它的供给单独核算（见 `relicSupplyFromSilver`）——
+  // ⚠ **遗物副本 v12**：掉落表里**没有**遗物——遗物只从**遗物副本**产出。
+  //   它的供给单独核算（见 `relicSupplyFromDungeon`）——
   //   遗物既不在主线掉落表里，就不能在这里按掉落概率统计。
   return out
 }
 
 /**
- * **遗物本体的供给**（挂机改版 v11：遗物改走独立入口 `relic.acquire`）。
+ * **遗物本体的供给**（存档 v12：遗物**只**来自遗物副本）。
  *
- * ⚠ 遗物**不再从掉落表出**——掉落表只剩银两 + 经验书。
- *   遗物现在是「银两 → 祈愿」⇒ 供给 = 银两收入 ÷ 单件祈愿成本。
+ * ⚠ 遗物**不再从掉落表出**，也不再「花银两祈愿」⇒ 供给与银两收入**脱钩**：
+ *   供给 = **每日额度 × 天数**（挂机通道）+ **手动挑战场次 × 每场件数**。
  *
- * ⚠ 这条口径必须与游戏一致（铁律 #4）：成本取 `RELIC_ACQUIRE.SILVER_COST`，
- *   稀有度分布取 `RELIC_ACQUIRE.RARITY_WEIGHTS`，**不在工具里另写一份**。
+ * ⚠ 这条口径必须与游戏一致（铁律 #4）：
+ *   - 每日额度取 `RELIC_DROP.DAILY_CAP`（防通胀闸门）；
+ *   - 每场件数取 `RELIC_DROP.COUNT`；
+ *   - 稀有度分布取 `relicDropRates()`（**公示 = 实际**的唯一一份口径），
+ *     **不在工具里另写一份权重表**。
+ *
+ * ⚠ 「手动挑战场次」与「天数」都是**模拟口径**的输入：
+ *   天数用工具已有的模拟天数（节奏基线的 `chapterDays` 之和），
+ *   手动场次用模拟里玩家每天的手动遗物副本挑战数（基线的 `relicRunsPerDay`）。
+ *   ⚠ 禁止用 `Date.now()` 推「今天第几天」——那会让同一份报告两次跑出两个数。
  */
-function relicSupplyFromSilver(silver: number): {
+function relicSupplyFromDungeon(
+  days: number,
+  manualRunsPerDay: number,
+  difficulty: DungeonDifficultyId,
+): {
   count: number
   byRarity: Record<string, number>
 } {
-  const count = Math.floor(silver / RELIC_ACQUIRE.SILVER_COST)
-  const totalWeight = Object.values(RELIC_ACQUIRE.RARITY_WEIGHTS).reduce((a, b) => a + b, 0)
+  // ① 挂机通道：每日额度（件/天）× 天数
+  const idleCount = days * RELIC_DROP.DAILY_CAP
+  // ② 手动挑战：每场期望件数（`RELIC_DROP.COUNT` 的中值）× 场次
+  //    ⚠ 手动挑战**不受**每日额度约束（主动行为，逐场结算）。
+  const perRun = (RELIC_DROP.COUNT[difficulty].min + RELIC_DROP.COUNT[difficulty].max) / 2
+  const manualCount = days * manualRunsPerDay * perRun
+  const count = idleCount + manualCount
+  // ③ 稀有度分布：取 core 的公示口径（`relicDropRates`）
   const byRarity: Record<string, number> = {}
-  for (const [rarity, weight] of Object.entries(RELIC_ACQUIRE.RARITY_WEIGHTS)) {
-    byRarity[rarity] = count * (weight / totalWeight)
+  for (const rate of relicDropRates(difficulty)) {
+    byRarity[rate.rarity] = count * rate.percent
   }
   return { count, byRarity }
 }
@@ -170,6 +194,62 @@ function addInto(target: Expected, src: Expected, times: number): void {
     target.relics[k] += src.relics[k] * times
   }
 }
+
+interface PaceBaseline {
+  scaleAnchors: number[]
+  chapterDays: number[]
+  /**
+   * 模拟里玩家**每天手动挑战遗物副本的场次**（存档 v12 起遗物只来自副本）。
+   *
+   * ⚠ 旧基线里的同名键 `relicsPerDay` 是「每天祈愿遗物件数」——
+   *   祈愿已下线，量纲一致（件/天 ≈ 场/天），读的时候兼容一下，
+   *   但**新写的基线用 `relicRunsPerDay`**（口径写在 `recalibrate.ts` 里）。
+   */
+  relicRunsPerDay?: number
+  /** @deprecated 旧基线键（每天祈愿遗物件数）；见 `relicRunsPerDay` */
+  relicsPerDay?: number
+  velocity: Array<{ chapter: number; days: number; produced: PaceFlow; spent: PaceFlow }>
+}
+
+const PACE_PATH = resolve(process.cwd(), 'artifacts/baselines/recalibrate.json')
+
+function readPaceBaseline(): PaceBaseline | null {
+  if (!existsSync(PACE_PATH)) return null
+  try {
+    const parsed = JSON.parse(readFileSync(PACE_PATH, 'utf8')) as PaceBaseline
+    return Array.isArray(parsed.velocity) && parsed.velocity.length > 0 ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 基线里的锚点是否与当前配置一致（不一致 ⇒ 基线过期，数字不可用）。
+ */
+function paceIsFresh(baseline: PaceBaseline): boolean {
+  if (!Array.isArray(baseline.scaleAnchors)) return false
+  if (baseline.scaleAnchors.length !== STAGE.SCALE_ANCHORS.length) return false
+  return baseline.scaleAnchors.every(
+    (v, i) => Math.abs(v - STAGE.SCALE_ANCHORS[i]) <= Math.max(1e-3, STAGE.SCALE_ANCHORS[i] * 1e-3),
+  )
+}
+
+/**
+ * 基线的**维度**是否与当前模型一致。
+ *
+ * ⚠ v9 → v10 换了资源维度（exp / silver / skillMats / relicStones / shards），
+ *   旧基线读出来全是 undefined —— 必须认出来并提示重跑，而不是打出一排 NaN。
+ */
+const PACE_FLOW_KEYS = ['silver', 'exp', 'skillMats', 'relicStones', 'shards'] as const
+
+function paceHasCurrentShape(baseline: PaceBaseline): boolean {
+  const row = baseline.velocity[0]
+  if (!row) return false
+  const produced = row.produced as unknown as Record<string, unknown> | undefined
+  if (!produced || typeof produced !== 'object') return false
+  return PACE_FLOW_KEYS.every((key) => typeof produced[key] === 'number')
+}
+
 
 // ─────────────────────────── 1. 逐章投放 ───────────────────────────
 
@@ -277,41 +357,36 @@ console.log('='.repeat(84))
 
 console.log('\n【逐章投放期望】（主线 310 关）\n')
 console.log(
-  '  章节        银两        经验    五行技能材料   三档强化石   遗物祈愿可得(N/R/SR/SSR)',
+  '  章节        银两        经验    五行技能材料   三档强化石',
 )
-console.log('  ' + '-'.repeat(82))
+console.log('  ' + '-'.repeat(62))
 /**
- * 遗物本体供给：**主线银两能换多少件遗物**（独立入口口径）。
- *
- * ⚠ 逐章都按「该章银两收入 ÷ 单件祈愿成本」折算 ⇒ 逐章相加 = 全章合计。
+ * ⚠ **遗物那一列没有了**（存档 v12）：遗物不再从掉落表出，也不再「花银两祈愿」，
+ *   它的供给与**章节银两无关**（只取决于「天数 × 每日额度」+「手动挑战场次」）。
+ *   ⇒ 逐章表里放一个「按银两折算」的列就是**误导**（会让人以为遗物产出跟着章节走）。
+ *   遗物的供给口径见下面的【遗物副本投放】。
  */
-function relicColumn(silver: number): string {
-  const wish = relicSupplyFromSilver(silver)
-  return `${(wish.byRarity.N ?? 0).toFixed(1)}/${(wish.byRarity.R ?? 0).toFixed(1)}/${(wish.byRarity.SR ?? 0).toFixed(1)}/${(wish.byRarity.SSR ?? 0).toFixed(1)}`
-}
 for (let i = 0; i < perChapter.length; i++) {
   const a = perChapter[i]
   console.log(
     `  第${String(i + 1).padStart(2)}章  ` +
       `${fmt(a.silver).padStart(10)} ${fmt(a.exp).padStart(10)} ` +
       `${fmt(sumOfCategory(a.items, 'skillMat')).padStart(12)} ` +
-      `${fmt(sumOfCategory(a.items, 'relicStone')).padStart(10)}   ` +
-      relicColumn(a.silver),
+      `${fmt(sumOfCategory(a.items, 'relicStone')).padStart(10)}`,
   )
 }
-console.log('  ' + '-'.repeat(82))
+console.log('  ' + '-'.repeat(62))
 console.log(
   `  主线合计  ` +
     `${fmt(mainline.silver).padStart(10)} ${fmt(mainline.exp).padStart(10)} ` +
     `${fmt(sumOfCategory(mainline.items, 'skillMat')).padStart(12)} ` +
-    `${fmt(sumOfCategory(mainline.items, 'relicStone')).padStart(10)}   ` +
-    relicColumn(mainline.silver),
+    `${fmt(sumOfCategory(mainline.items, 'relicStone')).padStart(10)}`,
 )
 console.log(
   '\n  注：主线**只掉经验书与银两**——五行技能材料与三档强化石是**副本专属产出**'
     + '（设计稿 §3），所以上面两列恒为 0；材料的投放见下表。\n'
-    + '  遗物**不再从掉落表出**（挂机改版 v11）：改走独立入口「遗物祈愿」'
-    + `（${RELIC_ACQUIRE.SILVER_COST} 银两 / 件），故上表最后一列按银两收入折算。`,
+    + '  遗物**不再从掉落表出**（遗物副本 v12）：遗物**只**来自**遗物副本**，'
+    + '供给与主线银两脱钩，口径见【遗物副本投放】。',
 )
 
 // ─────────────────────────── 3.5 副本材料投放 ───────────────────────────
@@ -330,6 +405,10 @@ console.log(
 )
 console.log('  ' + '-'.repeat(88))
 for (const variant of DUNGEON_VARIANTS) {
+  // ⚠ **遗物副本不在本表**（存档 v12）：遗物是**实例**，产出形状与堆叠材料不同
+  //   （没有「每胜产量 × 难度倍率」这回事），它单列一张表（见下）。
+  if (variant.kind === 'relic') continue
+  if (!variant.itemId) continue
   const base = DUNGEON_DROPS[variant.itemId] ?? { min: 1, max: 1 }
   const midBase = (base.min + base.max) / 2
   const byDifficulty = DUNGEON_DIFFICULTIES.map((d) => midBase * d.dropMul)
@@ -350,6 +429,52 @@ console.log(
     + '\n      「养满需刷」= 满养成消耗 ÷ 普通难度每胜产量（难度取「普通」是因为它是默认档）；'
     + '\n      消耗为「—」= 参考队伍里没有该五行的英灵 / 该档石根本用不到（材料用不到 ⇒ 不用刷）。',
 )
+
+// ─────────────────────────── 3.6 遗物副本投放 ───────────────────────────
+//
+// ⚠ 遗物是**实例**（不是堆叠物）⇒ 供给口径与材料完全不同：
+//   · 挂机通道：受**每日额度**约束（`RELIC_DROP.DAILY_CAP`，防通胀闸门）；
+//   · 手动挑战：不受额度约束（逐场结算，耗时换产出）；
+//   · 稀有度分布：取 core 的**公示口径** `relicDropRates()`（公示 = 实际）。
+//
+// ⚠ **变体遍历走 `DUNGEON_VARIANT_ORDER`**（铁律 #3：禁止硬编码变体 id 列表）——
+//   顺序表也是锚点表的顺序，两处必须一致。
+console.log('\n【遗物副本投放】（遗物本体的唯一来源 · 存档 v12）\n')
+console.log(
+  '  副本'.padEnd(18) + '套装'.padEnd(24) + '解锁线'.padStart(8) +
+    '简易/胜'.padStart(9) + '普通/胜'.padStart(9) + '困难/胜'.padStart(9),
+)
+console.log('  ' + '-'.repeat(77))
+for (const variantId of DUNGEON_VARIANT_ORDER) {
+  const variant = DUNGEON_INDEX.get(variantId)
+  if (!variant || variant.kind !== 'relic') continue
+  const setNames = (variant.relicSetIds ?? [])
+    .map((setId) => RELIC_SETS.get(setId)?.name ?? setId)
+    .join(' + ')
+  const unlock = RELIC_DROP.UNLOCK_STAGE[variant.id] ?? 0
+  const pieces = DUNGEON_DIFFICULTIES.map(
+    (d) => (RELIC_DROP.COUNT[d.id].min + RELIC_DROP.COUNT[d.id].max) / 2,
+  )
+  console.log(
+    `  ${variant.name.padEnd(16)}${setNames.padEnd(22)}` +
+      `${String(unlock).padStart(8)}` +
+      // ⚠ 件数是**区间中值**（普通档 1~2 ⇒ 1.5）⇒ 保留一位小数，别用整数格式化
+      pieces.map((v) => v.toFixed(1).padStart(7)).join('  '),
+  )
+}
+console.log(
+  `  每日挂机额度：${RELIC_DROP.DAILY_CAP} 件/天（防通胀闸门；手动挑战不受限）`,
+)
+console.log(
+  `  SSR 保底：连续 ${RELIC_DROP.PITY_SSR} 件未出 SSR ⇒ 第 ${RELIC_DROP.PITY_SSR + 1} 件必出 SSR（按件计）`,
+)
+for (const difficulty of DUNGEON_DIFFICULTIES) {
+  const rates = relicDropRates(difficulty.id)
+  console.log(
+    `  稀有度（${difficulty.name}档 · 公示口径）：` +
+      rates.map((r) => `${r.rarity} ${(r.percent * 100).toFixed(2)}%`).join(' · '),
+  )
+}
 
 console.log('\n【满养成消耗】基准 = 6 人编队（Lv240 / 6★ / 技能满级 / 6 件遗物满强化）\n')
 console.log(`  经验        ${fmt(cost.exp).padStart(12)}   （单人 ${fmt(expPerHero)} × ${TEAM_SIZE}）`)
@@ -400,22 +525,47 @@ for (const [name, supply, need] of rows) {
 }
 
 /**
- * 遗物本体供给（独立入口口径：银两 → 祈愿）。
+ * 遗物本体供给（**遗物副本口径**：存档 v12 起遗物只来自遗物副本）。
  *
- * ⚠ 挂机改版 v11：遗物**不再从掉落表出**，所以这里的分子是
- *   「主线银两收入能换几件遗物」，不是「掉落表期望遗物数」。
+ * ⚠ 分子不再是「主线银两收入能换几件」——遗物与银两**脱钩**了：
+ *   供给 = **每日额度 × 天数**（挂机通道）+ **手动挑战场次 × 每场件数**。
+ *
+ * ⚠ 「天数」用工具已有的**模拟天数**（节奏基线的 `chapterDays` 之和）；
+ *   没有基线时退回**首周 7 天**（本表下面「加上首周日常投放」那一节用的就是它）。
+ *   ⚠ 绝不用 `Date.now()` 推「今天第几天」——同一份报告两次跑会出两个数。
  */
-const relicWish = relicSupplyFromSilver(mainline.silver)
-const relicSupply = relicWish.count
+const paceBaseline = readPaceBaseline()
+const simulatedDays = paceBaseline
+  ? paceBaseline.chapterDays.reduce((sum, d) => sum + d, 0)
+  : DAILY.SIGN_IN_CYCLE
+/** 每天手动挑战遗物副本的场次（模拟口径；来自基线，没有基线时按 0 场算） */
+const manualRelicRunsPerDay =
+  paceBaseline?.relicRunsPerDay ?? paceBaseline?.relicsPerDay ?? 0
+/** 手动挑战按**普通档**计（难度顺序表的第 2 项；三档的稀有度权重相同） */
+const relicReferenceDifficulty: DungeonDifficultyId = DUNGEON_DIFFICULTY_ORDER[1]
+
+const relicSupplyDetail = relicSupplyFromDungeon(
+  simulatedDays,
+  manualRelicRunsPerDay,
+  relicReferenceDifficulty,
+)
+const relicSupply = relicSupplyDetail.count
 console.log(
   `  ${'遗物本体'.padEnd(12)} ${relicSupply.toFixed(0).padStart(10)} ${String(relicsInTeam).padStart(12)} ` +
     `${ratio(relicSupply, relicsInTeam).padStart(10)}   ${relicSupply >= relicsInTeam ? '✓' : '· 低于 1（见速度口径）'}`,
 )
 
 console.log(
-  `\n  注：遗物本体来自独立入口「遗物祈愿」（${RELIC_ACQUIRE.SILVER_COST} 银两 / 件），`
-    + `实际可用性需按稀有度折算（可得的 SSR 遗物约 ${(relicWish.byRarity.SSR ?? 0).toFixed(0)} 件）。`,
+  `\n  注：遗物本体来自**遗物副本**（存档 v12）：供给 = 每日额度 ${RELIC_DROP.DAILY_CAP} 件/天 × ${simulatedDays} 天`
+    + ` + 手动挑战 ${manualRelicRunsPerDay} 场/天 × 每场件数。`
+    + `实际可用性需按稀有度折算（可得的 SSR 遗物约 ${(relicSupplyDetail.byRarity.SSR ?? 0).toFixed(0)} 件）。`,
 )
+if (!paceBaseline) {
+  console.log(
+    '  ⚠ 缺少节奏基线 artifacts/baselines/recalibrate.json —— 天数按首周 7 天计，'
+      + '手动场次按 0 场计（先跑 `npm run balance:recalibrate` 重采）。',
+  )
+}
 
 // ── 非主线产出的三个维度：供给源不在主线，单独给「单次供给 vs 单次消耗」 ──
 //
@@ -457,9 +607,22 @@ for (const rarity of ['SSR', 'SR', 'R', 'N'] as const) {
       `${ratio(per, shardsPerStar).padStart(9)}`,
   )
 }
+{
+  // ⚠ **遗物本体**（存档 v12）：供给源 = 遗物副本（不是祈愿）。
+  //   「单次消耗」= 填满**一个遗物槽位**（1 件）——
+  //   遗物是实例，件数就是消耗单位（不能像材料那样折算成「几次养成动作」的倍数）。
+  const piecesPerWin = relicExpectedPieces(relicReferenceDifficulty)
+  console.log(
+    `  ${'遗物本体（实例）'.padEnd(20)}` +
+      `${'遗物副本（普通难度）'.padEnd(24)}` +
+      `${piecesPerWin.toFixed(1).padStart(10)} 件${'1'.padStart(8)} 件` +
+      `${ratio(piecesPerWin, 1).padStart(9)}`,
+  )
+}
 console.log(
   '\n  注：技能材料 / 强化石的「单次消耗」= 升 1 级技能 / 强化 1 级遗物（标准段）；'
-    + '\n      同名碎片的「单次消耗」= 升 1 星。倍数 = 一场副本（或一次重复抽卡）能换几次养成动作。',
+    + '\n      同名碎片的「单次消耗」= 升 1 星；遗物的「单次消耗」= 填 1 个槽位。'
+    + '倍数 = 一场副本（或一次重复抽卡）能换几次养成动作。',
 )
 
 console.log('\n【英灵阵容参考】SSR / SR / R / N 数量')
@@ -617,51 +780,6 @@ interface PaceFlow {
   /** 同名英灵碎片 */
   shards: number
   relics: number
-}
-
-interface PaceBaseline {
-  scaleAnchors: number[]
-  chapterDays: number[]
-  velocity: Array<{ chapter: number; days: number; produced: PaceFlow; spent: PaceFlow }>
-}
-
-const PACE_PATH = resolve(process.cwd(), 'artifacts/baselines/recalibrate.json')
-
-function readPaceBaseline(): PaceBaseline | null {
-  if (!existsSync(PACE_PATH)) return null
-  try {
-    const parsed = JSON.parse(readFileSync(PACE_PATH, 'utf8')) as PaceBaseline
-    return Array.isArray(parsed.velocity) && parsed.velocity.length > 0 ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-/**
- * 基线里的锚点是否与当前配置一致（不一致 ⇒ 基线过期，数字不可用）。
- */
-function paceIsFresh(baseline: PaceBaseline): boolean {
-  if (!Array.isArray(baseline.scaleAnchors)) return false
-  if (baseline.scaleAnchors.length !== STAGE.SCALE_ANCHORS.length) return false
-  return baseline.scaleAnchors.every(
-    (v, i) => Math.abs(v - STAGE.SCALE_ANCHORS[i]) <= Math.max(1e-3, STAGE.SCALE_ANCHORS[i] * 1e-3),
-  )
-}
-
-/**
- * 基线的**维度**是否与当前模型一致。
- *
- * ⚠ v9 → v10 换了资源维度（exp / silver / skillMats / relicStones / shards），
- *   旧基线读出来全是 undefined —— 必须认出来并提示重跑，而不是打出一排 NaN。
- */
-const PACE_FLOW_KEYS = ['silver', 'exp', 'skillMats', 'relicStones', 'shards'] as const
-
-function paceHasCurrentShape(baseline: PaceBaseline): boolean {
-  const row = baseline.velocity[0]
-  if (!row) return false
-  const produced = row.produced as unknown as Record<string, unknown> | undefined
-  if (!produced || typeof produced !== 'object') return false
-  return PACE_FLOW_KEYS.every((key) => typeof produced[key] === 'number')
 }
 
 interface StandardCost {

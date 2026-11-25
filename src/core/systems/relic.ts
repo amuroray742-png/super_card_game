@@ -4,9 +4,9 @@
  * 遗物是最大的乘区来源（zone 'relic'）。
  * 竞技模式下：只取套装效果（×0.7），随机词条与强化等级一律无效（§6.8）。
  */
-import type { RelicDef, RelicInstance, RelicSetDef, SaveData, StatMod } from '../model/types.ts'
+import type { Rarity, RelicDef, RelicInstance, RelicSetDef, SaveData, StatMod } from '../model/types.ts'
 import type { ItemId } from '../config/items.ts'
-import { RELIC } from '../config/economy.ts'
+import { RELIC, RELIC_DROP, type DungeonDifficultyId } from '../config/economy.ts'
 import type { RelicStoneTier } from '../config/economy.ts'
 import { Rng } from '../rng.ts'
 
@@ -18,6 +18,146 @@ export function registerRelics(defs: readonly RelicDef[], sets: readonly RelicSe
   for (const d of defs) RELIC_DEFS.set(d.id, d)
   for (const s of sets) RELIC_SETS.set(s.id, s)
 }
+
+// ─────────────────────── 遗物副本掉落（唯一一份口径） ───────────────────────
+
+/**
+ * 遗物稀有度档序（祈愿抽签与概率公示共用，**唯一一份**）。
+ */
+export const RELIC_RARITY_ORDER: readonly Rarity[] = ['N', 'R', 'SR', 'SSR']
+
+/**
+ * **遗物副本的稀有度概率表**（遗物唯一获取入口 `dungeon.challenge` 的公示口径）。
+ *
+ * ⚠ **唯一一份**：实际抽签（`rollRelicDrop`）与界面公示都读这个函数
+ *   ⇒ 「公示的百分比」与「实际抽到的分布」必然一致（铁律 #4）。
+ *
+ * ⚠ 表现层**禁止**自己拿 `RELIC_DROP.RATES` 换算百分比——
+ *   两处各算一套，换了权重就有一处对不上（合规硬要求：公示 = 实际）。
+ */
+export function relicDropRates(difficulty: DungeonDifficultyId): {
+  rarity: Rarity
+  weight: number
+  percent: number
+}[] {
+  const rates = RELIC_DROP.RATES[difficulty]
+  const total = RELIC_RARITY_ORDER.reduce((sum, r) => sum + (rates[r] ?? 0), 0)
+  return RELIC_RARITY_ORDER.map((rarity) => {
+    const weight = rates[rarity] ?? 0
+    return { rarity, weight, percent: total > 0 ? weight / total : 0 }
+  })
+}
+
+/** 按权重抽一个稀有度档（唯一一份抽签口径） */
+function rollRarity(difficulty: DungeonDifficultyId, rng: Rng): Rarity {
+  const rates = RELIC_DROP.RATES[difficulty]
+  const entries = RELIC_RARITY_ORDER.map((rarity) => ({ rarity, weight: rates[rarity] ?? 0 }))
+  const total = entries.reduce((sum, e) => sum + e.weight, 0)
+  if (total <= 0) return 'N'
+  let roll = rng.next() * total
+  for (const entry of entries) {
+    roll -= entry.weight
+    if (roll < 0) return entry.rarity
+  }
+  return entries[entries.length - 1].rarity
+}
+
+/**
+ * **遗物副本的一次掉落**（唯一一份产出逻辑，手动挑战与挂机通道共用）。
+ *
+ * 流程：
+ *   ① 件数 = 难度档区间（`RELIC_DROP.COUNT`），并被 `maxCount` 裁剪；
+ *   ② 稀有度 = 按权重抽（`RELIC_DROP.RATES`）；
+ *   ③ 具体遗物 = 在该副本候选池里、该稀有度的候选里**等概率**抽一件；
+ *   ④ **保底**：连续未出 SSR 达 `RELIC_DROP.PITY_SSR` **件** ⇒ 下一件必出 SSR。
+ *
+ * ⚠ **保底按「件」计**（不是按「场」）：一件遗物 = 一次抽签。
+ *   所以「连续 10 件未出 SSR ⇒ 第 11 件必出 SSR」，
+ *   且保底计数**逐件**累加 / 归零（一次掉 3 件就可能把计数推满 3）。
+ *
+ * ⚠ **保底计数必须随存档落盘**（`save.relicPity`）：
+ *   否则刷新页面就重置 ⇒ 保底形同虚设，玩家可以无限「刷新重抽」（铁律 #24）。
+ *
+ * @param pool 该副本的候选遗物池（遗物定义 id）
+ * @param pity 连续未出 SSR 的件数（跨场次累计，随存档落盘）
+ * @param maxCount 本次最多产出几件（挂机通道用它按**每日额度**裁剪；
+ *                手动挑战传默认上限＝不限）
+ * @returns 掉落的遗物定义 id 列表 + 更新后的保底计数
+ */
+export function rollRelicDrop(
+  pool: readonly string[],
+  difficulty: DungeonDifficultyId,
+  rng: Rng,
+  pity: number,
+  maxCount: number = Number.POSITIVE_INFINITY,
+): { defIds: string[]; pity: number } {
+  if (pool.length === 0) return { defIds: [], pity }
+  const range = RELIC_DROP.COUNT[difficulty]
+  const limit = Math.max(0, Math.floor(maxCount))
+  const count = Math.min(rng.int(range.min, range.max), limit)
+  if (count <= 0) return { defIds: [], pity }
+  const defIds: string[] = []
+  let curPity = pity
+
+  for (let i = 0; i < count; i++) {
+    // ⚠ 保底优先：连续未出 SSR 达阈值 ⇒ 这件必出 SSR
+    const forced = curPity >= RELIC_DROP.PITY_SSR
+    const rarity = forced ? 'SSR' : rollRarity(difficulty, rng)
+    const candidates = pool.filter((id) => RELIC_DEFS.get(id)?.rarity === rarity)
+    const defId =
+      candidates.length > 0 ? rng.pick(candidates) : rng.pick([...pool])
+    defIds.push(defId)
+    // ⚠ 按**实际落地的稀有度**更新保底（兜底分支可能落到别的稀有度）
+    const actual = RELIC_DEFS.get(defId)?.rarity ?? rarity
+    curPity = actual === 'SSR' ? 0 : curPity + 1
+  }
+
+  return { defIds, pity: curPity }
+}
+
+// ─────────────────────── 每日额度（防通胀闸门） ───────────────────────
+
+/**
+ * 遗物产出的**日期键**（由注入的时钟推导，core 不读 `Date.now()`，铁律 #1）。
+ *
+ * ⚠ 用 **UTC**：客户端与服务端时区可能不同，UTC 保证「哪一天」的判定
+ *   在任何设备上一致（额度是服务端权威的，但展示要与判定同源）。
+ */
+export function relicDailyKey(now: number): string {
+  const d = new Date(now)
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/**
+ * 遗物**今日剩余额度**（件）。
+ *
+ * ⚠ 这是**防通胀闸门**：遗物是零成本产出，而仓库溢出时会被自动分解
+ *   并折算成银两 ⇒ 没有额度，挂机遗物通道就是印钞机。
+ *
+ * ⚠ 跨日自动重置（`date` 与今天不一致 ⇒ 当日计数按 0 算）。
+ */
+export function relicQuotaLeft(save: SaveData, now: number): number {
+  const key = relicDailyKey(now)
+  const daily = save.relicDaily
+  const used = daily && daily.date === key ? daily.count : 0
+  return Math.max(0, RELIC_DROP.DAILY_CAP - used)
+}
+
+/** 记一次遗物产出（跨日自动重置计数） */
+export function recordRelicOutput(save: SaveData, now: number, count: number): void {
+  if (count <= 0) return
+  const key = relicDailyKey(now)
+  const daily = save.relicDaily
+  if (!daily || daily.date !== key) {
+    save.relicDaily = { date: key, count }
+    return
+  }
+  daily.count += count
+}
+
 
 // ─────────────────────────── uid ───────────────────────────
 

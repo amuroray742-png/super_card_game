@@ -1,10 +1,10 @@
 /**
- * 挂机账本的**权威性**（挂机改版 v11：三通道并行）。
+ * 挂机账本的**权威性**（挂机改版 v11：多通道并行；存档 v12：四条通道）。
  *
  * ## 这里守的是什么
  *
  * 旧版是「三个去向共用一份时间账本」，一旦有一条线出问题，
- * 三条线一起停摆；新版是**三条通道各自一份账本**，
+ * 三条线一起停摆；新版是**四条通道各自一份账本**（存档 v12 加了遗物通道），
  * 于是「哪条线在发、发了多少、会不会重复发」都必须**可核对**。
  *
  * 守四条：
@@ -183,8 +183,8 @@ describe('挂机账本：关闭与重开', () => {
     expect(skill?.rolls).toBe(10)
   })
 
-  it('关闭通道不影响另外两条通道的账本', () => {
-    // ⚠ 三条通道**各自独立**：关掉技能通道，主线照常发。
+  it('关闭通道不影响另外三条通道的账本', () => {
+    // ⚠ 四条通道**各自独立**：关掉技能通道，主线照常发。
     const save = makeSave()
     const ctx = makeCtx(NOW)
     applyAction(save, { type: 'idle.setChannel', channel: 'skill', dungeonStageId: SKILL_EARTH_EASY }, ctx)
@@ -257,10 +257,10 @@ describe('挂机账本：分批领取 == 一次领取', () => {
 
 // ─────────────────────────── 通道随机序列独立（v11） ───────────────────────────
 
-describe('挂机账本：三条通道各有各的随机序列', () => {
+describe('挂机账本：四条通道各有各的随机序列', () => {
   it('开不开另一条通道，不改变本通道的掉落', () => {
     // ⚠ **挂机改版 v11（设计稿 §3.3 / §3.6）**：每条通道用**自己的**持久化
-    //   随机序列。若三条共用一条全局序列，开 / 关一条通道就会改变另外两条的
+    //   随机序列。若几条共用一条全局序列，开 / 关一条通道就会改变另外几条的
     //   掉落 —— 那正是「产出互不干扰」被破坏的样子。
     //
     //   这里比的是**技能通道**：主线在遍历顺序里排第一（`IDLE_CHANNEL_KINDS`），
@@ -283,7 +283,7 @@ describe('挂机账本：三条通道各有各的随机序列', () => {
     expect(skillA.rolls).toBe(skillB.rolls)
     expect(skillA.rewards).toEqual(skillB.rewards)
 
-    // 三条通道的计数器**各自**前进（不是共用一个）
+    // 四条通道的计数器**各自**前进（不是共用一个）
     expect(withMain.rng.channels.main.counter).toBeGreaterThan(0)
     expect(withMain.rng.channels.skill.counter).toBeGreaterThan(0)
     expect(withMain.rng.channels.skill.counter).not.toBe(withMain.rng.channels.main.counter)

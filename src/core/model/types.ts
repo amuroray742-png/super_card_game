@@ -586,19 +586,24 @@ export interface PoolState {
 }
 
 /**
- * **挂机通道种类**（挂机改版 v11）。
+ * **挂机通道种类**（挂机改版 v11；存档 v12 增加遗物通道）。
  *
- * ⚠ 三条通道**各自独立**计量同一段墙钟时间、各自记账，产出互不干扰——
- *   玩家可以同时挂三条（主线 / 技能副本 / 强化副本）。
+ * ⚠ 四条通道**各自独立**计量同一段墙钟时间、各自记账，产出互不干扰——
+ *   玩家可以同时挂四条（主线 / 技能副本 / 强化副本 / **遗物副本**）。
  */
-export type IdleChannelKind = 'main' | 'skill' | 'enhance'
+export type IdleChannelKind = 'main' | 'skill' | 'enhance' | 'relic'
 
 /**
- * 三条通道的**固定顺序**（遍历顺序 = 界面展示顺序 = 锚点表顺序）。
+ * 四条通道的**固定顺序**（遍历顺序 = 界面展示顺序 = 锚点表顺序）。
  *
  * ⚠ 唯一出处：系统逻辑一律遍历这张表，禁止在别处另写一份通道列表。
  */
-export const IDLE_CHANNEL_KINDS: readonly IdleChannelKind[] = ['main', 'skill', 'enhance'] as const
+export const IDLE_CHANNEL_KINDS: readonly IdleChannelKind[] = [
+  'main',
+  'skill',
+  'enhance',
+  'relic',
+] as const
 
 /**
  * 单条通道的随机序列状态（挂机改版 v11）。
@@ -612,10 +617,10 @@ export interface ChannelRngState {
 }
 
 /**
- * **单条通道的目标**（挂机改版 v11）。
+ * **单条通道的目标**（挂机改版 v11；存档 v12 增加遗物通道）。
  *
  * - 主线：`stageId = null` = **跟随最新通关的关卡**（`campaign.clearedStage`）。
- * - 技能 / 强化：目标 = **已通关**的副本关卡 id（`dgn_<变体>_<难度>`）。
+ * - 技能 / 强化 / 遗物：目标 = **已通关**的副本关卡 id（`dgn_<变体>_<难度>`）。
  *
  * ⚠ 目标必须**已通关**：挂机只挂已通关内容，永不卡关（设计 §3.1）。
  */
@@ -623,12 +628,13 @@ export type IdleChannelTarget =
   | { kind: 'main'; stageId: number | null }
   | { kind: 'skill'; dungeonStageId: string }
   | { kind: 'enhance'; dungeonStageId: string }
+  | { kind: 'relic'; dungeonStageId: string }
 
 /**
  * **单条通道的独立时间账本**（挂机改版 v11）。
  *
  * ⚠ 每条通道**各有一份** `measuredAt` / `effectiveMs` / `offlineElapsedMs`——
- *   三条通道同时开着时，各自在同一段墙钟时间上独立计量、分别产出。
+ *   四条通道同时开着时，各自在同一段墙钟时间上独立计量、分别产出。
  */
 export interface IdleChannelState {
   /** 目标（`null` = 通道关闭，不计量） */
@@ -661,9 +667,10 @@ export interface SaveData {
    * 玩家可以「刷新重抽」，且所有玩家的抽卡序列完全相同，
    * 概率公示宣称的 SSR 0.60% 在实际游戏里会退化成固定脚本（铁律 #24）。
    *
-   * ⚠ **挂机改版 v11**：`channels` 是**三条挂机通道各自的随机序列**
-   *   （主线 / 技能副本 / 强化副本）。三条序列互不相同、互不干扰：
-   *   开一条通道不会改变另外两条的掉落，「分批领取 == 一次领取」在
+   * ⚠ **挂机改版 v11**：`channels` 是**四条挂机通道各自的随机序列**
+   *   （主线 / 技能副本 / 强化副本 / **遗物副本**，后者是存档 v12 加的）。
+   *   四条序列互不相同、互不干扰：
+   *   开一条通道不会改变另外三条的掉落，「分批领取 == 一次领取」在
    *   **每条通道各自**成立（设计稿 §3.3 / §3.6）。
    *
    * ⚠ 整个 `rng` 块属于**私有随机状态**：公开快照 / 缓存 / 导出串一律省略
@@ -672,7 +679,7 @@ export interface SaveData {
   rng: {
     seed: number
     counter: number
-    /** 三条挂机通道各自的随机序列（私有，随存档落盘） */
+    /** 四条挂机通道各自的随机序列（私有，随存档落盘） */
     channels: Record<IdleChannelKind, ChannelRngState>
   }
   player: {
@@ -752,28 +759,49 @@ export interface SaveData {
   }
   idle: {
     /**
-     * **三条挂机通道，各自独立账本**（挂机改版 v11）。
+     * **四条挂机通道，各自独立账本**（挂机改版 v11；存档 v12 加遗物通道）。
      *
-     * ⚠ 主线 / 技能副本 / 强化副本**各自计量**同一段墙钟时间、各自记账，
-     *   产出互不干扰——玩家可以同时挂三条（设计 §3.1）。
+     * ⚠ 主线 / 技能副本 / 强化副本 / 遗物副本**各自计量**同一段墙钟时间、各自记账，
+     *   产出互不干扰——玩家可以同时挂四条（设计 §3.1）。
      *
-     * ⚠ 三条通道**共用同一份在线租约** `activeUntil`：
+     * ⚠ 四条通道**共用同一份在线租约** `activeUntil`：
      *   租约是「玩家此刻在线」的证明，与挂哪条通道无关。
      */
     channels: {
       main: IdleChannelState
       skill: IdleChannelState
       enhance: IdleChannelState
+      relic: IdleChannelState
     }
-    /** 在线租约（服务端向未来续约，三通道共用同一份时间轴） */
+    /** 在线租约（服务端向未来续约，四通道共用同一份时间轴） */
     activeUntil: number
-    /** 已消费的有效时长总和（秒），三通道分别累计后相加 */
+    /** 已消费的有效时长总和（秒），四通道分别累计后相加 */
     totalIdleSeconds: number
   }
   /**
+   * **遗物副本的保底计数**（存档 v12）。
+   *
+   * ⚠ key = 副本关卡 id，值 = **连续未出 SSR 的次数**。
+   *   达到 `RELIC_DROP.PITY_SSR` 时，下一次胜利必出 SSR。
+   *
+   * ⚠ 必须随存档落盘：否则刷新页面就重置 ⇒ 保底形同虚设，
+   *   玩家可以无限「刷新重抽」（铁律 #24 的同款坑）。
+   */
+  relicPity: Record<string, number>
+  /**
+   * **遗物每日产出计数**（存档 v12 · 防通胀闸门）。
+   *
+   * ⚠ 遗物是**零成本**产出，而仓库溢出时会被自动分解并折算成银两
+   *   ⇒ 没有每日上限，挂机遗物通道就是印钞机。
+   *
+   * ⚠ `date` 用 **UTC** 日期键（`relicDailyKey`）：客户端与服务端时区可能不同，
+   *   「哪一天」的判定必须处处一致。
+   */
+  relicDaily: { date: string; count: number }
+  /**
    * **副本进度**（与主线**分开记账**）。
    *
-   * ⚠ 副本是**独立关卡**（挂机改版 v11）：`(变体 × 难度) = 1 关`，共 24 关，
+   * ⚠ 副本是**独立关卡**（挂机改版 v11）：`(变体 × 难度) = 1 关`，共 42 关，
    *   打赢一次即通关。副本**不写** `campaign`（`clearedStage` / `stageStars` /
    *   `creditedStages` 全不动）。
    */

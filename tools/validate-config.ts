@@ -36,6 +36,7 @@ import {
   IDLE,
   LEVEL,
   RELIC,
+  RELIC_DROP,
   REALMS,
   REBIRTH,
   SKILL,
@@ -64,9 +65,11 @@ import {
   DUNGEON_VARIANT_ORDER,
   dungeonStageId,
   dungeonStagesOfVariant,
+  relicPoolOf,
 } from '../src/core/config/dungeons.ts'
 import { computeOfflineEfficiency } from '../src/core/systems/idle.ts'
 import type { Rarity } from '../src/core/model/types.ts'
+import { relicIdsBySet } from '../src/core/config/relics.ts'
 
 // 加载注册型配置
 import '../src/core/config/relics.ts'
@@ -766,8 +769,35 @@ for (const id of ITEM_IDS) {
 }
 
 // ④ 副本变体：产出道具必须已登记 + 产量必须已登记 + 数量区间合法
+//
+// ⚠ **实施修正（遗物副本 v12）**：遗物副本的 `itemId` 是 `null`
+//   ——遗物是**实例**（走 `relicPool` + `rewards.relics`），不是堆叠道具。
+//   ⇒ 这里按 `kind` 分流：材料副本查道具表，遗物副本查套装与候选池。
+//   ⚠ 历史教训：把遗物当堆叠物塞进 `DUNGEON_DROPS` ⇒ `scaleRewards()` 按比例
+//   裁数组时会造出「不存在的遗物」，且入库口径与提示口径分叉（铁律 #26）。
 const dungeonItemIds = new Set<string>()
 for (const variant of DUNGEON_VARIANTS) {
+  if (variant.kind === 'relic') {
+    // ① 遗物副本**不得**有堆叠产出（遗物是实例）
+    if (variant.itemId !== null) {
+      err('B/REF', `遗物副本 ${variant.id} 的产出道具必须是 null（遗物是实例，不是堆叠物）`)
+    }
+    // ② 必须**恰好**挂 2 个套装（6 个副本 × 2 套 = 12 套，一个不多一个不少）
+    const setIds = variant.relicSetIds ?? []
+    if (setIds.length !== 2) {
+      err('C/NUM', `遗物副本 ${variant.id} 必须挂恰好 2 个套装（当前 ${setIds.length} 个：${setIds.join(', ') || '无'}）`)
+    }
+    for (const setId of setIds) {
+      if (!RELIC_SETS.has(setId)) {
+        err('B/REF', `遗物副本 ${variant.id} 引用了未登记的套装 ${setId}`)
+      }
+    }
+    continue
+  }
+  if (!variant.itemId) {
+    err('B/REF', `副本 ${variant.id} 没有登记产出道具`)
+    continue
+  }
   if (!ITEM_ID_SET.has(variant.itemId)) {
     err('B/REF', `副本 ${variant.id} 的产出道具 ${variant.itemId} 未在 ITEM_DEFS 登记`)
   }
@@ -814,9 +844,9 @@ for (const [key, table] of Object.entries(DROP_TABLES)) {
   }
 }
 
-// ⑧ 副本独立关卡（挂机改版 v11）：24 关齐全、敌人存在、段间单调、产量登记
+// ⑧ 副本独立关卡（挂机改版 v11 + 遗物副本 v12）：42 关齐全、敌人存在、段间单调、产量登记
 //
-// ⚠ **为什么要有这段**：副本从「取材主线波次」变成 **24 个独立关卡**之后，
+// ⚠ **为什么要有这段**：副本从「取材主线波次」变成 **42 个独立关卡**之后，
 //   配置面多了一整张表（`DUNGEON_STAGES`）与三张锚点表。
 //   这张表一旦和锚点表对不上（少一关、敌人 id 写错、难度段不递增），
 //   玩家看到的就会是「关卡列表少一档」「挑战报关卡不存在」「普通比简易还简单」。
@@ -850,14 +880,30 @@ for (const [key, table] of Object.entries(DROP_TABLES)) {
       }
     }
     // ③ 产量必须已登记（`DUNGEON_DROPS` × 难度倍率）
-    if (!dungeonItemIds.has(stage.drop.itemId)) {
-      err('B/REF', `副本关卡 ${stage.id} 的产出道具 ${stage.drop.itemId} 未登记`)
-    }
-    if (stage.drop.min > stage.drop.max) {
-      err('C/NUM', `副本关卡 ${stage.id} 的产量区间反了：${stage.drop.min} > ${stage.drop.max}`)
-    }
-    if (stage.drop.min < 1) {
-      err('C/NUM', `副本关卡 ${stage.id} 的产量下界为 ${stage.drop.min}，应 ≥ 1`)
+    //
+    // ⚠ **遗物副本 v12**：遗物副本的 `drop` 是 `null`（遗物是实例），
+    //   它的产出形状由 `relicPool` 决定 ⇒ 这里分流校验，别把 null 当成漏配。
+    const variant = DUNGEON_VARIANTS.find((v) => v.id === stage.variantId)
+    if (variant?.kind === 'relic') {
+      if (stage.drop !== null) {
+        err('C/NUM', `遗物副本关卡 ${stage.id} 的 drop 必须为 null（遗物是实例，不是堆叠物）`)
+      }
+      const pool = stage.relicPool
+      if (!pool || pool.length === 0) {
+        err('B/REF', `遗物副本关卡 ${stage.id} 没有候选遗物池（relicPool 为空）`)
+      }
+    } else if (!stage.drop) {
+      err('B/REF', `副本关卡 ${stage.id} 没有登记产量（drop 为 null，但它是材料副本）`)
+    } else {
+      if (!dungeonItemIds.has(stage.drop.itemId)) {
+        err('B/REF', `副本关卡 ${stage.id} 的产出道具 ${stage.drop.itemId} 未登记`)
+      }
+      if (stage.drop.min > stage.drop.max) {
+        err('C/NUM', `副本关卡 ${stage.id} 的产量区间反了：${stage.drop.min} > ${stage.drop.max}`)
+      }
+      if (stage.drop.min < 1) {
+        err('C/NUM', `副本关卡 ${stage.id} 的产量下界为 ${stage.drop.min}，应 ≥ 1`)
+      }
     }
     // ④ 缩放与门槛必须为正（锚点表错位会算出 0 或负数）
     if (!(stage.enemyScale > 0)) {
@@ -869,6 +915,10 @@ for (const [key, table] of Object.entries(DROP_TABLES)) {
   }
 
   // ⑤ 锚点表长度必须与关卡表一致（逐位对齐）
+  //
+  // ⚠ **遗物副本 v12**：副本从 24 关变成 **42 关**（14 变体 × 3 难度，其中 6 个遗物副本）。
+  //   三张锚点表必须**逐位**与关卡表等长 —— 少一位，后面所有关卡的缩放 / 门槛 / 设计等级
+  //   全部错位（而且 `npm run balance` 看不出来：它只比战力数字）。
   if (DUNGEON.SCALE_ANCHORS.length !== DUNGEON_STAGES.length) {
     err('C/NUM', `DUNGEON.SCALE_ANCHORS 长度 ${DUNGEON.SCALE_ANCHORS.length} ≠ 副本关卡数 ${DUNGEON_STAGES.length}`)
   }
@@ -906,7 +956,170 @@ for (const [key, table] of Object.entries(DROP_TABLES)) {
   }
 }
 
-// ⑨ 签到奖励里的道具只能是经验书（副本材料不得进签到）
+// ⑨ 遗物副本（存档 v12）：遗物是**唯一**来源 ⇒ 这段是硬红线
+//
+// ⚠ **为什么单独一段**：遗物副本是「遗物唯一来源」，任何一处配错都不是「少几个图标」，
+//   而是**整条养成链断掉**：
+//   - 候选池少一件 ⇒ 玩家永远凑不齐 5 件套 ⇒ 套装加成（2/4/6 件）永远差一点；
+//   - 套装覆盖重复 / 遗漏 ⇒ 有套装永远拿不到，或一个套装被两个副本抢；
+//   - 每日额度为 0 ⇒ 挂机遗物通道恒产出 0（遗物零成本 ⇒ 没有额度就是印钞机，
+//     但额度为 0 就直接变成「拿不到」）；
+//   - 保底为 0 ⇒ SSR 期望场次失控（5% 概率 ⇒ 集齐一套要 ~100 场）；
+//   - 第一个副本解锁线 > 1 ⇒ **新号拿不到首件遗物** ⇒ 强化副本（要求持有 Lv1 遗物）
+//     永远锁着 ⇒ 强化链整体锁死（2026-11-24 那次故障的成因）。
+//   这些都**不会**在 `npm run balance` 里暴露（它只比战力数字）⇒ 只能静态校验。
+{
+  const relicVariants = DUNGEON_VARIANTS.filter((v) => v.kind === 'relic')
+
+  // ① 遗物副本的**候选池**必须恰好等于它那 2 个套装的全部遗物 id
+  //    （每套 5 件 ⇒ 2 套 = 10 件；多一件少一件都要报错）
+  for (const variant of relicVariants) {
+    const expected = (variant.relicSetIds ?? []).flatMap((setId) => relicIdsBySet(setId))
+    const pool = relicPoolOf(variant)
+    if (!pool) {
+      err('B/REF', `遗物副本 ${variant.id} 没有候选遗物池`)
+      continue
+    }
+    if (pool.length !== expected.length) {
+      err(
+        'C/NUM',
+        `遗物副本 ${variant.id} 的候选池 ${pool.length} 件 ≠ 它那 2 个套装的遗物总数 ${expected.length} 件`
+        + `（套装：${(variant.relicSetIds ?? []).join(', ')}）`,
+      )
+    }
+    const missing = expected.filter((id) => !pool.includes(id))
+    const extra = pool.filter((id) => !expected.includes(id))
+    if (missing.length > 0) {
+      err('B/REF', `遗物副本 ${variant.id} 的候选池缺了：${missing.join(', ')}`)
+    }
+    if (extra.length > 0) {
+      err('B/REF', `遗物副本 ${variant.id} 的候选池多了：${extra.join(', ')}（不属于它那 2 个套装）`)
+    }
+    // 每个关卡的候选池必须与变体一致（三档难度共用同一个池）
+    for (const stage of dungeonStagesOfVariant(variant.id)) {
+      const stagePool = stage.relicPool ?? []
+      if (stagePool.length !== pool.length || stagePool.some((id) => !pool.includes(id))) {
+        err('C/NUM', `遗物副本关卡 ${stage.id} 的候选池与变体 ${variant.id} 不一致`)
+      }
+    }
+  }
+
+  // ② 12 个套装必须被 6 个遗物副本**恰好覆盖一次**（不重不漏）
+  const covered = new Map<string, string[]>()
+  for (const variant of relicVariants) {
+    for (const setId of variant.relicSetIds ?? []) {
+      covered.set(setId, [...(covered.get(setId) ?? []), variant.id])
+    }
+  }
+  for (const setId of RELIC_SETS.keys()) {
+    const owners = covered.get(setId) ?? []
+    if (owners.length === 0) {
+      err('B/REF', `套装 ${setId} 没有被任何遗物副本覆盖 ⇒ 玩家拿不到这一套`)
+    } else if (owners.length > 1) {
+      err('C/NUM', `套装 ${setId} 被多个遗物副本覆盖：${owners.join(', ')}（必须恰好一次）`)
+    }
+  }
+  for (const [setId, owners] of covered) {
+    if (!RELIC_SETS.has(setId)) {
+      err('B/REF', `遗物副本覆盖了未登记的套装 ${setId}（${owners.join(', ')}）`)
+    }
+  }
+
+  // ③ 每日额度必须为正（防通胀闸门；为 0 ⇒ 挂机遗物通道恒产出 0）
+  if (!(RELIC_DROP.DAILY_CAP > 0)) {
+    err('C/NUM', `RELIC_DROP.DAILY_CAP = ${RELIC_DROP.DAILY_CAP}，必须为正（每日额度是防通胀闸门）`)
+  }
+
+  // ④ 保底必须为正（连续未出 SSR 达阈值 ⇒ 下一件必出 SSR）
+  if (!(RELIC_DROP.PITY_SSR > 0)) {
+    err('C/NUM', `RELIC_DROP.PITY_SSR = ${RELIC_DROP.PITY_SSR}，必须为正（没有保底，集齐一套要上百场）`)
+  }
+
+  // ⑤ 三档难度的稀有度权重：键齐全 + 权重和为正
+  for (const difficulty of DUNGEON_DIFFICULTIES) {
+    const rates = RELIC_DROP.RATES[difficulty.id]
+    if (!rates) {
+      err('B/REF', `RELIC_DROP.RATES 缺少难度档 ${difficulty.id}`)
+      continue
+    }
+    let sum = 0
+    for (const rarity of ['N', 'R', 'SR', 'SSR'] as const) {
+      const weight = rates[rarity]
+      if (weight === undefined) {
+        err('B/REF', `RELIC_DROP.RATES.${difficulty.id} 缺少稀有度 ${rarity}`)
+        continue
+      }
+      if (weight < 0) {
+        err('C/NUM', `RELIC_DROP.RATES.${difficulty.id}.${rarity} = ${weight}，权重不能为负`)
+      }
+      sum += weight
+    }
+    if (!(sum > 0)) {
+      err('C/NUM', `RELIC_DROP.RATES.${difficulty.id} 的权重和 = ${sum}，必须为正`)
+    }
+    const count = RELIC_DROP.COUNT[difficulty.id]
+    if (!count || count.min < 1 || count.max < count.min) {
+      err('C/NUM', `RELIC_DROP.COUNT.${difficulty.id} 非法：${JSON.stringify(count ?? null)}（下界 ≥ 1 且上界 ≥ 下界）`)
+    }
+  }
+
+  // ⑥ **解锁线必须覆盖全部遗物副本**，且**第一个副本必须极早可达**（新号可达性）
+  //
+  // ⚠ 这是硬卡：强化副本要求「持有 Lv1 遗物」⇒ 遗物副本若也要求持有遗物，
+  //   首件遗物就永远拿不到 ⇒ 整条强化链锁死。
+  for (const variant of relicVariants) {
+    const need = RELIC_DROP.UNLOCK_STAGE[variant.id]
+    if (need === undefined) {
+      err('B/REF', `RELIC_DROP.UNLOCK_STAGE 没有登记遗物副本 ${variant.id} 的解锁线`)
+      continue
+    }
+    if (need < 1 || need > STAGES.length) {
+      err('C/NUM', `遗物副本 ${variant.id} 的解锁线 ${need} 超出主线关卡范围 1~${STAGES.length}`)
+    }
+  }
+  // 「第一个副本」= 变体顺序里的第一个遗物副本（顺序口径 = `DUNGEON_VARIANT_ORDER`）
+  const firstRelicVariantId = DUNGEON_VARIANT_ORDER.find((id) =>
+    DUNGEON_VARIANTS.some((v) => v.id === id && v.kind === 'relic'),
+  )
+  const firstUnlock = firstRelicVariantId
+    ? RELIC_DROP.UNLOCK_STAGE[firstRelicVariantId]
+    : undefined
+  if (firstRelicVariantId && (firstUnlock === undefined || firstUnlock > 1)) {
+    err(
+      'E/ECONOMY',
+      `第一个遗物副本 ${firstRelicVariantId} 的解锁线 = ${firstUnlock ?? '未登记'}，必须 ≤ 1`
+      + '（新号拿不到首件遗物 ⇒ 强化副本一直锁着 ⇒ 整条强化链锁死）',
+    )
+  }
+
+  // ⑦ `DUNGEON_DROPS` **不得**包含遗物（遗物是实例，不能按堆叠物缩放 / 入库）
+  for (const id of Object.keys(DUNGEON_DROPS)) {
+    if (RELIC_DEFS.has(id)) {
+      err('E/ECONOMY', `DUNGEON_DROPS 登记了遗物 ${id}：遗物是实例，只能走遗物副本的候选池`)
+    }
+  }
+
+  // ⑧ 遗物变体必须在 `DUNGEON_VARIANT_ORDER` 里，且顺序表长度 = 变体表长度
+  //    （锚点表按这个顺序逐位对齐 ⇒ 少一个就整体错位）
+  if (DUNGEON_VARIANT_ORDER.length !== DUNGEON_VARIANTS.length) {
+    err(
+      'C/NUM',
+      `DUNGEON_VARIANT_ORDER 长度 ${DUNGEON_VARIANT_ORDER.length} ≠ DUNGEON_VARIANTS 长度 ${DUNGEON_VARIANTS.length}`,
+    )
+  }
+  for (const variant of relicVariants) {
+    if (!DUNGEON_VARIANT_ORDER.includes(variant.id)) {
+      err('B/REF', `遗物副本变体 ${variant.id} 不在 DUNGEON_VARIANT_ORDER 里（锚点表会整体错位）`)
+    }
+  }
+  for (const variantId of DUNGEON_VARIANT_ORDER) {
+    if (!DUNGEON_VARIANTS.some((v) => v.id === variantId)) {
+      err('B/REF', `DUNGEON_VARIANT_ORDER 里的 ${variantId} 在 DUNGEON_VARIANTS 中不存在`)
+    }
+  }
+}
+
+// ⑩ 签到奖励里的道具只能是经验书（副本材料不得进签到）
 for (const [index, reward] of DAILY.SIGN_IN_REWARDS.entries()) {
   let material = 0
   for (const [id, count] of Object.entries(reward.items ?? {})) {
