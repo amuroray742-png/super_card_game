@@ -16,12 +16,15 @@ import {
 /**
  * 材料副本端到端用例（**挂机改版 v11**）。
  *
- * 副本现在是 **24 个独立关卡**（`(变体 × 难度) = 1 关`），
+ * 副本现在是 **42 个独立关卡**（`(变体 × 难度) = 1 关`）：
+ * 材料副本 14 变体 × 3 难度 = 24 关（技能 15 + 强化 9），
+ * 遗物副本 6 变体 × 3 难度 = 18 关。
  * 打通一次即通关，通关记录写 `save.dungeons.cleared`（与主线**分开记账**）。
  *
  * ## 守的语义
  *
- * 1. **24 关都在页面上**，按难度段分组（简易 / 普通 / 困难）；
+ * 1. **42 关都在页面上**，按难度段分组（简易 / 普通 / 困难），
+ *    且遗物副本 18 关独立成组（`dungeon-kind-relic` tab）；
  * 2. **通关记录**：`dungeon.challenge` 胜利 → `dungeons.cleared[id] === true`，
  *    回包 `firstClear === true`，**奖励只有材料**（不发银两 / 经验书 / 遗物）；
  * 3. **战败不发奖**：不写通关记录、不发任何东西；
@@ -72,16 +75,18 @@ async function openDungeon(page: Page, kind: 'skill' | 'enhance'): Promise<void>
   await expect(page.getByTestId(`dungeon-kind-${kind}`)).toBeVisible()
 }
 
-test.describe('副本页（24 个独立关卡）', () => {
-  test('技能 15 关 + 强化 9 关 = 24 关，按难度段分组', async ({ page }) => {
+test.describe('副本页（42 个独立关卡）', () => {
+  test('技能 15 关 + 强化 9 关 + 遗物 18 关 = 42 关，按难度段分组', async ({ page }) => {
     await importFixture(page, 'dgpage', (save: SaveData) => {
       giveTeam(save, STRONG_TEAM, 60)
     })
 
-    // 配置侧：24 关是**唯一出处**（core 的关卡表）
-    expect(DUNGEON_STAGES).toHaveLength(24)
+    // 配置侧：42 关是**唯一出处**（core 的关卡表）
+    expect(DUNGEON_STAGES).toHaveLength(42)
     expect(dungeonStagesOf('skill')).toHaveLength(15)
     expect(dungeonStagesOf('enhance')).toHaveLength(9)
+    // ⚠ 遗物副本（存档 v12）：6 个副本 × 3 难度 = 18 关
+    expect(dungeonStagesOf('relic')).toHaveLength(18)
 
     // ── 技能副本 tab：15 关，3 个难度段各 5 关 ─────────────
     await openDungeon(page, 'skill')
@@ -130,9 +135,11 @@ test.describe('副本页（24 个独立关卡）', () => {
     await expect(row).toContainText('每胜')
     // 产量口径取 core，不写死数字
     const stage = DUNGEON_STAGES.find((s) => s.id === FIRE_EASY)!
-    const amount = stage.drop.min === stage.drop.max
-      ? String(stage.drop.min)
-      : `${stage.drop.min}~${stage.drop.max}`
+    // ⚠ `drop` 现在**可空**（遗物副本只产遗物实例 ⇒ 没有堆叠材料）
+    expect(stage.drop, '技能副本必须有堆叠材料产出').not.toBeNull()
+    const amount = stage.drop!.min === stage.drop!.max
+      ? String(stage.drop!.min)
+      : `${stage.drop!.min}~${stage.drop!.max}`
     await expect(row).toContainText(`每胜 ${amount}`)
     // 未通关
     await expect(row).toContainText('未通关')
@@ -245,7 +252,7 @@ test.describe('副本挑战与通关记录', () => {
   })
 })
 
-test.describe('挂机通道（三通道并行）', () => {
+test.describe('挂机通道（多通道并行）', () => {
   test('已通关的副本关卡可以设为对应通道，通道目标写对', async ({ page }) => {
     const { accountId } = await importFixture(page, 'dgchan', (save: SaveData) => {
       giveTeam(save, STRONG_TEAM, 60)
@@ -288,12 +295,17 @@ test.describe('挂机通道（三通道并行）', () => {
   test('强化副本走自己的通道，两条通道互不干扰', async ({ page }) => {
     const { accountId, token } = await importFixture(page, 'dgenh', (save: SaveData) => {
       giveTeam(save, STRONG_TEAM, 60)
+      // ⚠ 遗物副本的解锁线是「主线通关关卡」⇒ 前置必须已通关主线
+      save.campaign.clearedStage = 5
     })
 
     // 强化副本 · 初阶 · 简易：需要「持有任意遗物」才解锁
-    // ⚠ 新档没有遗物 → 这里用**遗物祈愿**（遗物的独立获取入口）拿一件
-    const acquired = await postAction(token, 'dg-enh-acquire', { type: 'relic.acquire' })
-    expect(acquired.ok, '遗物祈愿应当成功').toBe(true)
+    // ⚠ 新档没有遗物 → 这里打**遗物副本**拿一件（遗物的唯一来源，存档 v12）
+    const acquired = await postAction(token, 'dg-enh-acquire', {
+      type: 'dungeon.challenge',
+      stageId: dungeonStageId('relicZhanTan', 'easy'),
+    })
+    expect(acquired.ok, '遗物副本挑战应当成功').toBe(true)
 
     await openDungeon(page, 'enhance')
     await waitForAction(page, 'dungeon.challenge', {

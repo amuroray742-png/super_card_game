@@ -149,7 +149,8 @@ test.describe('背包 · 5 分类', () => {
     const fireItem = ITEM_BY_ELEMENT.火
     await page.getByTestId(`backpack-go-dungeon-${fireItem}`).click()
     await expect.poll(() => urlText(page)).toContain('/#/dungeon?kind=skill&element=火')
-    // ⚠ **挂机改版 v11**：副本页改成「24 个独立关卡」，按难度段 × 变体平铺，
+    // ⚠ **挂机改版 v11**：副本页改成「独立关卡」（存档 v12 共 42 关），
+    //   按难度段 × 变体平铺，
     //   变体不再是一个独立分组 ⇒ 断言落在**关卡行**上（关卡 id 唯一出处是 core）。
     await expect(page.getByTestId(`dungeon-stage-${dungeonStageId('skillFire', 'easy')}`)).toBeVisible()
     // 深链命中的变体要高亮出来（点「去副本」要真的看到对应关卡）

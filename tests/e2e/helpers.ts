@@ -23,7 +23,7 @@ import { ACCOUNT_STORAGE_KEYS, accountSlotKey } from '../../src/core/config/acco
  * ## 挂机改版 v11 的口径变更
  *
  * - 挂机**不跑战斗**，按掉落表**逐次掷奖**；一次掷奖 = `IDLE.SECONDS_PER_ROLL` 秒。
- * - 三条通道（主线 / 技能副本 / 强化副本）**各自独立**计量同一段墙钟时间。
+ * - 四条通道（主线 / 技能副本 / 强化副本 / **遗物副本**）**各自独立**计量同一段墙钟时间。
  * - `idle.tick` **不带负载**（不再有 `battles`）——领取次数完全由服务端按时间账本决定。
  *   旧实现里的「推征 N 场」按钮已不存在，领取入口是推征页唯一的「全部领取」。
  */
@@ -162,6 +162,28 @@ export async function postAction(
   return (await res.json()) as Record<string, unknown>
 }
 
+/**
+ * 发一个动作，返回**HTTP 状态 + 回包**。
+ *
+ * ⚠ 与 `postAction` 的区别：后者只回回包正文，**协议级失败**（400 / 429）
+ *   的回包里**没有 `ok` 字段**（那是 `{ error: … }` 的形状）⇒
+ *   `res.ok` 是 `undefined` 而不是 `false`。
+ *   断言「这个动作被拒」时必须看**状态码**，否则会把 `undefined` 当成通过。
+ */
+export async function postActionStatus(
+  accessToken: string,
+  actionId: string,
+  action: unknown,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await fetch(`${E2E_API_BASE}/api/action`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ actionId, action }),
+  })
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  return { status: res.status, body }
+}
+
 /** 走界面注册 */
 export async function registerViaUi(
   page: Page,
@@ -214,9 +236,10 @@ export async function cachedSaveOf(page: Page, accountId: number | string): Prom
  * 造一个前置存档（**玩家可用的 `save.import` 动作**）。
  *
  * ⚠ 走服务端动作层，不碰数据库（铁律 #11）。
- * ⚠ **导入只接受 v11**，且导入后服务端会：
- *   - 把三条挂机通道的计量水位重置为导入时刻（有效预算清零）；
+ * ⚠ **导入只接受当前版本（v12）**，且导入后服务端会：
+ *   - 把四条挂机通道的计量水位重置为导入时刻（有效预算清零）；
  *   - **清空副本通关记录**（`dungeons.cleared = {}`）与副本挂机目标；
+ *   - **清空遗物保底计数与每日产出计数**（导入的进度不是可信的凭证）；
  *   - 主线通道恢复「跟随最新通关关卡」。
  *   ⇒ 想测「已通关的副本关卡才能挂机」，**必须真的打赢一次**，导入给不了。
  *
@@ -293,7 +316,7 @@ export async function waitForAction(
 /**
  * 收下「离线挂机结算」弹窗（没有就什么都不做）。
  *
- * ⚠ 标题是「离线挂机结算」（v11 改成**三通道分段**），
+ * ⚠ 标题是「离线挂机结算」（v11 改成**分通道分段**），
  *   旧的「离线推征结算」文案已随挂机改版一起退役。
  */
 export async function dismissOfflineReport(page: Page): Promise<void> {
@@ -313,7 +336,7 @@ export async function dismissOfflineReport(page: Page): Promise<void> {
  * ⚠ 挂机改版 v11 的关键差异：
  *   - 动作是 `idle.tick`，**不带任何负载**——次数由服务端的**时间账本**决定，
  *     客户端**不能**创造时间（旧实现的「推征 N 场」按钮已下线）；
- *   - 结果是**三通道分段**（`channels[]`），不是单个 `rewards`。
+ *   - 结果是**分通道分段**（`channels[]`），不是单个 `rewards`。
  *
  * ⚠ 必须**真实等时间**：一次掷奖 = `IDLE.SECONDS_PER_ROLL` 秒。
  *   在线时长按 `IDLE.ONLINE_MULTIPLIER` 倍率计量，所以实际比 1:1 快，
@@ -377,7 +400,7 @@ export interface CachedSave {
   /** 主线进度（副本**不写**这里 → 分开记账的判据） */
   campaign?: { clearedStage: number; chapterProgress?: number }
   /**
-   * 挂机账本（**三条通道各自独立**，挂机改版 v11）。
+   * 挂机账本（**四条通道各自独立**，挂机改版 v11 / 遗物副本 v12）。
    *
    * ⚠ 主线通道的 `stageId = null` = 「跟随最新通关关卡」。
    */
@@ -386,6 +409,8 @@ export interface CachedSave {
       main: { target: { kind: 'main'; stageId: number | null } | null }
       skill: { target: { kind: 'skill'; dungeonStageId: string } | null }
       enhance: { target: { kind: 'enhance'; dungeonStageId: string } | null }
+      /** 遗物副本通道（存档 v12 · 第 4 条） */
+      relic: { target: { kind: 'relic'; dungeonStageId: string } | null }
     }
     totalIdleSeconds?: number
   }
@@ -442,12 +467,17 @@ export async function relicTotal(page: Page): Promise<number> {
     // 已经在铸造页：先离开再回来，逼页面重新拉一次服务端统计
     await page.goto('/#/formation')
   }
-  await page.goto('/#/forge')
-  await page.waitForLoadState('networkidle')
+  // ⚠ **读服务端回包，不要从 DOM 上刮数字**：
+  //   `relic-total` 一进页面就渲染（先是 0），只等「可见」会读到**还没刷新的 0**
+  //   → 偶发失败（实测踩到过一次「仓库多了一件却断言 0」）。
+  //   这里等仓库请求真的回来，直接取权威 `total`（与 `serverRelics` 同一套路）。
+  const [response] = await Promise.all([
+    page.waitForResponse((r) => new URL(r.url()).pathname === '/api/relics'),
+    page.goto('/#/forge'),
+  ])
+  const body = (await response.json()) as ServerRelicPage
   await page.getByTestId('relic-total').waitFor({ state: 'visible', timeout: 8000 })
-  const text = await page.getByTestId('relic-total').innerText()
-  const digits = text.replace(/,/g, '').match(/\d+/)?.[0] ?? '0'
-  return Number(digits)
+  return body.total
 }
 
 /**

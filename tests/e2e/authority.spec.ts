@@ -28,7 +28,7 @@ import { GACHA, IDLE, START_RESOURCES } from '../../src/core/config/economy.ts'
  *   3. **多设备一致**：两台设备看到同一份进度；
  *   4. **离线只读**：服务端不可达时只能看，不能改。
  *
- * ⚠ **挂机改版 v11** 的口径：挂机是**三条独立通道**（主线 / 技能副本 / 强化副本），
+ * ⚠ **挂机改版 v11** 的口径：挂机是**四条独立通道**（主线 / 技能副本 / 强化副本 / 遗物副本），
  *   结算结果是**按通道分段**的 `channels[]`（不再是单个 `rewards`），
  *   离线结算回执同样按通道分段。
  */
@@ -144,7 +144,7 @@ test.describe('服务端权威', () => {
     await page.goto('/#/expedition')
     await page.waitForLoadState('networkidle')
 
-    // 篡改本地缓存里的**三条通道目标**
+    // 篡改本地缓存里的**挂机通道目标**
     await page.evaluate((key) => {
       const cached = JSON.parse(localStorage.getItem(key)!)
       cached.idle.channels.main.target = { kind: 'main', stageId: 3 }
@@ -350,7 +350,7 @@ test.describe('离线只读', () => {
   })
 })
 
-test.describe('离线结算回执（服务端出具 · 三通道分段）', () => {
+test.describe('离线结算回执（服务端出具 · 分通道分段）', () => {
   // ⚠ 这条用例要**真实离线一段时间**（阈值 `IDLE.OFFLINE_SETTLE_THRESHOLD_SEC` = 60 秒）
   //   → 预算必须放宽到 3 分钟。
   test.setTimeout(240_000)
@@ -378,8 +378,12 @@ test.describe('离线结算回执（服务端出具 · 三通道分段）', () =
     await expect(dialog).toBeVisible({ timeout: 20_000 })
     // 标题与总次数都来自**服务端回执**
     await expect(dialog).toContainText('离线挂机结算')
-    await expect(dialog).toContainText('三条通道各自结算')
-    // 三通道分段：主线这一段带着**目标名**与次数
+    // ⚠ 通道数**按实际结算段数推导**（界面不写死「三条 / 四条」）：
+    //   这里断言「文案里的条数 = 弹窗里实际渲染的通道段数」，
+    //   少写或多数都会被拦下（写死一个数 ⇒ 挂机通道增减后立刻说谎）。
+    const settledChannels = await dialog.locator('.offline-chan').count()
+    await expect(dialog).toContainText(`${settledChannels} 条通道各自结算`)
+    // 分通道分段：主线这一段带着**目标名**与次数
     const main = dialog.locator('.offline-chan').filter({ hasText: '主线' })
     await expect(main).toBeVisible()
     await expect(main).toContainText(getStage(5).name)

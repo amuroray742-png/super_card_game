@@ -50,7 +50,7 @@ test.setTimeout(180_000)
 
 test.beforeEach(async ({ page }) => {
   // 普通动作也会结算已累积的挂机收益，继续操作前先收下弹窗里的结算。
-  // ⚠ 挂机改版 v11：标题改成「离线挂机结算」（三通道分段）。
+  // ⚠ 挂机改版 v11：标题改成「离线挂机结算」（分通道分段）。
   await page.addLocatorHandler(
     page.getByTestId('offline-settlement'),
     async (report) => {
