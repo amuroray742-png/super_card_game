@@ -1,7 +1,11 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
+import type { RouteLocationNormalized } from 'vue-router'
 import { pinia } from './pinia'
 import { useAccountStore } from './stores/account'
 import { useGameStore } from './stores/game'
+import { ACCOUNT_STORAGE_KEYS } from '../core/config/account.ts'
+import { sessionFlags } from '../platform/storage.ts'
+import { planRouteRecovery, ROUTE_FALLBACK } from './utils/route-recovery.ts'
 
 /**
  * 路由表 + 登录守卫。
@@ -93,3 +97,90 @@ router.beforeEach(async (to) => {
 
   return true
 })
+
+/**
+ * 已经兜底过的错误（同一个错误对象只处理一次）。
+ *
+ * ⚠ 同一次失败会被送两遍：`router.onError` 与 `router.isReady()` 的 reject
+ *   拿到的是**同一个 error 对象**。不 dedupe 就会出现「先重载、又立刻回退」连着触发。
+ */
+const handledRouteErrors = new WeakSet<object>()
+
+/**
+ * 动态导入（chunk）拉取失败时的兜底（策略见 `utils/route-recovery.ts`）。
+ *
+ * ⚠ 触发场景：
+ *   - dev：Vite 重启 / HMR 后模块图与已加载的页面不一致；
+ *   - prod：发版后旧 chunk 失效（文件名 hash 变了）、网络抖动。
+ *
+ * ⚠ 恢复顺序是「重载一次（并记住要去哪）→ 回退首页 + 提示 → 只提示」，
+ *   次数由**会话级计数**控制（`ACCOUNT_STORAGE_KEYS.ROUTE_CHUNK_RETRY`）——
+ *   有上限，才不会「重载 → 还是失败 → 再重载」成死循环。
+ *
+ * @param to 失败时**想去**的路由（重载后要送去这里，不能只回原地）
+ * @returns 是否由本次兜底处理（false = 与动态导入无关，原样抛给调用方）
+ */
+export function handleRouteError(error: unknown, to?: RouteLocationNormalized | null): boolean {
+  if (error && typeof error === 'object') {
+    if (handledRouteErrors.has(error)) return false
+    handledRouteErrors.add(error)
+  }
+  const key = ACCOUNT_STORAGE_KEYS.ROUTE_CHUNK_RETRY
+  const targetKey = ACCOUNT_STORAGE_KEYS.ROUTE_CHUNK_TARGET
+  const target = to?.fullPath || ROUTE_FALLBACK
+  const action = planRouteRecovery(error, sessionFlags.count(key), target)
+  if (action.kind === 'ignore') return false
+  sessionFlags.bump(key)
+  if (action.kind === 'reload') {
+    // ⚠ **必须先记住要去哪**：hash 模式下失败的导航连 URL 都不会改，
+    //   不记下来，重载后只会回到失败前那一页 —— 玩家点的目标依然没打开。
+    sessionFlags.set(targetKey, action.target)
+    location.reload()
+    return true
+  }
+  if (action.kind === 'redirect') {
+    sessionFlags.clear(targetKey)
+    useGameStore(pinia).notify(action.message, 'warn')
+    void router
+      .replace(action.to)
+      .catch(() => undefined)
+      .finally(() => sessionFlags.clear(key))
+    return true
+  }
+  useGameStore(pinia).notify(action.message, 'warn')
+  return true
+}
+
+router.onError((error, to) => {
+  handleRouteError(error, to)
+})
+
+/**
+ * 重载之后**把玩家要去的那一页补上**。
+ *
+ * ⚠ 失败的导航被中止时，hash 模式的 URL 不会变 ⇒ 重载后停在原地。
+ *   这里把之前记下的目标路由再导航一次：
+ *   - 这次能拉下来（多半是瞬时故障）→ 玩家要的页面**真的打开了**；
+ *   - 还是拉不下来 → 由 `handleRouteError` 接手（回退首页 + 提示），不会成死循环。
+ *
+ * @returns 是否发起了重试导航
+ */
+export async function retryPendingRoute(): Promise<boolean> {
+  const key = ACCOUNT_STORAGE_KEYS.ROUTE_CHUNK_RETRY
+  const targetKey = ACCOUNT_STORAGE_KEYS.ROUTE_CHUNK_TARGET
+  const target = sessionFlags.get(targetKey)
+  if (!target) {
+    // 没有待重试的目标 ⇒ 本次会话的兜底预算重置（下次故障仍能完整重来一遍）
+    sessionFlags.clear(key)
+    return false
+  }
+  sessionFlags.clear(targetKey)
+  try {
+    await router.replace(target)
+  } catch {
+    // 失败已由 handleRouteError 接手（回退首页 + 提示），这里不再重复处理
+    return false
+  }
+  sessionFlags.clear(key)
+  return true
+}

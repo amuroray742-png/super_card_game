@@ -1126,6 +1126,32 @@
     > 跨过 6 秒掷奖周期的那一笔挂机收益。**不是产品算错，是基准取错了地方。**
     > 由 `authoritativeBefore()` 守护。
 
+67. **路由 chunk 拉取失败必须自愈，而且要送到玩家要去的那一页**：
+    - Vue Router 的路由组件全是 `() => import(...)` 懒加载。chunk 拉不到时
+      （dev server 重启、发版后 chunk 失效、网络抖动）导航会被**中止**：
+      - **初始导航失败** → `router.isReady()` reject → `main.ts` 不执行 `app.mount`
+        → **应用根本没挂载** → 整页白屏；
+      - **后续导航失败** → hash 模式下**连 URL 都不会改** → 玩家点了「背包」，
+        **什么都没发生**，也没有任何提示。
+    - ⇒ `router.onError` 必须兜底：判定在 `presentation/utils/route-recovery.ts`，
+      执行在 `presentation/router.ts`。恢复顺序是**有上限**的三级：
+      ① 重载一次（换一份新的模块图）→ ② 回退首页 + 一句提示 → ③ 只提示，不再动路由。
+      次数由**会话级计数**（`sgw.routeChunkRetry`）控制 ⇒ 不会「重载 → 还是失败 → 再重载」成死循环。
+    - ⚠ **重载必须记住「要去哪」**：失败的导航被中止时 hash 不会变，
+      不记下目标路由，重载后只会回到失败前那一页 —— 玩家点的目标**依然没打开**。
+      目标记在 `sgw.routeChunkTarget`，重载成功后由 `retryPendingRoute()` 补上那一次导航。
+    - ⚠ `main.ts` 必须接住 `router.isReady()` 的 reject 并**照样 `app.mount`**：
+      不接 = 白屏；接了但不给提示 = 玩家只看到空白。
+    - ⚠ 提示条只存在 2.2 秒 ⇒ E2E 断言它**不能直接轮询 DOM**，
+      要定时采样把出现过的提示**记进 sessionStorage** 再断言
+      （否则「断言轮询刚好错过那 2.2 秒」会偶发红）。
+    > 教训：玩家报「打不开页面」，浏览器里只有一条
+    > `TypeError: Failed to fetch dynamically imported module`。
+    > 根因不在业务代码，而在**路由层对 chunk 失败零兜底**——
+    > 一次请求失败 ⇒ 整页白屏 / 点了没反应，且没有任何提示。
+    > 由 `tests/unit/route-recovery.test.ts`（判定与动作分配）
+    > + `tests/e2e/route-recovery.spec.ts`（真拦 chunk、真失败、真恢复）守护。
+
 ## 数值调参的既定流程
 
 数值改动**只改** `src/core/config/economy.ts`（以及对应的配置表），然后按序执行：

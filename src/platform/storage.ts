@@ -111,3 +111,48 @@ export class MemoryStorageAdapter implements StorageAdapter {
 
 export const storage: StorageAdapter =
   typeof localStorage !== 'undefined' ? new LocalStorageAdapter() : new MemoryStorageAdapter()
+
+/**
+ * 会话级标记（关掉标签页即失效）。
+ *
+ * ⚠ **与存档标记分开**：存档标记要跨会话保留（迁移只做一次）；
+ *   而「已经兜底过几次」这种闩锁**必须随会话结束而清零**，
+ *   否则玩家下次打开游戏还会被当成「已经试过了」→ 直接被回退到首页。
+ *
+ * ⚠ 表现层不直接碰 sessionStorage（铁律 #6：本地存储一律经平台层）。
+ */
+export const sessionFlags = {
+  /** 读取标记（没有则 null） */
+  get(key: string): string | null {
+    try {
+      return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(key) : null
+    } catch {
+      return null
+    }
+  },
+  /** 写入标记；null 表示清除 */
+  set(key: string, value: string | null): void {
+    try {
+      if (typeof sessionStorage === 'undefined') return
+      if (value === null) sessionStorage.removeItem(key)
+      else sessionStorage.setItem(key, value)
+    } catch {
+      /* 隐私模式等场景写不进去：退化成「不兜底」，不影响主流程 */
+    }
+  },
+  /** 读成计数（非数字 / 负数一律当 0） */
+  count(key: string): number {
+    const n = Number(this.get(key))
+    return Number.isFinite(n) && n > 0 ? n : 0
+  },
+  /** 计数 +1，返回新值 */
+  bump(key: string): number {
+    const next = this.count(key) + 1
+    this.set(key, String(next))
+    return next
+  },
+  /** 清除标记 */
+  clear(key: string): void {
+    this.set(key, null)
+  },
+}

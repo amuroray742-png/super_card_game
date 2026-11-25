@@ -119,6 +119,10 @@ export const ACCOUNT_STORAGE_KEYS = {
   LEGACY_SAVE_SLOT: 'main',
   /** 存量槽位已迁走的标记（避免把旧档迁给第二个账号） */
   LEGACY_MIGRATED: 'sgw.legacyMigrated',
+  /** 路由 chunk 拉取失败后的兜底次数（会话级，见 presentation/utils/route-recovery.ts） */
+  ROUTE_CHUNK_RETRY: 'sgw.routeChunkRetry',
+  /** 路由 chunk 拉取失败时**想去**的路由（重载后自动重试到这里） */
+  ROUTE_CHUNK_TARGET: 'sgw.routeChunkTarget',
 } as const
 
 /** 账号槽位名：每账号一个（存档归属由账号决定，不写进存档本体） */

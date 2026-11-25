@@ -3020,6 +3020,50 @@ relicDaily: { date: string; count: number }
    > ——「回包里有」≠「界面上有」。现在补了「面板出现 / 画布上有人 / 跳过演出后出结算与奖励」
    > 三段断言（`tests/e2e/battle.spec.ts` 与 `tests/e2e/dungeon.spec.ts`）。
 
+### 12.14 路由 chunk 失败的自愈（v12 之后的路由层加固）
+
+> 本节记录**路由层**的一条架构约定：懒加载组件拉不到时，界面必须自愈，
+> 而不是留一个死页面给玩家。
+
+**问题**：Vue Router 的路由组件全是 `() => import(...)` 懒加载。chunk 拉不到时
+（dev server 重启、发版后 chunk 失效、网络抖动）导航会被**中止**：
+
+| 失败位置 | 表现 | 玩家看到 |
+|---|---|---|
+| **初始导航** | `router.isReady()` reject → `main.ts` 的 `.then(mount)` 不执行 | **整页白屏**（应用根本没挂载） |
+| **后续导航** | 导航中止，hash 模式下**连 URL 都不会改** | 点了「背包」，**什么都没发生** |
+
+两者都只有一条 `TypeError: Failed to fetch dynamically imported module`，
+没有任何面向玩家的提示 —— 这就是「页面打不开」的全部真相。
+
+**结构**（判定与执行分离，判定部分零 DOM 依赖 ⇒ 可在 Node 下单测）：
+
+| 位置 | 职责 |
+|---|---|
+| `presentation/utils/route-recovery.ts` | 判定「是不是动态导入失败」+ 分配恢复动作（纯函数） |
+| `presentation/router.ts` | `router.onError` 兜底：重载 / 回退 / 提示；`retryPendingRoute()` 补上目标路由 |
+| `presentation/main.ts` | 接住 `router.isReady()` 的 reject 并**照样 `app.mount`**（否则白屏） |
+| `platform/storage.ts` | `sessionFlags`（会话级标记；关标签页即失效） |
+
+**恢复顺序（必须有上限）**：
+
+1. **重载一次**（换一份新的模块图）——同时把**失败时想去的路由**记进
+   `sgw.routeChunkTarget`；
+2. **回退首页 + 一句提示**（`sgw.routeChunkRetry` 计数 = 1 时）；
+3. **只提示，不再动路由**（计数 ≥ 2 时）。
+
+次数由**会话级计数**控制 ⇒ 不会「重载 → 还是失败 → 再重载」成死循环；
+一次成功的恢复后计数清零 ⇒ 下一次故障仍有完整预算。
+
+> ⚠ **重载必须记住「要去哪」**：失败的导航被中止时 hash 不变，
+> 不记下目标路由，重载后只会回到失败前那一页 —— 玩家点的目标**依然没打开**。
+> 目标由 `retryPendingRoute()` 在挂载后补上那一次导航。
+
+**验收**：`tests/unit/route-recovery.test.ts`（判定与动作分配）
++ `tests/e2e/route-recovery.spec.ts`（**真拦 chunk、真失败、真恢复**：
+点背包拉不到 → 不留死页面 + 有提示；首屏拉不到 → 不白屏 + 落到可用页面）。
+铁律见 AGENTS.md #67。
+
 
 ---
 
