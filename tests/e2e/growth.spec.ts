@@ -13,6 +13,7 @@ import {
   cachedSaveOf,
   claimIdleThroughUi,
   dismissOfflineReport,
+  dismissReplay,
   loginAccount,
   postAction,
   registerAccount,
@@ -219,6 +220,8 @@ async function ensureFirstClear(page: Page): Promise<void> {
       await challenge.click()
     },
   })
+  // ⚠ 回放是**全屏覆盖层** ⇒ 收起它才能继续点页面上的「全部领取」
+  await dismissReplay(page)
 }
 
 /** 读取本次喂书的权威响应，核对实际扣费与变更后的存档。 */

@@ -199,6 +199,10 @@ test.describe('背包 · 经验书投喂', () => {
 
     // 选书 + 选英灵
     await page.getByTestId(`backpack-pick-book-${EXP_BOOK.small.id}`).click()
+    // ⚠ 背包页一屏化 v14：英灵不再平铺成 chip（旧版是**无上限**的 chip 列表，
+    //   wrap 成好几行吃掉首屏）⇒ 改成「当前英灵 + 换」按钮 + 抽屉。
+    await page.getByTestId('backpack-feed-pick-hero').click()
+    await expect(page.getByTestId('backpack-hero-picker')).toBeVisible()
     await page.getByTestId(`backpack-pick-hero-${EARTH_HERO}`).click()
 
     const levelBefore = await heroLevelOf(page, accountId, EARTH_HERO)

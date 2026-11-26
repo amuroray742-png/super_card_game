@@ -7,6 +7,7 @@ import { HEROES } from '../../src/core/config/heroes/index.ts'
 import {
   cachedSaveOf,
   claimIdleThroughUi,
+  dismissReplay,
   giveTeam,
   importFixture,
   postAction,
@@ -132,6 +133,8 @@ async function farmRelicStones(page: Page, accountId: number, rounds = 2): Promi
         await page.getByTestId(`dungeon-challenge-${TIER1_EASY}`).click()
       },
     })
+    // ⚠ 回放是**全屏覆盖层** ⇒ 收起它才能继续点页面上的按钮（下一轮挑战）
+    await dismissReplay(page)
   }
   await expect
     .poll(async () => (await cachedSaveOf(page, accountId))?.items?.relicStoneTier1 ?? 0, { timeout: 10_000 })
@@ -368,12 +371,17 @@ test.describe('遗物挂机通道', () => {
 
     await page.goto('/#/expedition')
     await page.waitForLoadState('networkidle')
-    const claim = page.getByTestId('idle-claim-relic')
-    await expect(claim).toBeVisible()
+    // ⚠ **推征页一屏化（v13）**：遗物通道不再有独立的「可领 N 次」按钮——
+    //   领取统一走「全部领取（N 次）」（动作层只有 `idle.tick` 一个口径）。
+    //   **次数仍然写在遗物通道行里**，取的是服务端口径（铁律 #62：界面只能少写）。
+    const row = page.getByTestId('idle-channel-relic')
+    await expect(row).toBeVisible()
 
-    // 按钮上写的次数 ≤ 今日剩余额度（额度按「件」计，每次掷奖至少出 1 件）
-    const label = (await claim.textContent()) ?? ''
-    const shown = Number(label.match(/(\d+)/)?.[1] ?? '0')
+    // 通道行里写的次数 ≤ 今日剩余额度（额度按「件」计，每次掷奖至少出 1 件）
+    const label = (await row.innerText()) ?? ''
+    const matched = /可结算\s*(\d+)\s*次/.exec(label)
+    expect(matched, `遗物通道行里读不到「可结算 N 次」：${label}`).toBeTruthy()
+    const shown = Number(matched?.[1] ?? '0')
     expect(shown).toBeLessThanOrEqual(RELIC_DROP.DAILY_CAP)
 
     // 实际领取到的件数也不会超过额度
@@ -458,7 +466,10 @@ test.describe('遗物仓库', () => {
       save.campaign.clearedStage = 5
     })
 
-    await page.goto('/#/forge')
+    // ⚠ 背包页一屏化 v14：套装进度**下沉到 L2**「套装与保底」
+    //   （旧版它在仓库上方，把真正的网格挤到第三屏 —— 铁律 #69）。
+    //   语义不变：仍然「看得见件数」+「点套装直达产出它的副本」。
+    await page.goto('/#/forge/sets')
     await page.waitForLoadState('networkidle')
 
     const row = page.getByTestId('relic-set-row-set_zhanshen')

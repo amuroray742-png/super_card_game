@@ -76,7 +76,18 @@ select {
 /* ── 布局 ───────────────────────────────────────────── */
 
 .page {
-  padding: 12px 12px calc(var(--tab-h) + 20px);
+  /**
+   * ⚠ **不得**用 `calc(var(--tab-h) + …)` 给底栏预留叠底空间。
+   *
+   * 底栏 `.tabs` 是 `.body` 的 **flex 兄弟节点**（`App.vue` 的 `.shell` 是
+   * column flex，`.body` 独立滚动）⇒ **底栏不叠在内容上**。
+   * 原来这里写的是 `calc(var(--tab-h) + 20px)` = 78px，
+   * 于是**每个页面底部**都多出一段滚不到内容的死空白。
+   *
+   * AGENTS.md 铁律 #68：主循环页面必须一屏可达 ⇒ 这 78px 直接吃掉了
+   * 360×640 机型上 534px 可视内容区的 15%。
+   */
+  padding: 12px;
   min-height: 100%;
 }
 
@@ -386,6 +397,350 @@ select {
   border: 1px solid var(--c-line-2);
   border-radius: 12px;
   padding: 16px;
+}
+
+/* ── 全屏覆盖层 ───────────────────────────────────────── */
+
+/**
+ * **全屏覆盖层**（战斗回放演出 / 底部抽屉的共同底座）。
+ *
+ * ⚠ 盖住顶栏与底栏（`inset: 0`）：战斗期间玩家不需要看资源与导航，
+ *   「关掉后回到原位」比「保留导航」更重要（AGENTS.md 铁律 #68 的 P2）。
+ *
+ * ⚠ z-index 取 150：高于 `.mask`（弹窗 100），低于 `.toast`（200）
+ *   —— 提示条要能压在覆盖层之上（结算文案必须看得见）。
+ */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  background: rgba(10, 9, 8, 0.96);
+}
+
+/** 覆盖层头部（关卡名 + 状态 + 收起） */
+.overlay-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--c-line);
+}
+
+/** 覆盖层主体（可滚动） */
+.overlay-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px;
+}
+
+/** 覆盖层底部（主操作） */
+.overlay-foot {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--c-line);
+  background: rgba(20, 18, 15, 0.96);
+}
+
+/* ── 紧凑 chip（副本入口 / 章节切换） ─────────────────────── */
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--c-line-2);
+  background: var(--c-panel-2);
+  color: var(--c-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chip.on {
+  border-color: var(--c-gold);
+  color: var(--c-gold-2);
+  background: #2a2419;
+}
+
+/**
+ * **紧凑 chip**（筛选行用）。
+ *
+ * ⚠ 360×640 的内容区只有 534px：一行 34px 的 chip 看着不多，
+ *   但筛选行往往有两三行（稀有度 + 套装 + 五行）⇒ 差的 6px 会
+ *   把主操作挤出首屏（AGENTS.md 铁律 #69）。
+ */
+.chip-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid var(--c-line-2);
+  background: var(--c-panel-2);
+  color: var(--c-text-dim);
+  font-size: 11px;
+}
+
+.chip-sm.on {
+  border-color: var(--c-gold);
+  color: var(--c-gold-2);
+  background: #2a2419;
+}
+
+/* ── 通道行（挂机四通道的紧凑摘要） ───────────────────────── */
+
+/**
+ * 挂机通道的**一行式**摘要。
+ *
+ * ⚠ 左侧 `flex: 1` + 省略号，右侧固定宽度 —— 目标名过长时**优先截断左边**，
+ *   「可结算 N 次」这类数字必须完整可见（铁律 #62：次数是服务端口径）。
+ */
+.chan-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--c-line);
+  cursor: pointer;
+}
+
+.chan-row:last-of-type {
+  border-bottom: none;
+}
+
+.chan-left {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.chan-left > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chan-right {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chan-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-text-mute);
+}
+
+.chan-dot.on {
+  background: var(--c-green);
+  box-shadow: 0 0 6px rgba(82, 190, 128, 0.6);
+}
+
+.chan-arrow {
+  color: var(--c-text-mute);
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* ── 底部抽屉（sheet） ─────────────────────────────────── */
+
+/**
+ * **底部抽屉**：从底部升起的半屏面板。
+ *
+ * ⚠ 遮罩只盖**内容区**（顶栏与底栏留着）：
+ *   顶栏让玩家随时看得见资源，底栏让玩家随时能离开 ——
+ *   抽屉是「看一眼细节」，不该把人困住（铁律 #27：入口必须够得着）。
+ *
+ * ⚠ z-index 取 140：低于 `.overlay`（战斗演出 150）、高于 `.mask`（弹窗 100）。
+ */
+.sheet-mask {
+  position: fixed;
+  inset: var(--top-h) 0 var(--tab-h) 0;
+  z-index: 140;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+}
+
+.sheet {
+  width: 100%;
+  max-height: 76vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--c-panel);
+  border: 1px solid var(--c-line-2);
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+  padding: 12px 12px 16px;
+}
+
+/* ── 吸顶 / 吸底工具条 ───────────────────────────────────── */
+
+/**
+ * **吸顶条**：内容滚动时钉在可视区顶部（仓库的容量条 + 筛选）。
+ *
+ * ⚠ z-index 取 4：**低于** `.offline-bar`（5）——
+ *   离线提示条也钉在 `top: 0`，两者同位时离线提示必须压住工具条
+ *   （否则离线提示被半截盖住，看不清「只能看不能改」）。
+ * ⚠ 用负 margin 抵消 `.page` 的 12px 内边距 ⇒ 条是**通栏**的，
+ *   不会在左右各留一道缝。
+ */
+.sticky-top {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: -12px -12px 8px;
+  padding: 8px 12px;
+  background: rgba(20, 18, 15, 0.96);
+  border-bottom: 1px solid var(--c-line);
+  backdrop-filter: blur(8px);
+}
+
+/**
+ * **吸底条**：勾选后出现的批量操作条（钉在可视区底部）。
+ *
+ * ⚠ 只在「有选中项」时渲染 —— 平时不渲染就**不占首屏空间**
+ *   （AGENTS.md 铁律 #69：主操作必须在首屏，别让工具占位）。
+ * ⚠ `bottom: 0` + 负 margin ⇒ 贴住内容区底部；底栏（`.tabs`）是
+ *   `.body` 的 flex 兄弟节点，**不叠内容**，所以这里不需要再留 `--tab-h`。
+ */
+.sticky-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px -12px -12px;
+  padding: 8px 12px;
+  background: rgba(20, 18, 15, 0.96);
+  border-top: 1px solid var(--c-line-2);
+  backdrop-filter: blur(8px);
+}
+
+.sticky-bar .sticky-left {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── 抽屉里的选择行 ───────────────────────────────────────── */
+
+/**
+ * 抽屉内的「挑一个」列表行（选英灵 / 选关卡）。
+ *
+ * ⚠ 抽屉里不要再套一层 `.mask` 弹窗（双层遮罩会把人困住）——
+ *   需要切换内容时，在**同一个抽屉内**换视图。
+ */
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 0;
+  text-align: left;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.picker-row:last-child {
+  border-bottom: none;
+}
+
+/**
+ * **横向滚动的筛选行**（套装筛选 13 个 chip、五行筛选等）。
+ *
+ * ⚠ 固定单行 + 横向滚动：套装筛选 wrap 成 3 行会**吃掉 3 行首屏**
+ *   （360×640 的内容区只有 534px）。
+ */
+.scroll-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.scroll-row::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-row > * {
+  flex: 0 0 auto;
+}
+
+/* ── 关卡网格 ─────────────────────────────────────────── */
+
+/**
+ * 本章关卡网格（L2 关卡一览页）。
+ *
+ * ⚠ **固定 7 列**（不是 `auto-fill`）：一章 31 关，6 列 ⇒ 最后一行只剩 1 格（很难看），
+ *   7 列 ⇒ 5 行、末行 3 格。格子在 360px 宽下约 43.7px（≥ 34px 的点按下限）。
+ * ⚠ 31 格 × 6 行 = 336px 会把二级页撑到 360×640 之外 ⇒ 7 列把它压到 238px，
+ *   **二级页同样一屏**（AGENTS.md 铁律 #68）。
+ * ⚠ 样式放全局：推征页曾内联过一版、关卡一览页又写一版 ⇒ 两处会走样。
+ */
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.stage-cell {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 1px solid var(--c-line);
+  background: var(--c-bg-2);
+  color: var(--c-text-mute);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.stage-cell.done {
+  border-color: #4a5f3f;
+  background: #232a1e;
+  color: #a9c48c;
+}
+
+.stage-cell.now {
+  border-color: var(--c-gold);
+  color: var(--c-gold-2);
+  box-shadow: 0 0 0 1px rgba(200, 169, 81, 0.3) inset;
+}
+
+.stage-cell.boss .s-boss {
+  position: absolute;
+  bottom: 1px;
+  font-size: 8px;
+  color: #d98a7a;
+  letter-spacing: 0.05em;
 }
 
 /* ── 进度条 ─────────────────────────────────────────── */

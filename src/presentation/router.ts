@@ -44,6 +44,24 @@ export const router = createRouter({
     { path: '/dungeon', name: 'dungeon', component: () => import('./views/DungeonView.vue') },
 
     { path: '/hero/:id', name: 'hero', component: () => import('./views/HeroDetailView.vue') },
+    /**
+     * 关卡一览（L2 二级页，推征页一屏化 v13）。
+     *
+     * ⚠ **不加 `meta.tab`** ⇒ `App.vue` 的 `.top-back` 自动出现（返回按钮白拿），
+     *   且底部标签栏不高亮推征页（它不是标签页）。
+     * ⚠ `?pick=main` = 「选关模式」：从推征页的主线通道行进来，
+     *   点已通关的关卡直接设为挂机目标。
+     */
+    { path: '/stages', name: 'stages', component: () => import('./views/StagesView.vue') },
+    /**
+     * 套装与保底（L2 二级页，背包页一屏化 v14）。
+     *
+     * ⚠ **不加 `meta.tab`** ⇒ `App.vue` 的 `.top-back` 自动出现（返回按钮白拿），
+     *   且底部标签栏不高亮背包页（它不是标签页）。
+     * ⚠ 路径挂在 `/forge` 下：背包页的别名是 `/backpack`，
+     *   但**别名不继承子路由** ⇒ 入口一律写绝对路径 `/forge/sets`。
+     */
+    { path: '/forge/sets', name: 'relic-sets', component: () => import('./views/RelicSetsView.vue') },
     { path: '/stage/:id', name: 'stage', component: () => import('./views/StageDetailView.vue') },
     { path: '/relic/:uid', name: 'relic', component: () => import('./views/RelicDetailView.vue') },
     { path: '/gacha', name: 'gacha', component: () => import('./views/GachaView.vue') },

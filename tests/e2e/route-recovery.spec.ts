@@ -54,8 +54,14 @@ async function toastLog(page: Page): Promise<string> {
     .catch(() => '')
 }
 
-/** 推征页的标题（用来判断「页面是活的」而不是停在上一页） */
-const EXPEDITION_HEADING = '挂机通道'
+/**
+ * 推征页的**主 CTA**（用来判断「页面是活的」而不是停在上一页）。
+ *
+ * ⚠ 推征页一屏化 v13：挂机面板的标题从「挂机通道」改成了「挂机」，
+ *   而「已通关 N 关」那行字随关卡网格下沉到了 `/stages`
+ *   ⇒ 这里改用**必定存在且唯一**的主按钮「挑战此关」作为探针。
+ */
+const EXPEDITION_HEADING = '挑战此关'
 
 test.describe('路由 chunk 拉取失败的兜底', () => {
   test('点背包时 chunk 拉不到 → 兜底生效，不会停在死页面', async ({ page }) => {

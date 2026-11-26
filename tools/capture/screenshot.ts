@@ -60,6 +60,12 @@
  * npx tsx tools/capture/screenshot.ts --dungeon-challenge --api http://127.0.0.1:8791 \
  *   --url http://127.0.0.1:4188 --out artifacts/art-preview/dungeon.png
  *
+ * # 背包页「主操作在首屏」场景（背包页一屏化 v14）
+ * #   导入前置 → 5 个分类逐个**量**主操作按钮的底边，超出首屏直接报错
+ * npx tsx tools/capture/screenshot.ts --backpack-one-screen --viewport 360x640 \
+ *   --api http://127.0.0.1:8792 --url http://127.0.0.1:4189 \
+ *   --out artifacts/art-preview/backpack-one-screen-360x640.png
+ *
  * # 浏览器兼容性测量（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏）
  * npx tsx tools/capture/screenshot.ts --compat --route /login \
  *   --url http://127.0.0.1:4188 --compat-out artifacts/baselines/browser-compat.json
@@ -72,6 +78,7 @@ import { assertSafeOrigin, ISOLATED_PREVIEW_URL } from './origin-guard.ts'
 import { buildRelicFixture, buildBackpackFixture, importRelicFixture } from './relic-fixture.ts'
 import { buildDungeonFixture, importDungeonFixture } from './dungeon-fixture.ts'
 import { dungeonStageId, dungeonStagesOf } from '../../src/core/config/dungeons.ts'
+import { ITEM_BY_ELEMENT, RELIC_STONE_ITEM_BY_TIER } from '../../src/core/config/items.ts'
 
 /** 隔离预览服务默认端口（与 dev server 刻意不同） */
 const DEFAULT_URL = ISOLATED_PREVIEW_URL
@@ -98,6 +105,10 @@ interface Options {
   ladder: boolean
   /** 副本挑战场景：登录 → 十连 → 副本页（42 关列表 / 挑战 / 设为挂机通道） */
   dungeonChallenge: boolean
+  /** 推征页一屏场景：登录 → 十连 → 编队 → 推征首屏（并**量**有没有纵向滚动） */
+  expeditionOneScreen: boolean
+  /** 背包页首屏场景：导入前置 → 5 个分类逐个**量**主操作在不在首屏 */
+  backpackOneScreen: boolean
   /** 浏览器兼容性测量模式（Safari 引擎 / 微信 UA / 低端 Android + 4G 首屏） */
   compat: boolean
   /** 兼容性报告的输出路径（JSON） */
@@ -133,6 +144,8 @@ function parseArgs(argv: string[]): Options {
     daily: argv.includes('--daily'),
     ladder: argv.includes('--ladder'),
     dungeonChallenge: argv.includes('--dungeon-challenge'),
+    expeditionOneScreen: argv.includes('--expedition-one-screen'),
+    backpackOneScreen: argv.includes('--backpack-one-screen'),
     compat: argv.includes('--compat'),
     compatOut: get('--compat-out') ?? 'artifacts/baselines/browser-compat.json',
     api: get('--api') ?? '',
@@ -470,11 +483,12 @@ async function runBattleScenario(
   //    - 不指定 → 走推征页的「挑战此关」（**服务端真实战斗** → 回放一次性回传 → 页面级回放面板）
   //
   // ⚠ **挂机改版 v11：关卡详情改成弹窗**（`StageDetailModal.vue`），
-  //   推征页的关卡网格点一下就开弹窗（`stage-cell-<id>`），
+  //   **推征页一屏化 v13：关卡网格已下沉到二级页 `/stages`**（推征页只留一屏，
+  //   31 格网格塞不进去）⇒ 截图要先走 `/stages` 再点格子。
   //   深链 `/#/stage/:id` 仍在（`StageDetailView.vue` 是薄壳）但不再是主入口。
   //   ⇒ 截图走**弹窗**这条真实路径，才截得到玩家实际看到的界面。
   if (opts.stage) {
-    await page.goto(`${base}/#/expedition`, { waitUntil: 'networkidle' })
+    await page.goto(`${base}/#/stages`, { waitUntil: 'networkidle' })
     await page.locator(`[data-testid="stage-cell-${opts.stage}"]`).first().click()
     await page.locator('[data-testid="stage-detail-modal"]').waitFor({ state: 'visible' })
     await page.getByRole('button', { name: '战斗预览', exact: true }).click()
@@ -501,6 +515,216 @@ async function runBattleScenario(
   await page.waitForTimeout(300)
 
   return opts.out.replace(/\.png$/, '') + '-result.png'
+}
+
+/**
+ * **推征页「一屏」场景**（推征页一屏化 v13）。
+ *
+ * ## 为什么单独做一个场景
+ *
+ * 「一屏」这件事**看截图容易漏**：第一屏露出的那几块看着都正常，
+ * 被挤到第二屏的内容根本不在视野里 ⇒ 改成**量一次**
+ * （内容区溢出量 + 三个关键 CTA 的底边），超了就直接报错。
+ *
+ * ⚠ **走真实链路**：十连 → 编队 → 手动挑战第 1 关
+ *   ⇒ 主线推进了、挂机通道有目标了、战力条与羁绊有内容了，
+ *   量出来的才是玩家真正看到的那一屏。
+ */
+async function runExpeditionOneScreenScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  const base = await setupAccount(context, page, opts)
+
+  // 编队（满编 6 人：战力条与羁绊都要有内容）
+  await page.goto(`${base}/#/formation`, { waitUntil: 'networkidle' })
+  for (const [slotText, index] of [
+    ['空位 1', 0],
+    ['空位 2', 1],
+    ['空位 3', 2],
+    ['空位 4', 3],
+    ['空位 5', 4],
+    ['空位 6', 5],
+  ] as const) {
+    await page.locator('.slot', { hasText: slotText }).click()
+    const dialog = page.locator('.dialog')
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.locator('.pick-row').nth(index).click()
+    await dialog.waitFor({ state: 'detached' })
+  }
+
+  // 手动挑战第 1 关 ⇒ 主线推进 + 主线挂机通道有了目标
+  await page.goto(`${base}/#/expedition`, { waitUntil: 'networkidle' })
+  await page.getByTestId('campaign-challenge').click()
+  const replay = page.getByTestId('challenge-replay')
+  await replay.waitFor({ state: 'visible', timeout: 30_000 })
+  await page.getByTestId('challenge-replay-close').click()
+  await page.waitForTimeout(600)
+
+  // 量：内容区有没有纵向滚动 + 三个关键 CTA 在不在首屏
+  const measured = await page.evaluate(() => {
+    const body = document.querySelector('.body') as HTMLElement | null
+    const overflow = body ? body.scrollHeight - body.clientHeight : -1
+    const ids = ['campaign-challenge', 'idle-claim-all', 'stage-stage-list']
+    const ctas = ids.map((id) => {
+      const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
+      if (!el) return { id, bottom: -1, visible: false }
+      const r = el.getBoundingClientRect()
+      return { id, bottom: Math.round(r.bottom), visible: r.height > 0 }
+    })
+    return { overflow, ctas, viewport: window.innerHeight }
+  })
+  console.log(`[一屏] 视口 ${measured.viewport}px · 内容区溢出 ${measured.overflow}px`)
+  for (const c of measured.ctas) console.log(`[一屏] ${c.id} 底边 ${c.bottom}px`)
+
+  if (measured.overflow > 4) {
+    throw new Error(
+      `推征页在 ${measured.viewport}px 高的视口下出现了 ${measured.overflow}px 的纵向滚动`,
+    )
+  }
+  for (const c of measured.ctas) {
+    if (!c.visible || c.bottom > measured.viewport) {
+      throw new Error(`「${c.id}」不在首屏内（底边 ${c.bottom}px > 视口 ${measured.viewport}px）`)
+    }
+  }
+
+  await assertResourceBarFullyVisible(page)
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: outPath })
+  return ''
+}
+
+/**
+ * **背包页「主操作在首屏」场景**（背包页一屏化 v14）。
+ *
+ * ## 为什么背包页的口径与推征页不同
+ *
+ * 推征页是「一屏决策页」⇒ 整页不许有纵向滚动。
+ * 背包页是**列表型**页面（仓库 60 件 / 碎片按英灵分堆）⇒ 列表可以滚，
+ * 但**主操作必须在首屏**——旧版「强化 +1」排在 1760px 的网格下面，
+ * 手机上要滚 3 屏才摸得到。
+ *
+ * ## 这个场景量什么
+ *
+ * 逐个分类量「主操作按钮的底边」：
+ * - 遗物：去遗物副本 / 图鉴摘要行；
+ * - 技能材料：5 个「去副本」；
+ * - 强化材料：3 个「去副本」；
+ * - 经验书：「投喂」；
+ * - 卡碎片：前 4 行碎片。
+ *
+ * ⚠ 底栏是 `.body` 的 flex 兄弟节点（**不叠内容**）⇒ 首屏底边 = 视口高 − 底栏高。
+ *
+ * ⚠ 走**导入前置**（同背包场景）：遗物 60 件 + 五行材料 + 三档强化石 +
+ *   两种经验书 + 同名碎片一次到位 —— 不依赖真实时间与随机掉落。
+ */
+async function runBackpackOneScreenScenario(
+  context: BrowserContext,
+  page: Page,
+  opts: Options,
+  outPath: string,
+): Promise<string> {
+  const session = await registerSession(opts.api)
+  await importRelicFixture(opts.api, session.accessToken, buildBackpackFixture())
+  await injectSession(context, opts, session)
+  const base = opts.url.replace(/\/$/, '')
+
+  /** 量一批元素：底边是否落在首屏内 */
+  const measure = async (ids: string[]) =>
+    page.evaluate((list) => {
+      const tabBar = document.querySelector('.tabs') as HTMLElement | null
+      const bottom = window.innerHeight - (tabBar?.getBoundingClientRect().height ?? 58)
+      return list.map((id) => {
+        const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
+        if (!el) return { id, bottom: -1, visible: false }
+        const r = el.getBoundingClientRect()
+        return { id, bottom: Math.round(r.bottom), visible: r.height > 0 }
+      })
+    }, ids)
+
+  /** 分类 → 该分类要量的主操作（testid） */
+  // ⚠ 道具 id 一律走 core 的唯一口径（`ITEM_BY_ELEMENT` / `RELIC_STONE_ITEM_BY_TIER`），
+  //   **不在脚本里就地写字符串 id**（铁律 #8）。
+  const PLAN: { tab: string; ids: string[]; shot: string }[] = [
+    {
+      tab: 'relics',
+      ids: ['relic-go-dungeon', 'relic-atlas-open'],
+      shot: '-relics.png',
+    },
+    {
+      tab: 'skillMat',
+      ids: (['金', '木', '水', '火', '土'] as const).map(
+        (el) => `backpack-go-dungeon-${ITEM_BY_ELEMENT[el]}`,
+      ),
+      shot: '-skillMat.png',
+    },
+    {
+      tab: 'relicStone',
+      ids: (['relicStoneTier1', 'relicStoneTier2', 'relicStoneTier3'] as const).map(
+        (tier) => `backpack-go-dungeon-${RELIC_STONE_ITEM_BY_TIER[tier]}`,
+      ),
+      shot: '-relicStone.png',
+    },
+    {
+      tab: 'expBook',
+      ids: ['backpack-feed'],
+      shot: '-expBook.png',
+    },
+    {
+      tab: 'shards',
+      ids: ['backpack-only-starable'],
+      shot: '-shards.png',
+    },
+  ]
+
+  for (const step of PLAN) {
+    await page.goto(`${base}/#/forge?tab=${step.tab}`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(800)
+
+    const measured = await measure(step.ids)
+    // ⚠ 底栏是 `nav.tabs`（App.vue）；**背包页自己也有一块 `.tabs`**（分类 pill 行），
+    //   用 `.tabs` 会量到 pill 行 ⇒ 首屏底边算大 26px ⇒ 断言形同虚设。
+    const tabBar = await page
+      .locator('nav.tabs')
+      .first()
+      .evaluate((el) => el.getBoundingClientRect().height)
+    const limit = (await page.evaluate(() => window.innerHeight)) - Math.round(tabBar)
+    console.log(`[背包一屏] ${step.tab}：首屏底边 ${limit}px`)
+    for (const m of measured) console.log(`[背包一屏] ${step.tab} · ${m.id} 底边 ${m.bottom}px`)
+
+    for (const m of measured) {
+      if (!m.visible) throw new Error(`「${m.id}」在「${step.tab}」分类里找不到`)
+      if (m.bottom > limit) {
+        throw new Error(
+          `「${m.id}」不在首屏内（底边 ${m.bottom}px > 首屏底边 ${limit}px）`,
+        )
+      }
+    }
+
+    await assertResourceBarFullyVisible(page)
+    await page.screenshot({ path: outPath.replace(/\.png$/, step.shot) })
+  }
+
+  // 遗物详情抽屉：点一下就升起来，「强化 +N」就在抽屉里
+  await page.goto(`${base}/#/forge?tab=relics`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(800)
+  await page.getByTestId('relic-open').first().click()
+  await page.getByTestId('relic-detail-sheet').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-relic-detail.png') })
+  await page.getByTestId('relic-detail-close').click()
+
+  // L2「套装与保底」（参考信息下沉后的那一页）
+  await page.goto(`${base}/#/forge/sets`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(800)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-sets.png'), fullPage: opts.fullPage })
+
+  await page.goto(`${base}/#/forge?tab=relics`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(800)
+  await page.screenshot({ path: outPath })
+  return ''
 }
 
 /**
@@ -581,9 +805,10 @@ async function runRelicScenario(
   await assertResourceBarFullyVisible(page)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-forge.png'), fullPage: opts.fullPage })
 
-  // ② 套装进度（铁律 #27：养成规则必须在玩家眼前）
+  // ② 套装进度 + 保底进度（**已下沉到 L2「套装与保底」** —— 背包页一屏化 v14）
   //    ⚠ 断言落在**套装进度行**上（`relic-set-row-<套装 id>`）——
   //    套装 id 走 core 的登记表，不在脚本里另写一份名单。
+  await page.goto(`${base}/#/forge/sets`, { waitUntil: 'networkidle' })
   const setRows = page.locator('[data-testid^="relic-set-row-"]')
   await setRows.first().waitFor({ state: 'visible', timeout: 10_000 })
   console.log(`[relic] 套装进度行：${await setRows.count()} 行`)
@@ -591,12 +816,13 @@ async function runRelicScenario(
   await page.waitForTimeout(400)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-set-progress.png') })
 
-  // ③ 每日额度（挂机通道的防通胀闸门）
+  // ③ 每日额度（挂机通道的防通胀闸门）—— 仍在仓库的吸顶工具条里
+  await page.goto(`${base}/#/forge`, { waitUntil: 'networkidle' })
   await page.getByTestId('relic-daily-quota').scrollIntoViewIfNeeded()
   await page.waitForTimeout(300)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-daily-quota.png') })
 
-  // ④ 保底进度（各遗物副本关卡分别记）
+  // ④ 保底进度（各遗物副本关卡分别记）—— 与套装进度同在 L2
   const pityRows = page.locator('[data-testid^="relic-pity-row-"]')
   await pityRows.first().waitFor({ state: 'visible', timeout: 10_000 })
   console.log(`[relic] 保底进度行：${await pityRows.count()} 行`)
@@ -606,6 +832,7 @@ async function runRelicScenario(
 
   // ⑤ **点一次「去遗物副本获取遗物」** → 落到遗物副本页
   //    ⚠ 这一步是「动作层有 ≠ 玩家点得到」的验收：按钮在、能点、点完真的落到副本页。
+  await page.goto(`${base}/#/forge`, { waitUntil: 'networkidle' })
   await page.getByTestId('relic-go-dungeon').click()
   await page.getByTestId('dungeon-kind-relic').waitFor({ state: 'visible', timeout: 10_000 })
   await page.waitForTimeout(600)
@@ -620,13 +847,17 @@ async function runRelicScenario(
   await page.getByTestId('resource-dialog').getByRole('button', { name: '关闭' }).click()
   await page.getByTestId('resource-dialog').waitFor({ state: 'detached', timeout: 5_000 })
 
-  // 铸造页：选中一件 → 详情面板（强化按钮 + 花费 + 下一级预览）
+  // 铸造页：点一件遗物 → **底部抽屉**里的详情（强化按钮 + 花费 + 下一级预览）
+  // ⚠ 背包页一屏化 v14：详情从页内面板改成**底部抽屉**——
+  //   旧版详情排在 1760px 的网格下面，手机上要滚 3 屏才摸得到「强化 +1」。
   await page.locator('.relic-cell').first().click()
+  await page.getByTestId('relic-detail-sheet').waitFor({ state: 'visible', timeout: 10_000 })
   await page.getByTestId('relic-upgrade').waitFor({ state: 'visible', timeout: 10_000 })
   await page.waitForTimeout(400)
   await page.getByTestId('relic-upgrade').scrollIntoViewIfNeeded()
   await page.waitForTimeout(300)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-upgrade.png') })
+  await page.getByTestId('relic-detail-close').click()
 
   // 英灵页：一键推荐装备 + 套装效果
   // ⚠ 页面是**内部滚动容器**（.body），不是整页滚动 → fullPage 拍不到下半部分，
@@ -720,6 +951,12 @@ async function runBackpackScenario(
   await page.getByTestId('backpack-tab-shards').waitFor({ state: 'visible', timeout: 10_000 })
   await page.waitForTimeout(600)
   await page.screenshot({ path: outPath.replace(/\.png$/, '-shards.png'), fullPage: opts.fullPage })
+
+  // ⑤b L2「套装与保底」（参考信息下沉后的那一页 —— 背包页一屏化 v14）
+  await page.goto(`${base}/#/forge/sets`, { waitUntil: 'networkidle' })
+  await page.getByTestId('relic-set-row-set_zhanshen').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: outPath.replace(/\.png$/, '-sets.png'), fullPage: opts.fullPage })
 
   // ⑥ 材料 → 副本直达（点「去副本」应当真的跳到副本页）
   await page.goto(`${base}/#/forge?tab=skillMat`, { waitUntil: 'networkidle' })
@@ -1172,6 +1409,11 @@ async function runDungeonChallengeScenario(
   await page.screenshot({ path: resultPath })
   console.log(`副本挑战结算截图已保存：${resultPath}`)
 
+  // ⚠ **回放是全屏覆盖层**（推征页一屏化 v13）⇒ 收起它才能继续点页面上的 tab。
+  //   （覆盖层是模态的：开着时底下的页面点不动。）
+  await page.getByTestId('challenge-replay-close').click()
+  await page.waitForTimeout(300)
+
   // ⑥ 打赢一次即通关 ⇒ 「已通关」+「设为挂机通道」变为可用（这是副本的核心契约）
   await expectEnabled(firstRow.locator(`[data-testid="dungeon-set-channel-${firstStageId}"]`), '设为挂机通道')
 
@@ -1252,6 +1494,10 @@ async function main(): Promise<void> {
       await runLadderScenario(context, page, opts, outPath)
     } else if (opts.dungeonChallenge) {
       resultPath = await runDungeonChallengeScenario(context, page, opts, outPath)
+    } else if (opts.expeditionOneScreen) {
+      await runExpeditionOneScreenScenario(context, page, opts, outPath)
+    } else if (opts.backpackOneScreen) {
+      await runBackpackOneScreenScenario(context, page, opts, outPath)
     } else if (opts.gachaTicket) {
       await runGachaTicketScenario(context, page, opts, outPath)
     } else if (opts.gachaReveal) {
@@ -1275,7 +1521,7 @@ async function main(): Promise<void> {
       await page.waitForTimeout(400)
     }
 
-    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic && !opts.backpack && !opts.daily && !opts.ladder && !opts.dungeonChallenge) {
+    if (!opts.battle && !opts.hero && !opts.gachaTicket && !opts.gachaReveal && !opts.relic && !opts.backpack && !opts.daily && !opts.ladder && !opts.dungeonChallenge && !opts.expeditionOneScreen && !opts.backpackOneScreen) {
       await page.screenshot({ path: outPath, fullPage: opts.fullPage })
     }
     if (resultPath) {

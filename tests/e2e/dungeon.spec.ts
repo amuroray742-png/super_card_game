@@ -7,6 +7,7 @@ import { getStage } from '../../src/core/config/stages.ts'
 import { GAME_ERROR_CODES } from '../../src/core/config/game-errors.ts'
 import {
   cachedSaveOf,
+  dismissReplay,
   giveTeam,
   importFixture,
   postAction,
@@ -265,6 +266,8 @@ test.describe('挂机通道（多通道并行）', () => {
         await page.getByTestId(`dungeon-challenge-${FIRE_EASY}`).click()
       },
     })
+    // ⚠ 回放是**全屏覆盖层** ⇒ 收起它才能继续点页面上的按钮
+    await dismissReplay(page)
     await expect.poll(() => dungeonClearedOf(page, accountId, FIRE_EASY), { timeout: 10_000 }).toBe(true)
 
     // ── 2) 设为技能通道 ────────────────────────────────────
@@ -313,6 +316,8 @@ test.describe('挂机通道（多通道并行）', () => {
         await page.getByTestId(`dungeon-challenge-${TIER1_EASY}`).click()
       },
     })
+    // ⚠ 回放是**全屏覆盖层** ⇒ 收起它才能继续点页面上的按钮
+    await dismissReplay(page)
     await expect.poll(() => dungeonClearedOf(page, accountId, TIER1_EASY), { timeout: 10_000 }).toBe(true)
 
     const setRes = await waitForAction(page, 'idle.setChannel', {

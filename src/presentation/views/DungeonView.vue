@@ -56,7 +56,6 @@ import { relicIdsBySet } from '../../core/config/relics.ts'
 import { ITEM_DEFS } from '../../core/config/items.ts'
 import { resourceIconPath } from '../../core/config/art.ts'
 import { formatNumber, formatPower } from '../utils/format'
-import ChallengeReplay from '../components/ChallengeReplay.vue'
 
 const store = useGameStore()
 const route = useRoute()
@@ -395,9 +394,6 @@ async function setAsIdleChannel(stage: DungeonStageDef) {
 <template>
   <div class="page">
     <div class="page-title">副本</div>
-
-    <!-- 手动挑战的战斗回放（服务端执行 → 回放一次性回传 → 这里演出来） -->
-    <ChallengeReplay />
 
     <!-- 种类切换 -->
     <div class="tabs">

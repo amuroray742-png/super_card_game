@@ -23,6 +23,7 @@ import type { IdleChannelKind } from '../core/model/types.ts'
 import { formatNumber } from './utils/format'
 import { rewardLines } from './utils/reward-text'
 import { richParts } from '../content/compliance/index.ts'
+import ChallengeReplay from './components/ChallengeReplay.vue'
 
 const store = useGameStore()
 const account = useAccountStore()
@@ -268,6 +269,14 @@ function goBackBare() {
         </router-view>
       </main>
       <div v-else class="empty">载入中…</div>
+
+      <!--
+        战斗回放：**全局唯一**的全屏覆盖层。
+        ⚠ 以前是各页面各挂一份（推征 / 副本 / 关卡深链），现在统一挂在这里 ——
+          战斗在哪个页面发起都走同一层，且底下页面的位置一个字都不动
+          （AGENTS.md 铁律 #68 的 P2）。
+      -->
+      <ChallengeReplay />
 
       <!-- 底部标签栏 -->
       <nav class="tabs">

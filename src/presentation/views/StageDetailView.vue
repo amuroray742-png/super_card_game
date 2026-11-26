@@ -14,7 +14,6 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '../stores/game'
 import StageDetailModal from '../components/StageDetailModal.vue'
-import ChallengeReplay from '../components/ChallengeReplay.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,6 +37,5 @@ function onClose() {
 <template>
   <div class="page">
     <StageDetailModal v-if="!closed" :stage-id="stageId" @close="onClose" />
-    <ChallengeReplay />
   </div>
 </template>

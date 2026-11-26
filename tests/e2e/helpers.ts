@@ -314,6 +314,27 @@ export async function waitForAction(
 }
 
 /**
+ * **收起战斗回放覆盖层**。
+ *
+ * ⚠ 推征页一屏化 v13：回放是**全屏覆盖层**（模态演出）⇒
+ *   覆盖层开着的时候，底下的页面**点不动**（Playwright 会报「元素被遮挡」）。
+ *   用例要继续操作页面，就必须先收起它 —— 对应玩家点右上「收起」/ 底部「返回」。
+ *
+ * ⚠ 顺带守住「换页 = 离开演出」：覆盖层是全局唯一的，
+ *   不收它就换页的话，新页面会被演出层挡住。
+ */
+export async function dismissReplay(page: Page): Promise<void> {
+  const overlay = page.getByTestId('challenge-replay')
+  const shown = await overlay
+    .waitFor({ state: 'visible', timeout: 2500 })
+    .then(() => true)
+    .catch(() => false)
+  if (!shown) return
+  await page.getByTestId('challenge-replay-close').click()
+  await expect(overlay).toHaveCount(0)
+}
+
+/**
  * 收下「离线挂机结算」弹窗（没有就什么都不做）。
  *
  * ⚠ 标题是「离线挂机结算」（v11 改成**分通道分段**），

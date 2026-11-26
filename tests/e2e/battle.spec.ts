@@ -324,8 +324,10 @@ test.describe('手动挑战主线关卡（挂机改版 v11）', () => {
     await expect
       .poll(async () => (await cachedSaveOf(page, accountId))?.campaign?.clearedStage, { timeout: 10_000 })
       .toBe(1)
-    // 界面上的「已通关 N 关」跟着更新
-    await expect(page.getByText('已通关 1 关')).toBeVisible()
+    // ⚠ **推征页一屏化 v13**：关卡网格下沉到二级页 `/stages` ⇒ 推征页不再有
+    //   「已通关 N 关」那行字；**主卡必须立刻指向新的下一关**（这是同一件事的
+    //   新落点：界面要跟着通关进度走）。
+    await expect(page.getByTestId('stage-detail-open')).toContainText(getStage(2).name)
   })
 
   test('战斗回放由服务端的 replay 字段带回（不进幂等日志）', async ({ page }) => {
